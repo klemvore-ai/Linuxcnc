@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"chat.tools.terminal.autoApprove": {
+			"/^python main\\.py$/": {
+				"approve": true,
+				"matchCommandLine": true
+			}
+		},
+		"geminicodeassist.outlines.automaticOutlineGeneration": true
+	}
+}

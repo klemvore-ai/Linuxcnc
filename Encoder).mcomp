@@ -1,0 +1,34 @@
+{
+    "Mesa 7i76E - TB3 (StepGen 4 / Encoder)": [
+        [
+            "TB3-2 (Step 4)",
+            true,
+            "",
+            "Default"
+        ],
+        [
+            "TB3-4 (Dir 4)",
+            true,
+            "",
+            "Default"
+        ],
+        [
+            "TB3-7 (Index+)",
+            false,
+            "",
+            "Default"
+        ],
+        [
+            "TB3-13 (Phase A+)",
+            false,
+            "",
+            "Default"
+        ],
+        [
+            "TB3-16 (Phase B+)",
+            false,
+            "",
+            "Default"
+        ]
+    ]
+}

@@ -1,0 +1,124 @@
+{
+    "HBS57_Servo_Drive": [
+        [
+            "VDC_GND-",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "VDC_VDC+",
+            false,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_A+",
+            true,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_A-",
+            true,
+            "stepgen.00.enable",
+            "Ground (Black)"
+        ],
+        [
+            "Motor_B+",
+            true,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_B-",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "Encoder_ENGD",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "Encoder_VCC",
+            false,
+            "stepgen.00.velocity-cmd",
+            "Power (Red)"
+        ],
+        [
+            "Encoder_EA-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "EnCoder_EA+",
+            false,
+            "encoder.00.phase-A7i76.0.0.input-00",
+            "Signal (Blue)"
+        ],
+        [
+            "Encoder_EB-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Encoder_EB+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ALM-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ALM+",
+            true,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ENA-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ENA+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_DIR-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_DIR+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_PUL-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_PUL+",
+            false,
+            "",
+            "Signal (Blue)"
+        ]
+    ]
+}

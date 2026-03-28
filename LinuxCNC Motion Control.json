@@ -1,0 +1,28 @@
+{
+    "LinuxCNC Motion Control": [
+        [
+            "X-Pos-Cmd",
+            true,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Y-Pos-Cmd",
+            true,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Z-Pos-Cmd",
+            true,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Spindle-On",
+            true,
+            "",
+            "Signal (Blue)"
+        ]
+    ]
+}

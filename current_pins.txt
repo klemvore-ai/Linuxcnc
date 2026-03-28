@@ -1,0 +1,386 @@
+Component Pins:
+Owner   Type  Dir         Value  Name
+    36  s32   OUT    2098000000  hm2_7i76e.0.0.debug
+    36  float OUT             0  hm2_7i76e.0.7i76.0.0.analogin0
+    36  float OUT             0  hm2_7i76e.0.7i76.0.0.analogin1
+    36  float OUT             0  hm2_7i76e.0.7i76.0.0.analogin2
+    36  float OUT             0  hm2_7i76e.0.7i76.0.0.analogin3
+    36  s32   OUT             0  hm2_7i76e.0.7i76.0.0.enc0.count ==> axis-selected-count
+    36  bit   I/O         FALSE  hm2_7i76e.0.7i76.0.0.enc0.index-enable
+    36  float OUT             0  hm2_7i76e.0.7i76.0.0.enc0.position
+    36  s32   OUT             0  hm2_7i76e.0.7i76.0.0.enc0.rawcounts
+    36  bit   I/O         FALSE  hm2_7i76e.0.7i76.0.0.enc0.reset
+    36  s32   OUT             0  hm2_7i76e.0.7i76.0.0.enc1.count
+    36  bit   I/O         FALSE  hm2_7i76e.0.7i76.0.0.enc1.index-enable
+    36  float OUT             0  hm2_7i76e.0.7i76.0.0.enc1.position
+    36  s32   OUT             0  hm2_7i76e.0.7i76.0.0.enc1.rawcounts
+    36  bit   I/O         FALSE  hm2_7i76e.0.7i76.0.0.enc1.reset
+    36  float OUT      23.39684  hm2_7i76e.0.7i76.0.0.fieldvoltage
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-00 ==> joint-select-a
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-00-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-01 ==> joint-select-b
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-01-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-02 ==> joint-select-c
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-02-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-03 ==> jog-incr-a
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-03-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-04 ==> jog-incr-b
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-04-not
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-05 ==> jog-incr-c
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-05-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-06 ==> joint-select-d
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-06-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-07
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-07-not
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-08
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-08-not ==> min-home-x
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-09
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-09-not ==> min-home-y
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-10
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-10-not ==> min-home-z
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-11
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-11-not ==> min-home-y2
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-12
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-12-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-13
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-13-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-14
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-14-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-15
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-15-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-16
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-16-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-17
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-17-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-18
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-18-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-19
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-19-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-20 ==> Drive-fault
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-20-not
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-21
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-21-not ==> estop-button
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-22 ==> cycle-start-button
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-22-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-23 ==> cycle-stop-button
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-23-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-24 ==> cycle-pause-button
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-24-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-25 ==> cycle-zone-ready
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-25-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-26 ==> plate-setter
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-26-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-27 ==> toolsetter-overtravel
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-27-not
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-28
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-28-not ==> probe-tip
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-29
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-29-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-30
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-30-not
+    36  bit   OUT         FALSE  hm2_7i76e.0.7i76.0.0.input-31
+    36  bit   OUT          TRUE  hm2_7i76e.0.7i76.0.0.input-31-not
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-00 <== coolant-mist
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-01 <== coolant-flood
+    36  bit   IN           TRUE  hm2_7i76e.0.7i76.0.0.output-02 <== drive-enable
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-03
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-04
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-05
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-06
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-07
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-08
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-09
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-10
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-11
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-12
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-13
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-14
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.output-15
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.spindir <== spindle-ccw
+    36  bit   IN          FALSE  hm2_7i76e.0.7i76.0.0.spinena <== spindle-enable
+    36  float IN              0  hm2_7i76e.0.7i76.0.0.spinout <== spindle-output
+    36  float IN            -50  hm2_7i76e.0.dpll.01.timer-us
+    36  float IN            100  hm2_7i76e.0.dpll.02.timer-us
+    36  float IN            100  hm2_7i76e.0.dpll.03.timer-us
+    36  float IN            100  hm2_7i76e.0.dpll.04.timer-us
+    36  float IN              1  hm2_7i76e.0.dpll.base-freq-khz
+    36  u32   OUT    0x0000002A  hm2_7i76e.0.dpll.ddsize
+    36  float OUT       6.34889  hm2_7i76e.0.dpll.phase-error-us
+    36  u32   IN     0x00400000  hm2_7i76e.0.dpll.plimit
+    36  u32   OUT    0x00000018  hm2_7i76e.0.dpll.prescale
+    36  u32   IN     0x000007D0  hm2_7i76e.0.dpll.time-const
+    36  s32   OUT             0  hm2_7i76e.0.encoder.00.count
+    36  s32   OUT             0  hm2_7i76e.0.encoder.00.count-latched
+    36  bit   I/O         FALSE  hm2_7i76e.0.encoder.00.index-enable
+    36  bit   OUT         FALSE  hm2_7i76e.0.encoder.00.input-a
+    36  bit   OUT         FALSE  hm2_7i76e.0.encoder.00.input-b
+    36  bit   OUT          TRUE  hm2_7i76e.0.encoder.00.input-index
+    36  float OUT             0  hm2_7i76e.0.encoder.00.position
+    36  float OUT             0  hm2_7i76e.0.encoder.00.position-latched
+    36  bit   OUT         FALSE  hm2_7i76e.0.encoder.00.quad-error
+    36  bit   IN          FALSE  hm2_7i76e.0.encoder.00.quad-error-enable
+    36  s32   OUT             0  hm2_7i76e.0.encoder.00.rawcounts
+    36  s32   OUT             0  hm2_7i76e.0.encoder.00.rawlatch
+    36  bit   IN          FALSE  hm2_7i76e.0.encoder.00.reset
+    36  float OUT             0  hm2_7i76e.0.encoder.00.velocity
+    36  float OUT             0  hm2_7i76e.0.encoder.00.velocity-rpm
+    36  s32   OUT             0  hm2_7i76e.0.encoder.01.count
+    36  s32   OUT             0  hm2_7i76e.0.encoder.01.count-latched
+    36  bit   I/O         FALSE  hm2_7i76e.0.encoder.01.index-enable
+    36  bit   OUT          TRUE  hm2_7i76e.0.encoder.01.input-a
+    36  bit   OUT         FALSE  hm2_7i76e.0.encoder.01.input-b
+    36  bit   OUT          TRUE  hm2_7i76e.0.encoder.01.input-index
+    36  float OUT             0  hm2_7i76e.0.encoder.01.position
+    36  float OUT             0  hm2_7i76e.0.encoder.01.position-latched
+    36  bit   OUT         FALSE  hm2_7i76e.0.encoder.01.quad-error
+    36  bit   IN          FALSE  hm2_7i76e.0.encoder.01.quad-error-enable
+    36  s32   OUT             1  hm2_7i76e.0.encoder.01.rawcounts
+    36  s32   OUT             1  hm2_7i76e.0.encoder.01.rawlatch
+    36  bit   IN          FALSE  hm2_7i76e.0.encoder.01.reset
+    36  float OUT             0  hm2_7i76e.0.encoder.01.velocity
+    36  float OUT             0  hm2_7i76e.0.encoder.01.velocity-rpm
+    36  s32   OUT             0  hm2_7i76e.0.encoder.02.count
+    36  s32   OUT             0  hm2_7i76e.0.encoder.02.count-latched
+    36  bit   I/O         FALSE  hm2_7i76e.0.encoder.02.index-enable
+    36  bit   OUT          TRUE  hm2_7i76e.0.encoder.02.input-a
+    36  bit   OUT         FALSE  hm2_7i76e.0.encoder.02.input-b
+    36  bit   OUT          TRUE  hm2_7i76e.0.encoder.02.input-index
+    36  float OUT             0  hm2_7i76e.0.encoder.02.position
+    36  float OUT             0  hm2_7i76e.0.encoder.02.position-latched
+    36  bit   OUT         FALSE  hm2_7i76e.0.encoder.02.quad-error
+    36  bit   IN          FALSE  hm2_7i76e.0.encoder.02.quad-error-enable
+    36  s32   OUT             1  hm2_7i76e.0.encoder.02.rawcounts
+    36  s32   OUT             1  hm2_7i76e.0.encoder.02.rawlatch
+    36  bit   IN          FALSE  hm2_7i76e.0.encoder.02.reset
+    36  float OUT             0  hm2_7i76e.0.encoder.02.velocity
+    36  float OUT             0  hm2_7i76e.0.encoder.02.velocity-rpm
+    36  bit   IN          FALSE  hm2_7i76e.0.encoder.hires-timestamp
+    36  u32   IN     0x017D7840  hm2_7i76e.0.encoder.sample-frequency
+    36  s32   IN             -1  hm2_7i76e.0.encoder.timer-number
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.000.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.000.in_not
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.001.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.001.in_not
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.002.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.002.in_not
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.003.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.003.in_not
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.004.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.004.in_not
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.005.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.005.in_not
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.006.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.006.in_not
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.007.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.007.in_not
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.008.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.008.in_not
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.009.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.009.in_not
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.010.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.010.in_not
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.011.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.011.in_not
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.012.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.012.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.012.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.013.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.013.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.013.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.014.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.014.in_not
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.015.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.015.in_not
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.016.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.016.in_not
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.017.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.017.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.017.out
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.018.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.018.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.018.out
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.019.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.019.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.019.out
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.020.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.020.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.020.out
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.021.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.021.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.021.out
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.022.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.022.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.022.out
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.023.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.023.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.023.out
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.024.in
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.024.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.024.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.025.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.025.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.025.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.026.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.026.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.026.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.027.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.027.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.027.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.028.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.028.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.028.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.029.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.029.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.029.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.030.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.030.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.030.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.031.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.031.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.031.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.032.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.032.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.032.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.033.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.033.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.033.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.034.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.034.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.034.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.035.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.035.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.035.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.036.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.036.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.036.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.037.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.037.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.037.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.038.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.038.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.038.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.039.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.039.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.039.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.040.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.040.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.040.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.041.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.041.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.041.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.042.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.042.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.042.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.043.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.043.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.043.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.044.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.044.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.044.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.045.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.045.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.045.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.046.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.046.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.046.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.047.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.047.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.047.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.048.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.048.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.048.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.049.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.049.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.049.out
+    36  bit   OUT          TRUE  hm2_7i76e.0.gpio.050.in
+    36  bit   OUT         FALSE  hm2_7i76e.0.gpio.050.in_not
+    36  bit   IN          FALSE  hm2_7i76e.0.gpio.050.out
+    36  bit   IN          FALSE  hm2_7i76e.0.led.CR01
+    36  bit   IN          FALSE  hm2_7i76e.0.led.CR02
+    36  bit   IN          FALSE  hm2_7i76e.0.led.CR03
+    36  bit   IN          FALSE  hm2_7i76e.0.led.CR04
+    36  bit   OUT         FALSE  hm2_7i76e.0.packet-error
+    36  bit   OUT         FALSE  hm2_7i76e.0.packet-error-exceeded
+    36  s32   OUT             0  hm2_7i76e.0.packet-error-level
+    36  u32   I/O    0x00000000  hm2_7i76e.0.packet-error-total
+    36  s32   OUT             0  hm2_7i76e.0.read-request.time
+    36  s32   OUT        294498  hm2_7i76e.0.read.time
+    36  u32   OUT    0x00000000  hm2_7i76e.0.sserial.port-0.fault-count
+    36  u32   OUT    0x00000003  hm2_7i76e.0.sserial.port-0.port_state
+    36  u32   OUT    0x00000000  hm2_7i76e.0.sserial.port-0.port_state2
+    36  u32   OUT    0x00000000  hm2_7i76e.0.sserial.port-0.port_state3
+    36  bit   IN           TRUE  hm2_7i76e.0.sserial.port-0.run
+    36  bit   IN           TRUE  hm2_7i76e.0.stepgen.00.control-type
+    36  s32   OUT             0  hm2_7i76e.0.stepgen.00.counts
+    36  float OUT             0  hm2_7i76e.0.stepgen.00.dbg_err_at_match
+    36  float OUT             0  hm2_7i76e.0.stepgen.00.dbg_ff_vel
+    36  float OUT             0  hm2_7i76e.0.stepgen.00.dbg_pos_minus_prev_cmd
+    36  float OUT             0  hm2_7i76e.0.stepgen.00.dbg_s_to_match
+    36  s32   OUT             0  hm2_7i76e.0.stepgen.00.dbg_step_rate
+    36  float OUT             0  hm2_7i76e.0.stepgen.00.dbg_vel_error
+    36  bit   IN          FALSE  hm2_7i76e.0.stepgen.00.enable <== x-enable
+    36  float IN              0  hm2_7i76e.0.stepgen.00.position-cmd
+    36  float OUT            -0  hm2_7i76e.0.stepgen.00.position-fb ==> x-pos-fb
+    36  bit   IN          FALSE  hm2_7i76e.0.stepgen.00.position-reset
+    36  float IN              0  hm2_7i76e.0.stepgen.00.velocity-cmd <== x-output
+    36  float OUT             0  hm2_7i76e.0.stepgen.00.velocity-fb
+    36  bit   IN           TRUE  hm2_7i76e.0.stepgen.01.control-type
+    36  s32   OUT             0  hm2_7i76e.0.stepgen.01.counts
+    36  float OUT             0  hm2_7i76e.0.stepgen.01.dbg_err_at_match
+    36  float OUT             0  hm2_7i76e.0.stepgen.01.dbg_ff_vel
+    36  float OUT             0  hm2_7i76e.0.stepgen.01.dbg_pos_minus_prev_cmd
+    36  float OUT             0  hm2_7i76e.0.stepgen.01.dbg_s_to_match
+    36  s32   OUT             0  hm2_7i76e.0.stepgen.01.dbg_step_rate
+    36  float OUT             0  hm2_7i76e.0.stepgen.01.dbg_vel_error
+    36  bit   IN          FALSE  hm2_7i76e.0.stepgen.01.enable <== y-enable
+    36  float IN              0  hm2_7i76e.0.stepgen.01.position-cmd
+    36  float OUT            -0  hm2_7i76e.0.stepgen.01.position-fb ==> y-pos-fb
+    36  bit   IN          FALSE  hm2_7i76e.0.stepgen.01.position-reset
+    36  float IN              0  hm2_7i76e.0.stepgen.01.velocity-cmd <== y-output
+    36  float OUT             0  hm2_7i76e.0.stepgen.01.velocity-fb
+    36  bit   IN           TRUE  hm2_7i76e.0.stepgen.02.control-type
+    36  s32   OUT             0  hm2_7i76e.0.stepgen.02.counts
+    36  float OUT             0  hm2_7i76e.0.stepgen.02.dbg_err_at_match
+    36  float OUT             0  hm2_7i76e.0.stepgen.02.dbg_ff_vel
+    36  float OUT             0  hm2_7i76e.0.stepgen.02.dbg_pos_minus_prev_cmd
+    36  float OUT             0  hm2_7i76e.0.stepgen.02.dbg_s_to_match
+    36  s32   OUT             0  hm2_7i76e.0.stepgen.02.dbg_step_rate
+    36  float OUT             0  hm2_7i76e.0.stepgen.02.dbg_vel_error
+    36  bit   IN          FALSE  hm2_7i76e.0.stepgen.02.enable <== z-enable
+    36  float IN              0  hm2_7i76e.0.stepgen.02.position-cmd
+    36  float OUT             0  hm2_7i76e.0.stepgen.02.position-fb ==> z-pos-fb
+    36  bit   IN          FALSE  hm2_7i76e.0.stepgen.02.position-reset
+    36  float IN              0  hm2_7i76e.0.stepgen.02.velocity-cmd <== z-output
+    36  float OUT             0  hm2_7i76e.0.stepgen.02.velocity-fb
+    36  bit   IN           TRUE  hm2_7i76e.0.stepgen.03.control-type
+    36  s32   OUT             0  hm2_7i76e.0.stepgen.03.counts
+    36  float OUT             0  hm2_7i76e.0.stepgen.03.dbg_err_at_match
+    36  float OUT             0  hm2_7i76e.0.stepgen.03.dbg_ff_vel
+    36  float OUT             0  hm2_7i76e.0.stepgen.03.dbg_pos_minus_prev_cmd
+    36  float OUT             0  hm2_7i76e.0.stepgen.03.dbg_s_to_match
+    36  s32   OUT             0  hm2_7i76e.0.stepgen.03.dbg_step_rate
+    36  float OUT             0  hm2_7i76e.0.stepgen.03.dbg_vel_error
+    36  bit   IN          FALSE  hm2_7i76e.0.stepgen.03.enable <== y2-enable
+    36  float IN              0  hm2_7i76e.0.stepgen.03.position-cmd
+    36  float OUT            -0  hm2_7i76e.0.stepgen.03.position-fb ==> y2-pos-fb
+    36  bit   IN          FALSE  hm2_7i76e.0.stepgen.03.position-reset
+    36  float IN              0  hm2_7i76e.0.stepgen.03.velocity-cmd <== y2-output
+    36  float OUT             0  hm2_7i76e.0.stepgen.03.velocity-fb
+    36  bit   IN          FALSE  hm2_7i76e.0.stepgen.04.control-type
+    36  s32   OUT             0  hm2_7i76e.0.stepgen.04.counts
+    36  float OUT             0  hm2_7i76e.0.stepgen.04.dbg_err_at_match
+    36  float OUT             0  hm2_7i76e.0.stepgen.04.dbg_ff_vel
+    36  float OUT             0  hm2_7i76e.0.stepgen.04.dbg_pos_minus_prev_cmd
+    36  float OUT             0  hm2_7i76e.0.stepgen.04.dbg_s_to_match
+    36  s32   OUT             0  hm2_7i76e.0.stepgen.04.dbg_step_rate
+    36  float OUT             0  hm2_7i76e.0.stepgen.04.dbg_vel_error
+    36  bit   IN          FALSE  hm2_7i76e.0.stepgen.04.enable
+    36  float IN              0  hm2_7i76e.0.stepgen.04.position-cmd
+    36  float OUT             0  hm2_7i76e.0.stepgen.04.position-fb
+    36  bit   IN          FALSE  hm2_7i76e.0.stepgen.04.position-reset
+    36  float IN              0  hm2_7i76e.0.stepgen.04.velocity-cmd
+    36  float OUT             0  hm2_7i76e.0.stepgen.04.velocity-fb
+    36  s32   IN              1  hm2_7i76e.0.stepgen.timer-number
+    36  bit   I/O         FALSE  hm2_7i76e.0.watchdog.has_bit
+    36  s32   OUT         31096  hm2_7i76e.0.write.time
+

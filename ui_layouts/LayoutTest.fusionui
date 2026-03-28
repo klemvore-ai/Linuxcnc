@@ -1,0 +1,14 @@
+[
+    {
+        "type": "DRO",
+        "title": "Z Axis",
+        "x": 400.0,
+        "y": 500.0
+    },
+    {
+        "type": "Button",
+        "title": "Spindle Start",
+        "x": 400.0,
+        "y": 340.0
+    }
+]

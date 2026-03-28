@@ -1,0 +1,38 @@
+{
+    "components": [
+        {
+            "lib_name": "LinuxCNC Motion Control",
+            "hal_id": "ID_1",
+            "x": 115.0,
+            "y": 191.0
+        },
+        {
+            "lib_name": "Mesa_7i76e",
+            "hal_id": "ID_0",
+            "x": 538.0,
+            "y": 70.0
+        }
+    ],
+    "wires": [
+        {
+            "start": {
+                "comp_id": "ID_1",
+                "pin_idx": 2
+            },
+            "end": {
+                "comp_id": "ID_0",
+                "pin_idx": 2
+            }
+        },
+        {
+            "start": {
+                "comp_id": "ID_1",
+                "pin_idx": 0
+            },
+            "end": {
+                "comp_id": "ID_0",
+                "pin_idx": 0
+            }
+        }
+    ]
+}

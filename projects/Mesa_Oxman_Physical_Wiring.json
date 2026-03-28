@@ -1,0 +1,122 @@
+{
+    "components": [
+        {
+            "lib_name": "HBS57_Servo_Drive",
+            "hal_id": "Drive_X",
+            "x": 833.2303196249997,
+            "y": -351.02237692187487
+        },
+        {
+            "lib_name": "HBS57_Servo_Drive",
+            "hal_id": "Drive_Y",
+            "x": 836.0705607656251,
+            "y": 358.15206423437485
+        },
+        {
+            "lib_name": "HBS57_Servo_Drive",
+            "hal_id": "Drive_Y2",
+            "x": 848.7951515624997,
+            "y": 1786.7683153124995
+        },
+        {
+            "lib_name": "HBS57_Servo_Drive",
+            "hal_id": "Drive_Z",
+            "x": 847.4877693906247,
+            "y": 1082.3910282499996
+        },
+        {
+            "lib_name": "LinuxCNC Motion Control",
+            "hal_id": "ID_4",
+            "x": -999.5260804806743,
+            "y": 630.6461836145659
+        },
+        {
+            "lib_name": "Mesa 7i76E - TB2 (StepGen 0-3)",
+            "hal_id": "ID_5",
+            "x": 31.15901446574253,
+            "y": 509.26167967653817
+        }
+    ],
+    "wires": [
+        {
+            "start": {
+                "comp_id": "ID_5",
+                "pin_idx": 1
+            },
+            "end": {
+                "comp_id": "Drive_X",
+                "pin_idx": 17
+            }
+        },
+        {
+            "start": {
+                "comp_id": "ID_5",
+                "pin_idx": 0
+            },
+            "end": {
+                "comp_id": "Drive_X",
+                "pin_idx": 19
+            }
+        },
+        {
+            "start": {
+                "comp_id": "ID_5",
+                "pin_idx": 2
+            },
+            "end": {
+                "comp_id": "Drive_Y",
+                "pin_idx": 19
+            }
+        },
+        {
+            "start": {
+                "comp_id": "ID_5",
+                "pin_idx": 3
+            },
+            "end": {
+                "comp_id": "Drive_Y",
+                "pin_idx": 16
+            }
+        },
+        {
+            "start": {
+                "comp_id": "ID_5",
+                "pin_idx": 4
+            },
+            "end": {
+                "comp_id": "Drive_Z",
+                "pin_idx": 19
+            }
+        },
+        {
+            "start": {
+                "comp_id": "ID_5",
+                "pin_idx": 5
+            },
+            "end": {
+                "comp_id": "Drive_Z",
+                "pin_idx": 17
+            }
+        },
+        {
+            "start": {
+                "comp_id": "ID_5",
+                "pin_idx": 6
+            },
+            "end": {
+                "comp_id": "Drive_Y2",
+                "pin_idx": 19
+            }
+        },
+        {
+            "start": {
+                "comp_id": "ID_5",
+                "pin_idx": 7
+            },
+            "end": {
+                "comp_id": "Drive_Y2",
+                "pin_idx": 17
+            }
+        }
+    ]
+}

@@ -1,0 +1,2452 @@
+{
+    "HBS57_Servo_Drive": [
+        [
+            "VDC_GND-",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "VDC_VDC+",
+            false,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_A+",
+            true,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_A-",
+            true,
+            "stepgen.00.enable",
+            "Ground (Black)"
+        ],
+        [
+            "Motor_B+",
+            true,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_B-",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "Encoder_ENGD",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "Encoder_VCC",
+            false,
+            "stepgen.00.velocity-cmd",
+            "Power (Red)"
+        ],
+        [
+            "Encoder_EA-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "EnCoder_EA+",
+            false,
+            "encoder.00.phase-A7i76.0.0.input-00",
+            "Signal (Blue)"
+        ],
+        [
+            "Encoder_EB-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Encoder_EB+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ALM-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ALM+",
+            true,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ENA-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ENA+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_DIR-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_DIR+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_PUL-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_PUL+",
+            false,
+            "",
+            "Signal (Blue)"
+        ]
+    ],
+    "7I76EU_TB2": [
+        [
+            "TB2-4,5 [StepGen 00] Dir/Table2",
+            true,
+            "hm2_7i76e.0.stepgen.00.dir",
+            "Clock (Yellow)"
+        ],
+        [
+            "TB2-2,3 [StepGen 00] Step/Table1",
+            true,
+            "hm2_7i76e.0.stepgen.00.step",
+            "Clock (Yellow)"
+        ],
+        [
+            "TB2-10,11 [StepGen 01] Dir/Table2",
+            true,
+            "hm2_7i76e.0.stepgen.01.dir",
+            "Clock (Yellow)"
+        ],
+        [
+            "TB2-8,9 [StepGen 01] Step/Table1",
+            true,
+            "hm2_7i76e.0.stepgen.01.step",
+            "Clock (Yellow)"
+        ],
+        [
+            "TB2-16,17 [StepGen 02] Dir/Table2",
+            true,
+            "hm2_7i76e.0.stepgen.02.dir",
+            "Clock (Yellow)"
+        ],
+        [
+            "TB2-14,15 [StepGen 02] Step/Table1",
+            true,
+            "hm2_7i76e.0.stepgen.02.step",
+            "Clock (Yellow)"
+        ],
+        [
+            "TB2-22,23 [StepGen 03] Dir/Table2",
+            true,
+            "hm2_7i76e.0.stepgen.03.dir",
+            "Clock (Yellow)"
+        ],
+        [
+            "TB2-20,21 [StepGen 03] Step/Table1",
+            true,
+            "hm2_7i76e.0.stepgen.03.step",
+            "Clock (Yellow)"
+        ]
+    ],
+    "7I76EU_TB3": [
+        [
+            "TB3-4,5 [StepGen 04] Dir/Table2",
+            true,
+            "hm2_7i76e.0.stepgen.04.dir",
+            "Clock (Yellow)"
+        ],
+        [
+            "TB3-2,3 [StepGen 04] Step/Table1",
+            true,
+            "hm2_7i76e.0.stepgen.04.step",
+            "Clock (Yellow)"
+        ],
+        [
+            "TB3-18,19 [SSerial 00] TXData1",
+            true,
+            "hm2_7i76e.0.gpio.012",
+            "Signal (Blue)"
+        ],
+        [
+            "TB3-16,17 [SSerial 00] RXData1",
+            false,
+            "hm2_7i76e.0.gpio.013",
+            "Signal (Blue)"
+        ],
+        [
+            "TB3-13,14 [QCount 02] Quad-A",
+            false,
+            "hm2_7i76e.0.encoder.02.input-a",
+            "Power (Red)"
+        ],
+        [
+            "TB3-10,11 [QCount 01] Quad-A",
+            false,
+            "hm2_7i76e.0.encoder.01.input-a",
+            "Power (Red)"
+        ],
+        [
+            "TB3-7,8 [QCount 00] Quad-A",
+            false,
+            "hm2_7i76e.0.encoder.00.input-a",
+            "Power (Red)"
+        ]
+    ],
+    "7I76EU_On-Card": [
+        [
+            "Internal-Field-IO [SSerial 00] TXData0",
+            true,
+            "hm2_7i76e.0.gpio.010",
+            "Signal (Blue)"
+        ],
+        [
+            "Internal-Field-IO [SSerial 00] RXData0",
+            false,
+            "hm2_7i76e.0.gpio.011",
+            "Signal (Blue)"
+        ]
+    ],
+    "7I76EU_P1": [
+        [
+            "1",
+            false,
+            "hm2_7i76e.0.gpio.017",
+            "Default"
+        ],
+        [
+            "14",
+            false,
+            "hm2_7i76e.0.gpio.018",
+            "Default"
+        ],
+        [
+            "2",
+            false,
+            "hm2_7i76e.0.gpio.019",
+            "Default"
+        ],
+        [
+            "15",
+            false,
+            "hm2_7i76e.0.gpio.020",
+            "Default"
+        ],
+        [
+            "3",
+            false,
+            "hm2_7i76e.0.gpio.021",
+            "Default"
+        ],
+        [
+            "16",
+            false,
+            "hm2_7i76e.0.gpio.022",
+            "Default"
+        ],
+        [
+            "4",
+            false,
+            "hm2_7i76e.0.gpio.023",
+            "Default"
+        ],
+        [
+            "17",
+            false,
+            "hm2_7i76e.0.gpio.024",
+            "Default"
+        ],
+        [
+            "5",
+            false,
+            "hm2_7i76e.0.gpio.025",
+            "Default"
+        ],
+        [
+            "6",
+            false,
+            "hm2_7i76e.0.gpio.026",
+            "Default"
+        ],
+        [
+            "7",
+            false,
+            "hm2_7i76e.0.gpio.027",
+            "Default"
+        ],
+        [
+            "8",
+            false,
+            "hm2_7i76e.0.gpio.028",
+            "Default"
+        ],
+        [
+            "9",
+            false,
+            "hm2_7i76e.0.gpio.029",
+            "Default"
+        ],
+        [
+            "10",
+            false,
+            "hm2_7i76e.0.gpio.030",
+            "Default"
+        ],
+        [
+            "11",
+            false,
+            "hm2_7i76e.0.gpio.031",
+            "Default"
+        ],
+        [
+            "12",
+            false,
+            "hm2_7i76e.0.gpio.032",
+            "Default"
+        ],
+        [
+            "13",
+            false,
+            "hm2_7i76e.0.gpio.033",
+            "Default"
+        ]
+    ],
+    "7I76EU_P2": [
+        [
+            "1",
+            false,
+            "hm2_7i76e.0.gpio.034",
+            "Default"
+        ],
+        [
+            "14",
+            false,
+            "hm2_7i76e.0.gpio.035",
+            "Default"
+        ],
+        [
+            "2",
+            false,
+            "hm2_7i76e.0.gpio.036",
+            "Default"
+        ],
+        [
+            "15",
+            false,
+            "hm2_7i76e.0.gpio.037",
+            "Default"
+        ],
+        [
+            "3",
+            false,
+            "hm2_7i76e.0.gpio.038",
+            "Default"
+        ],
+        [
+            "16",
+            false,
+            "hm2_7i76e.0.gpio.039",
+            "Default"
+        ],
+        [
+            "4",
+            false,
+            "hm2_7i76e.0.gpio.040",
+            "Default"
+        ],
+        [
+            "17",
+            false,
+            "hm2_7i76e.0.gpio.041",
+            "Default"
+        ],
+        [
+            "5",
+            false,
+            "hm2_7i76e.0.gpio.042",
+            "Default"
+        ],
+        [
+            "6",
+            false,
+            "hm2_7i76e.0.gpio.043",
+            "Default"
+        ],
+        [
+            "7",
+            false,
+            "hm2_7i76e.0.gpio.044",
+            "Default"
+        ],
+        [
+            "8",
+            false,
+            "hm2_7i76e.0.gpio.045",
+            "Default"
+        ],
+        [
+            "9",
+            false,
+            "hm2_7i76e.0.gpio.046",
+            "Default"
+        ],
+        [
+            "10",
+            false,
+            "hm2_7i76e.0.gpio.047",
+            "Default"
+        ],
+        [
+            "11",
+            false,
+            "hm2_7i76e.0.gpio.048",
+            "Default"
+        ],
+        [
+            "12",
+            false,
+            "hm2_7i76e.0.gpio.049",
+            "Default"
+        ],
+        [
+            "13",
+            false,
+            "hm2_7i76e.0.gpio.050",
+            "Default"
+        ]
+    ],
+    "7I76EU_TB6": [
+        [
+            "TB6 Input 00",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-00",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 01",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-01",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 02",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-02",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 03",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-03",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 04",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-04",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 05",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-05",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 06",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-06",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 07",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-07",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 08",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-08",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 09",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-09",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 10",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-10",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 11",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-11",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 12",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-12",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 13",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-13",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 14",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-14",
+            "Signal (Blue)"
+        ],
+        [
+            "TB6 Input 15",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-15",
+            "Signal (Blue)"
+        ]
+    ],
+    "7I76EU_TB5": [
+        [
+            "TB5 Input 16",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-16",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 17",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-17",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 18",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-18",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 19",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-19",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 20",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-20",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 21",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-21",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 22",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-22",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 23",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-23",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 24",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-24",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 25",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-25",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 26",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-26",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 27",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-27",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 28",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-28",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 29",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-29",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 30",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-30",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 Input 31",
+            false,
+            "hm2_7i76e.0.7i76.0.0.input-31",
+            "Signal (Blue)"
+        ],
+        [
+            "TB5 MPG0 Count (Pins 16/17)",
+            true,
+            "hm2_7i76e.0.7i76.0.0.enc0.count",
+            "Clock (Yellow)"
+        ],
+        [
+            "TB5 MPG1 Count (Pins 18/19)",
+            true,
+            "hm2_7i76e.0.7i76.0.0.enc1.count",
+            "Clock (Yellow)"
+        ]
+    ],
+    "7I76EU_TB4": [
+        [
+            "TB4 Output 00",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-00",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 01",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-01",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 02",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-02",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 03",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-03",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 04",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-04",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 05",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-05",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 06",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-06",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 07",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-07",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 08",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-08",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 09",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-09",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 10",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-10",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 11",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-11",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 12",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-12",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 13",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-13",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 14",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-14",
+            "Signal (Blue)"
+        ],
+        [
+            "TB4 Output 15",
+            true,
+            "hm2_7i76e.0.7i76.0.0.output-15",
+            "Signal (Blue)"
+        ]
+    ],
+    "HBS57_Servo_Drive_X": [
+        [
+            "VDC_GND-",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "VDC_VDC+",
+            false,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_A+",
+            true,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_A-",
+            true,
+            "stepgen.00.enable",
+            "Ground (Black)"
+        ],
+        [
+            "Motor_B+",
+            true,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_B-",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "Encoder_ENGD",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "Encoder_VCC",
+            false,
+            "stepgen.00.velocity-cmd",
+            "Power (Red)"
+        ],
+        [
+            "Encoder_EA-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "EnCoder_EA+",
+            false,
+            "encoder.00.phase-A7i76.0.0.input-00",
+            "Signal (Blue)"
+        ],
+        [
+            "Encoder_EB-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Encoder_EB+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ALM-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ALM+",
+            true,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ENA-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ENA+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_DIR-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_DIR+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_PUL-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_PUL+",
+            false,
+            "",
+            "Signal (Blue)"
+        ]
+    ],
+    "HBS57_Servo_Drive_Y": [
+        [
+            "VDC_GND-",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "VDC_VDC+",
+            false,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_A+",
+            true,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_A-",
+            true,
+            "stepgen.00.enable",
+            "Ground (Black)"
+        ],
+        [
+            "Motor_B+",
+            true,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_B-",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "Encoder_ENGD",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "Encoder_VCC",
+            false,
+            "stepgen.00.velocity-cmd",
+            "Power (Red)"
+        ],
+        [
+            "Encoder_EA-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "EnCoder_EA+",
+            false,
+            "encoder.00.phase-A7i76.0.0.input-00",
+            "Signal (Blue)"
+        ],
+        [
+            "Encoder_EB-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Encoder_EB+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ALM-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ALM+",
+            true,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ENA-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ENA+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_DIR-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_DIR+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_PUL-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_PUL+",
+            false,
+            "",
+            "Signal (Blue)"
+        ]
+    ],
+    "HBS57_Servo_Drive_Z": [
+        [
+            "VDC_GND-",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "VDC_VDC+",
+            false,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_A+",
+            true,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_A-",
+            true,
+            "stepgen.00.enable",
+            "Ground (Black)"
+        ],
+        [
+            "Motor_B+",
+            true,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_B-",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "Encoder_ENGD",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "Encoder_VCC",
+            false,
+            "stepgen.00.velocity-cmd",
+            "Power (Red)"
+        ],
+        [
+            "Encoder_EA-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "EnCoder_EA+",
+            false,
+            "encoder.00.phase-A7i76.0.0.input-00",
+            "Signal (Blue)"
+        ],
+        [
+            "Encoder_EB-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Encoder_EB+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ALM-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ALM+",
+            true,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ENA-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ENA+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_DIR-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_DIR+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_PUL-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_PUL+",
+            false,
+            "",
+            "Signal (Blue)"
+        ]
+    ],
+    "HBS57_Servo_Drive_Y2": [
+        [
+            "VDC_GND-",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "VDC_VDC+",
+            false,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_A+",
+            true,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_A-",
+            true,
+            "stepgen.00.enable",
+            "Ground (Black)"
+        ],
+        [
+            "Motor_B+",
+            true,
+            "",
+            "Power (Red)"
+        ],
+        [
+            "Motor_B-",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "Encoder_ENGD",
+            false,
+            "",
+            "Ground (Black)"
+        ],
+        [
+            "Encoder_VCC",
+            false,
+            "stepgen.00.velocity-cmd",
+            "Power (Red)"
+        ],
+        [
+            "Encoder_EA-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "EnCoder_EA+",
+            false,
+            "encoder.00.phase-A7i76.0.0.input-00",
+            "Signal (Blue)"
+        ],
+        [
+            "Encoder_EB-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Encoder_EB+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ALM-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ALM+",
+            true,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ENA-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_ENA+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_DIR-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_DIR+",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_PUL-",
+            false,
+            "",
+            "Signal (Blue)"
+        ],
+        [
+            "Signal_PUL+",
+            false,
+            "",
+            "Signal (Blue)"
+        ]
+    ],
+    "Auto_hm2_7i76e_0_7i76_0_0": [
+        [
+            "INPUT-08-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-08-not",
+            "Default"
+        ],
+        [
+            "INPUT-09-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-09-not",
+            "Default"
+        ],
+        [
+            "INPUT-10-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-10-not",
+            "Default"
+        ],
+        [
+            "INPUT-11-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-11-not",
+            "Default"
+        ],
+        [
+            "SPINOUT",
+            false,
+            "hm2_7i76e.0.7i76.0.0.spinout",
+            "Default"
+        ],
+        [
+            "SPINENA",
+            false,
+            "hm2_7i76e.0.7i76.0.0.spinena",
+            "Signal (Blue)"
+        ],
+        [
+            "SPINDIR",
+            false,
+            "hm2_7i76e.0.7i76.0.0.spindir",
+            "Clock (Yellow)"
+        ],
+        [
+            "INPUT-21-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-21-not",
+            "Default"
+        ],
+        [
+            "INPUT-28-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-28-not",
+            "Default"
+        ]
+    ],
+    "Auto_pid_x": [
+        [
+            "INDEX-ENABLE",
+            false,
+            "pid.x.index-enable",
+            "Signal (Blue)"
+        ],
+        [
+            "ENABLE",
+            false,
+            "pid.x.enable",
+            "Signal (Blue)"
+        ],
+        [
+            "COMMAND",
+            false,
+            "pid.x.command",
+            "Default"
+        ],
+        [
+            "FEEDBACK",
+            false,
+            "pid.x.feedback",
+            "Default"
+        ],
+        [
+            "OUTPUT",
+            true,
+            "pid.x.output",
+            "Default"
+        ]
+    ],
+    "Auto_joint_0": [
+        [
+            "MOTOR-POS-CMD",
+            true,
+            "joint.0.motor-pos-cmd",
+            "Default"
+        ],
+        [
+            "VEL-CMD",
+            true,
+            "joint.0.vel-cmd",
+            "Default"
+        ],
+        [
+            "MOTOR-POS-FB",
+            false,
+            "joint.0.motor-pos-fb",
+            "Default"
+        ],
+        [
+            "AMP-ENABLE-OUT",
+            true,
+            "joint.0.amp-enable-out",
+            "Signal (Blue)"
+        ],
+        [
+            "HOME-SW-IN",
+            false,
+            "joint.0.home-sw-in",
+            "Default"
+        ],
+        [
+            "NEG-LIM-SW-IN",
+            false,
+            "joint.0.neg-lim-sw-in",
+            "Default"
+        ],
+        [
+            "POS-LIM-SW-IN",
+            false,
+            "joint.0.pos-lim-sw-in",
+            "Default"
+        ]
+    ],
+    "Auto_hm2_7i76e_0_stepgen_00": [
+        [
+            "VELOCITY-CMD",
+            false,
+            "hm2_7i76e.0.stepgen.00.velocity-cmd",
+            "Default"
+        ],
+        [
+            "POSITION-FB",
+            true,
+            "hm2_7i76e.0.stepgen.00.position-fb",
+            "Default"
+        ],
+        [
+            "ENABLE",
+            false,
+            "hm2_7i76e.0.stepgen.00.enable",
+            "Signal (Blue)"
+        ],
+        [
+            "POSITION-CMD",
+            false,
+            "hm2_7i76e.0.stepgen.00.position-cmd",
+            "Default"
+        ]
+    ],
+    "Auto_pid_y": [
+        [
+            "INDEX-ENABLE",
+            false,
+            "pid.y.index-enable",
+            "Signal (Blue)"
+        ],
+        [
+            "ENABLE",
+            false,
+            "pid.y.enable",
+            "Signal (Blue)"
+        ],
+        [
+            "COMMAND",
+            false,
+            "pid.y.command",
+            "Default"
+        ],
+        [
+            "FEEDBACK",
+            false,
+            "pid.y.feedback",
+            "Default"
+        ],
+        [
+            "OUTPUT",
+            true,
+            "pid.y.output",
+            "Default"
+        ]
+    ],
+    "Auto_joint_1": [
+        [
+            "MOTOR-POS-CMD",
+            true,
+            "joint.1.motor-pos-cmd",
+            "Default"
+        ],
+        [
+            "VEL-CMD",
+            true,
+            "joint.1.vel-cmd",
+            "Default"
+        ],
+        [
+            "MOTOR-POS-FB",
+            false,
+            "joint.1.motor-pos-fb",
+            "Default"
+        ],
+        [
+            "AMP-ENABLE-OUT",
+            true,
+            "joint.1.amp-enable-out",
+            "Signal (Blue)"
+        ],
+        [
+            "HOME-SW-IN",
+            false,
+            "joint.1.home-sw-in",
+            "Default"
+        ],
+        [
+            "NEG-LIM-SW-IN",
+            false,
+            "joint.1.neg-lim-sw-in",
+            "Default"
+        ],
+        [
+            "POS-LIM-SW-IN",
+            false,
+            "joint.1.pos-lim-sw-in",
+            "Default"
+        ]
+    ],
+    "Auto_hm2_7i76e_0_stepgen_01": [
+        [
+            "VELOCITY-CMD",
+            false,
+            "hm2_7i76e.0.stepgen.01.velocity-cmd",
+            "Default"
+        ],
+        [
+            "POSITION-FB",
+            true,
+            "hm2_7i76e.0.stepgen.01.position-fb",
+            "Default"
+        ],
+        [
+            "ENABLE",
+            false,
+            "hm2_7i76e.0.stepgen.01.enable",
+            "Signal (Blue)"
+        ],
+        [
+            "POSITION-CMD",
+            false,
+            "hm2_7i76e.0.stepgen.01.position-cmd",
+            "Default"
+        ]
+    ],
+    "Auto_pid_y2": [
+        [
+            "INDEX-ENABLE",
+            false,
+            "pid.y2.index-enable",
+            "Signal (Blue)"
+        ],
+        [
+            "ENABLE",
+            false,
+            "pid.y2.enable",
+            "Signal (Blue)"
+        ],
+        [
+            "COMMAND",
+            false,
+            "pid.y2.command",
+            "Default"
+        ],
+        [
+            "FEEDBACK",
+            false,
+            "pid.y2.feedback",
+            "Default"
+        ],
+        [
+            "OUTPUT",
+            true,
+            "pid.y2.output",
+            "Default"
+        ]
+    ],
+    "Auto_joint_2": [
+        [
+            "MOTOR-POS-CMD",
+            true,
+            "joint.2.motor-pos-cmd",
+            "Default"
+        ],
+        [
+            "VEL-CMD",
+            true,
+            "joint.2.vel-cmd",
+            "Default"
+        ],
+        [
+            "MOTOR-POS-FB",
+            false,
+            "joint.2.motor-pos-fb",
+            "Default"
+        ],
+        [
+            "AMP-ENABLE-OUT",
+            true,
+            "joint.2.amp-enable-out",
+            "Signal (Blue)"
+        ],
+        [
+            "HOME-SW-IN",
+            false,
+            "joint.2.home-sw-in",
+            "Default"
+        ],
+        [
+            "NEG-LIM-SW-IN",
+            false,
+            "joint.2.neg-lim-sw-in",
+            "Default"
+        ],
+        [
+            "POS-LIM-SW-IN",
+            false,
+            "joint.2.pos-lim-sw-in",
+            "Default"
+        ]
+    ],
+    "Auto_hm2_7i76e_0_stepgen_03": [
+        [
+            "VELOCITY-CMD",
+            false,
+            "hm2_7i76e.0.stepgen.03.velocity-cmd",
+            "Default"
+        ],
+        [
+            "POSITION-FB",
+            true,
+            "hm2_7i76e.0.stepgen.03.position-fb",
+            "Default"
+        ],
+        [
+            "ENABLE",
+            false,
+            "hm2_7i76e.0.stepgen.03.enable",
+            "Signal (Blue)"
+        ],
+        [
+            "POSITION-CMD",
+            false,
+            "hm2_7i76e.0.stepgen.03.position-cmd",
+            "Default"
+        ]
+    ],
+    "Auto_pid_z": [
+        [
+            "INDEX-ENABLE",
+            false,
+            "pid.z.index-enable",
+            "Signal (Blue)"
+        ],
+        [
+            "ENABLE",
+            false,
+            "pid.z.enable",
+            "Signal (Blue)"
+        ],
+        [
+            "COMMAND",
+            false,
+            "pid.z.command",
+            "Default"
+        ],
+        [
+            "FEEDBACK",
+            false,
+            "pid.z.feedback",
+            "Default"
+        ],
+        [
+            "OUTPUT",
+            true,
+            "pid.z.output",
+            "Default"
+        ]
+    ],
+    "Auto_joint_3": [
+        [
+            "MOTOR-POS-CMD",
+            true,
+            "joint.3.motor-pos-cmd",
+            "Default"
+        ],
+        [
+            "VEL-CMD",
+            true,
+            "joint.3.vel-cmd",
+            "Default"
+        ],
+        [
+            "MOTOR-POS-FB",
+            false,
+            "joint.3.motor-pos-fb",
+            "Default"
+        ],
+        [
+            "AMP-ENABLE-OUT",
+            true,
+            "joint.3.amp-enable-out",
+            "Signal (Blue)"
+        ],
+        [
+            "HOME-SW-IN",
+            false,
+            "joint.3.home-sw-in",
+            "Default"
+        ],
+        [
+            "NEG-LIM-SW-IN",
+            false,
+            "joint.3.neg-lim-sw-in",
+            "Default"
+        ],
+        [
+            "POS-LIM-SW-IN",
+            false,
+            "joint.3.pos-lim-sw-in",
+            "Default"
+        ]
+    ],
+    "Auto_hm2_7i76e_0_stepgen_02": [
+        [
+            "VELOCITY-CMD",
+            false,
+            "hm2_7i76e.0.stepgen.02.velocity-cmd",
+            "Default"
+        ],
+        [
+            "POSITION-FB",
+            true,
+            "hm2_7i76e.0.stepgen.02.position-fb",
+            "Default"
+        ],
+        [
+            "ENABLE",
+            false,
+            "hm2_7i76e.0.stepgen.02.enable",
+            "Signal (Blue)"
+        ],
+        [
+            "POSITION-CMD",
+            false,
+            "hm2_7i76e.0.stepgen.02.position-cmd",
+            "Default"
+        ]
+    ],
+    "Auto_pid_s": [
+        [
+            "INDEX-ENABLE",
+            false,
+            "pid.s.index-enable",
+            "Signal (Blue)"
+        ],
+        [
+            "ENABLE",
+            false,
+            "pid.s.enable",
+            "Signal (Blue)"
+        ],
+        [
+            "COMMAND",
+            false,
+            "pid.s.command",
+            "Default"
+        ],
+        [
+            "FEEDBACK",
+            false,
+            "pid.s.feedback",
+            "Default"
+        ],
+        [
+            "OUTPUT",
+            true,
+            "pid.s.output",
+            "Default"
+        ]
+    ],
+    "Auto_spindle_0": [
+        [
+            "SPEED-OUT-RPS",
+            true,
+            "spindle.0.speed-out-rps",
+            "Default"
+        ],
+        [
+            "SPEED-OUT-RPS-ABS",
+            true,
+            "spindle.0.speed-out-rps-abs",
+            "Default"
+        ],
+        [
+            "SPEED-OUT",
+            true,
+            "spindle.0.speed-out",
+            "Default"
+        ],
+        [
+            "SPEED-OUT-ABS",
+            true,
+            "spindle.0.speed-out-abs",
+            "Default"
+        ],
+        [
+            "ON",
+            true,
+            "spindle.0.on",
+            "Default"
+        ],
+        [
+            "FORWARD",
+            true,
+            "spindle.0.forward",
+            "Default"
+        ],
+        [
+            "REVERSE",
+            true,
+            "spindle.0.reverse",
+            "Default"
+        ],
+        [
+            "BRAKE",
+            true,
+            "spindle.0.brake",
+            "Default"
+        ],
+        [
+            "REVS",
+            false,
+            "spindle.0.revs",
+            "Default"
+        ],
+        [
+            "AT-SPEED",
+            false,
+            "spindle.0.at-speed",
+            "Default"
+        ],
+        [
+            "SPEED-IN",
+            false,
+            "spindle.0.speed-in",
+            "Default"
+        ],
+        [
+            "INDEX-ENABLE",
+            false,
+            "spindle.0.index-enable",
+            "Signal (Blue)"
+        ]
+    ],
+    "Auto_Misc_Imported": [
+        [
+            "<=>",
+            true,
+            "<=>",
+            "Default"
+        ],
+        [
+            "SPINDLE-ENABLE",
+            false,
+            "spindle-enable",
+            "Signal (Blue)"
+        ]
+    ],
+    "Auto_halui_axis_x": [
+        [
+            "SELECT",
+            false,
+            "halui.axis.x.select",
+            "Default"
+        ],
+        [
+            "PLUS",
+            true,
+            "halui.axis.x.plus",
+            "Default"
+        ],
+        [
+            "MINUS",
+            true,
+            "halui.axis.x.minus",
+            "Default"
+        ],
+        [
+            "ANALOG",
+            true,
+            "halui.axis.x.analog",
+            "Default"
+        ]
+    ],
+    "Auto_halui_joint_0": [
+        [
+            "IS-HOMED",
+            true,
+            "halui.joint.0.is-homed",
+            "Default"
+        ]
+    ],
+    "Auto_halui_axis_y": [
+        [
+            "SELECT",
+            false,
+            "halui.axis.y.select",
+            "Default"
+        ],
+        [
+            "PLUS",
+            true,
+            "halui.axis.y.plus",
+            "Default"
+        ],
+        [
+            "MINUS",
+            true,
+            "halui.axis.y.minus",
+            "Default"
+        ],
+        [
+            "ANALOG",
+            true,
+            "halui.axis.y.analog",
+            "Default"
+        ]
+    ],
+    "Auto_halui_joint_1": [
+        [
+            "IS-HOMED",
+            true,
+            "halui.joint.1.is-homed",
+            "Default"
+        ]
+    ],
+    "Auto_halui_joint_2": [
+        [
+            "IS-HOMED",
+            true,
+            "halui.joint.2.is-homed",
+            "Default"
+        ]
+    ],
+    "Auto_halui_axis_z": [
+        [
+            "SELECT",
+            false,
+            "halui.axis.z.select",
+            "Default"
+        ],
+        [
+            "PLUS",
+            true,
+            "halui.axis.z.plus",
+            "Default"
+        ],
+        [
+            "MINUS",
+            true,
+            "halui.axis.z.minus",
+            "Default"
+        ],
+        [
+            "ANALOG",
+            true,
+            "halui.axis.z.analog",
+            "Default"
+        ]
+    ],
+    "Auto_halui_joint_3": [
+        [
+            "IS-HOMED",
+            true,
+            "halui.joint.3.is-homed",
+            "Default"
+        ]
+    ],
+    "Auto_halui_axis_selected": [
+        [
+            "PLUS",
+            true,
+            "halui.axis.selected.plus",
+            "Default"
+        ],
+        [
+            "MINUS",
+            true,
+            "halui.axis.selected.minus",
+            "Default"
+        ]
+    ],
+    "Auto_halui_spindle_0": [
+        [
+            "FORWARD",
+            true,
+            "halui.spindle.0.forward",
+            "Default"
+        ],
+        [
+            "REVERSE",
+            true,
+            "halui.spindle.0.reverse",
+            "Default"
+        ],
+        [
+            "STOP",
+            true,
+            "halui.spindle.0.stop",
+            "Default"
+        ]
+    ],
+    "Auto_iocontrol_0": [
+        [
+            "USER-ENABLE-OUT",
+            true,
+            "iocontrol.0.user-enable-out",
+            "Signal (Blue)"
+        ],
+        [
+            "COOLANT-MIST",
+            true,
+            "iocontrol.0.coolant-mist",
+            "Default"
+        ],
+        [
+            "COOLANT-FLOOD",
+            true,
+            "iocontrol.0.coolant-flood",
+            "Default"
+        ],
+        [
+            "TOOL-CHANGE",
+            true,
+            "iocontrol.0.tool-change",
+            "Default"
+        ],
+        [
+            "TOOL-CHANGED",
+            false,
+            "iocontrol.0.tool-changed",
+            "Default"
+        ],
+        [
+            "TOOL-PREP-NUMBER",
+            true,
+            "iocontrol.0.tool-prep-number",
+            "Default"
+        ],
+        [
+            "TOOL-PREPARE",
+            true,
+            "iocontrol.0.tool-prepare",
+            "Default"
+        ],
+        [
+            "TOOL-PREPARED",
+            false,
+            "iocontrol.0.tool-prepared",
+            "Default"
+        ],
+        [
+            "EMC-ENABLE-IN",
+            false,
+            "iocontrol.0.emc-enable-in",
+            "Signal (Blue)"
+        ]
+    ],
+    "Auto_halui_axis": [
+        [
+            "JOG-SPEED",
+            true,
+            "halui.axis.jog-speed",
+            "Default"
+        ]
+    ],
+    "Auto_halui_mode": [
+        [
+            "IS-MDI",
+            true,
+            "halui.mode.is-mdi",
+            "Default"
+        ]
+    ],
+    "Auto_motion": [
+        [
+            "PROBE-INPUT",
+            false,
+            "motion.probe-input",
+            "Default"
+        ],
+        [
+            "IN-POSITION",
+            true,
+            "motion.in-position",
+            "Default"
+        ],
+        [
+            "MOTION-ENABLED",
+            true,
+            "motion.motion-enabled",
+            "Signal (Blue)"
+        ],
+        [
+            "FEED-HOLD",
+            false,
+            "motion.feed-hold",
+            "Default"
+        ]
+    ],
+    "Auto_hm2_7i76e_0_7i76_0_0_enc0": [
+        [
+            "COUNT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.enc0.count",
+            "Default"
+        ]
+    ],
+    "Auto_axis_x": [
+        [
+            "JOG-SCALE",
+            false,
+            "axis.x.jog-scale",
+            "Default"
+        ],
+        [
+            "JOG-ENABLE",
+            false,
+            "axis.x.jog-enable",
+            "Signal (Blue)"
+        ],
+        [
+            "JOG-COUNTS",
+            false,
+            "axis.x.jog-counts",
+            "Default"
+        ]
+    ],
+    "Auto_axis_y": [
+        [
+            "JOG-SCALE",
+            false,
+            "axis.y.jog-scale",
+            "Default"
+        ],
+        [
+            "JOG-ENABLE",
+            false,
+            "axis.y.jog-enable",
+            "Signal (Blue)"
+        ],
+        [
+            "JOG-COUNTS",
+            false,
+            "axis.y.jog-counts",
+            "Default"
+        ]
+    ],
+    "Auto_axis_z": [
+        [
+            "JOG-SCALE",
+            false,
+            "axis.z.jog-scale",
+            "Default"
+        ],
+        [
+            "JOG-ENABLE",
+            false,
+            "axis.z.jog-enable",
+            "Signal (Blue)"
+        ],
+        [
+            "JOG-COUNTS",
+            false,
+            "axis.z.jog-counts",
+            "Default"
+        ]
+    ],
+    "Auto_jogincr": [
+        [
+            "SEL0",
+            false,
+            "jogincr.sel0",
+            "Default"
+        ],
+        [
+            "SEL1",
+            false,
+            "jogincr.sel1",
+            "Default"
+        ],
+        [
+            "SEL2",
+            false,
+            "jogincr.sel2",
+            "Default"
+        ],
+        [
+            "SEL3",
+            false,
+            "jogincr.sel3",
+            "Default"
+        ],
+        [
+            "OUT-F",
+            true,
+            "jogincr.out-f",
+            "Default"
+        ]
+    ],
+    "Auto_halui_program": [
+        [
+            "RUN",
+            false,
+            "halui.program.run",
+            "Default"
+        ],
+        [
+            "STOP",
+            false,
+            "halui.program.stop",
+            "Default"
+        ],
+        [
+            "PAUSE",
+            false,
+            "halui.program.pause",
+            "Default"
+        ],
+        [
+            "RESUME",
+            false,
+            "halui.program.resume",
+            "Default"
+        ]
+    ],
+    "Auto_or2_0": [
+        [
+            "IN0",
+            false,
+            "or2.0.in0",
+            "Default"
+        ],
+        [
+            "IN1",
+            false,
+            "or2.0.in1",
+            "Default"
+        ],
+        [
+            "OUT",
+            true,
+            "or2.0.out",
+            "Default"
+        ]
+    ],
+    "Auto_not_0": [
+        [
+            "IN",
+            false,
+            "not.0.in",
+            "Default"
+        ],
+        [
+            "OUT",
+            true,
+            "not.0.out",
+            "Default"
+        ]
+    ],
+    "UI_DRO_ZAxis": [
+        [
+            "VALUE-IN",
+            false,
+            "ui.z_axis.in",
+            "Clock (Yellow)"
+        ]
+    ],
+    "UI_Button_SpindleStart": [
+        [
+            "OUT",
+            true,
+            "ui.spindle_start.out",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_Button_Home_Z": [
+        [
+            "OUT",
+            true,
+            "ui.home_z.out",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_Button_Home_Y": [
+        [
+            "OUT",
+            true,
+            "ui.home_y.out",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_Button_Home_X": [
+        [
+            "OUT",
+            true,
+            "ui.home_x.out",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_Button_Home_ALL": [
+        [
+            "OUT",
+            true,
+            "ui.home_all.out",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_DRO_DRO_Z": [
+        [
+            "VALUE-IN",
+            false,
+            "ui.dro_z.in",
+            "Clock (Yellow)"
+        ]
+    ],
+    "UI_DRO_DRO_Y": [
+        [
+            "VALUE-IN",
+            false,
+            "ui.dro_y.in",
+            "Clock (Yellow)"
+        ]
+    ],
+    "UI_DRO_DRO_X": [
+        [
+            "VALUE-IN",
+            false,
+            "ui.dro_x.in",
+            "Clock (Yellow)"
+        ]
+    ],
+    "UI_LED_MachineMode": [
+        [
+            "STATE-IN",
+            false,
+            "ui.machine_mode.in",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_Button_Jog_Z+": [
+        [
+            "OUT",
+            true,
+            "ui.jog_z+.out",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_Button_Jog_Z-": [
+        [
+            "OUT",
+            true,
+            "ui.jog_z-.out",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_Button_Jog_Y-": [
+        [
+            "OUT",
+            true,
+            "ui.jog_y-.out",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_Button_Jog_Y+": [
+        [
+            "OUT",
+            true,
+            "ui.jog_y+.out",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_Button_Jog_X-": [
+        [
+            "OUT",
+            true,
+            "ui.jog_x-.out",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_Button_Jog_X+": [
+        [
+            "OUT",
+            true,
+            "ui.jog_x+.out",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_Button_EStop": [
+        [
+            "OUT",
+            true,
+            "ui.estop.out",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_LED_MachineState": [
+        [
+            "STATE-IN",
+            false,
+            "ui.machine_state.in",
+            "Signal (Blue)"
+        ]
+    ],
+    "UI_3D_ToolPath": [
+        [
+            "X-POS",
+            false,
+            "ui.tool_path.x",
+            "Clock (Yellow)"
+        ],
+        [
+            "Y-POS",
+            false,
+            "ui.tool_path.y",
+            "Clock (Yellow)"
+        ],
+        [
+            "Z-POS",
+            false,
+            "ui.tool_path.z",
+            "Clock (Yellow)"
+        ]
+    ],
+    "UI_GCode_G-CodeEditor": [
+        [
+            "FILE-PATH",
+            false,
+            "ui.g-code_editor.file",
+            "Default"
+        ]
+    ],
+    "Auto_or2_1": [
+        [
+            "OUT",
+            true,
+            "or2.1.out",
+            "Default"
+        ],
+        [
+            "IN0",
+            false,
+            "or2.1.in0",
+            "Default"
+        ],
+        [
+            "IN1",
+            false,
+            "or2.1.in1",
+            "Default"
+        ]
+    ],
+    "Auto_and2_0": [
+        [
+            "IN0",
+            false,
+            "and2.0.in0",
+            "Default"
+        ],
+        [
+            "OUT",
+            true,
+            "and2.0.out",
+            "Default"
+        ],
+        [
+            "IN1",
+            false,
+            "and2.0.in1",
+            "Default"
+        ]
+    ],
+    "Auto_lut5_0": [
+        [
+            "OUT",
+            true,
+            "lut5.0.out",
+            "Default"
+        ],
+        [
+            "IN-0",
+            false,
+            "lut5.0.in-0",
+            "Default"
+        ],
+        [
+            "IN-1",
+            false,
+            "lut5.0.in-1",
+            "Default"
+        ]
+    ]
+}

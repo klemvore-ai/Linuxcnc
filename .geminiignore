@@ -1,0 +1,27 @@
+# General ignores
+.vscode/
+__pycache__/
+recovery/
+.git/
+
+# CNC/Python Specific
+*.pyc
+*.ini
+*.json
+*.txt
+*.hal
+*.mcomp
+
+# Large files in your root
+original_dashboard.py
+temp_init_ui.py
+
+# Ignore Copilot / MS specific junk
+.completions/
+.copilot/
+*.copilot-temp
+vsc70_*.tmp
+
+# Ignore the massive python files from your list
+temp_init_ui.py
+original_dashboard.py
