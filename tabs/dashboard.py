@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
                              QLabel, QPushButton, QGroupBox, QSlider, QLineEdit, 
-                             QSizePolicy, QScrollArea, QMessageBox, QStackedWidget, QFileDialog, QTextEdit, QInputDialog, QGraphicsDropShadowEffect, QTabWidget, QGraphicsView, QGraphicsScene, QComboBox, QGraphicsItem, QProgressBar)
+                             QSizePolicy, QScrollArea, QMessageBox, QStackedWidget, QFileDialog, QTextEdit, QInputDialog, QGraphicsDropShadowEffect, QTabWidget, QGraphicsView, QGraphicsScene, QComboBox, QGraphicsItem, QProgressBar, QAbstractButton)
 from PyQt6.QtCore import Qt, QTimer, QProcess, QThread, pyqtSignal, QRectF, QRect, QSize, QFileSystemWatcher
 from PyQt6.QtGui import QColor, QPainterPath, QPen, QPainter, QTextCursor, QTextFormat, QBrush, QFont, QSyntaxHighlighter, QTextCharFormat
 import platform
@@ -866,6 +866,10 @@ except Exception as e:
         self.custom_ui_widget = QWidget()
         self.custom_scroll.setWidget(self.custom_ui_widget)
         self.stack.addWidget(self.custom_scroll)
+
+        # Fix for keyboard jogging: prevent buttons and sliders from stealing focus
+        for control in self.findChildren((QAbstractButton, QSlider)):
+            control.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def build_default_ui(self):
         # 2. DEFINE THE DICTIONARY IMMEDIATELY (Prevents KeyError)
@@ -2283,32 +2287,33 @@ except Exception as e: pass"""
             
             if is_local_ip(ip):
                 try: 
-                    res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-                    if res.stderr:
-                        clean_err = res.stderr.replace("tool_mmap_user(): tool mmap not available", "").replace("poll(): continuing without tool mmap data", "").strip()
-                        if clean_err:
-                            with open('/tmp/fusion_jog_debug.txt', 'a') as f: f.write(f"\nSUBPROCESS STDERR:\n{clean_err}\n")
-                except Exception as e:
-                    with open('/tmp/fusion_jog_debug.txt', 'a') as f: f.write(f"\nSUBPROCESS EXCEPTION:\n{e}\n")
+                    subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+                except Exception:
+                    pass # Ignore timeouts and errors for local non-critical commands
                 continue
                 
             if HAS_PARAMIKO:
+                ssh = None
                 try:
-                    if not self.ssh_client or not self.ssh_client.get_transport() or not self.ssh_client.get_transport().is_active():
-                        self.ssh_client = paramiko.SSHClient()
-                        self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                        self.ssh_client.connect(ip, username=user, password=password, timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
-                    
-                    stdin, stdout, stderr = self.ssh_client.exec_command(cmd)
-                    err = stderr.read().decode()
-                    if err:
-                        clean_err = err.replace("tool_mmap_user(): tool mmap not available", "").replace("poll(): continuing without tool mmap data", "").strip()
-                        if clean_err: self.ssh_client.exec_command(f"echo 'SSH STDERR: {clean_err}' >> /tmp/fusion_jog_debug.txt")
-                except Exception:
-                    self.ssh_client = None
-            else:
-                try: subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", cmd], capture_output=True, timeout=5)
-                except: pass
+                    ssh = paramiko.SSHClient()
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    ssh.connect(ip, username=user, password=password, timeout=2, banner_timeout=3, auth_timeout=3, look_for_keys=not bool(password), allow_agent=not bool(password))
+                    ssh.exec_command(cmd, timeout=5)
+                except Exception as e:
+                    # Log paramiko errors for debugging, as they can indicate connection problems
+                    try:
+                        log_path = os.path.join(tempfile.gettempdir(), 'cncfusion_cmd_errors.txt')
+                        with open(log_path, 'a') as f:
+                            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Command '{cmd}' failed: {e}\n")
+                    except: pass
+                finally:
+                    if ssh:
+                        ssh.close()
+            else: # Fallback to system SSH
+                try: 
+                    subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", cmd], capture_output=True, timeout=5)
+                except: 
+                    pass
 
     def set_feed_override(self):
         py_code = f"import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.feedrate({self.feed_slider.value() / 100.0})\nexcept: pass"

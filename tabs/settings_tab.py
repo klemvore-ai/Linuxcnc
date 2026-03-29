@@ -1548,9 +1548,8 @@ class SettingsTab(QWidget):
             blueprint_hal.append(f"net selected-jog-incr jogincr.out-f => " + " ".join(scale_nets))
             blueprint_hal.append("")
         else:
-            if pin_mpg_count or (pin_mpg_a and pin_mpg_b):
-                for ax in axes_list:
-                    blueprint_hal.append(f"setp axis.{ax.lower()}.jog-scale 0.01")
+            # If no MPG is enabled, do nothing, let default jog scale apply or be set elsewhere
+            pass
 
         for ax in axes_list:
             ax_lower = ax.lower()

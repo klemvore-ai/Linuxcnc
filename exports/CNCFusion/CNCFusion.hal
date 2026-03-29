@@ -3,6 +3,7 @@ loadrt [KINS]KINEMATICS
 loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS
 loadrt hostmot2
 loadrt hm2_eth board_ip=10.10.10.10 config="num_encoders=1 num_pwmgens=0 num_stepgens=4 sserial_port_0=2xxxx"
+loadrt mux16 names=jogincr
 loadrt or2 count=1
 loadrt lut5 count=1
 loadrt and2 count=1
@@ -10,6 +11,7 @@ setp hm2_7i76e.0.watchdog.timeout_ns 25000000
 addf hm2_7i76e.0.read servo-thread
 addf motion-command-handler servo-thread
 addf motion-controller servo-thread
+addf jogincr servo-thread
 addf or2.0 servo-thread
 addf lut5.0 servo-thread
 addf and2.0 servo-thread

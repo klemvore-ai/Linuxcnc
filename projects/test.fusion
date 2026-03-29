@@ -2,429 +2,484 @@
     "components": [
         {
             "name": "7I76EU_TB4",
-            "comp_id": "7I76EU_TB4_1774459068031611900",
+            "comp_id": "7I76EU_TB4_1774816807203317400",
             "x": 500.0,
             "y": 1162.0
         },
         {
             "name": "7I76EU_TB5",
-            "comp_id": "7I76EU_TB5_1774459068012107800",
+            "comp_id": "7I76EU_TB5_1774816807193316800",
             "x": 500.0,
-            "y": 50.0
+            "y": 578.0
         },
         {
             "name": "7I76EU_TB6",
-            "comp_id": "7I76EU_TB6_1774459068020612800",
+            "comp_id": "7I76EU_TB6_1774816807189816900",
             "x": 500.0,
-            "y": 634.0
+            "y": 50.0
         },
         {
             "name": "Auto_and2_0",
-            "comp_id": "Auto_and2_0_1774459068037113100",
+            "comp_id": "Auto_and2_0_1774816807195818000",
             "x": 50.0,
-            "y": 4206.0
+            "y": 2114.0
         },
         {
             "name": "Auto_axis_x",
-            "comp_id": "Auto_axis_x_1774459068026112500",
+            "comp_id": "Auto_axis_x_1774816807209318200",
             "x": 50.0,
-            "y": 2502.0
+            "y": 4014.0
         },
         {
             "name": "Auto_axis_y",
-            "comp_id": "Auto_axis_y_1774459068025612900",
-            "x": 50.0,
-            "y": 2338.0
-        },
-        {
-            "name": "Auto_axis_z",
-            "comp_id": "Auto_axis_z_1774459068027111500",
-            "x": 50.0,
-            "y": 2830.0
-        },
-        {
-            "name": "Auto_halui_program",
-            "comp_id": "Auto_halui_program_1774459068028612000",
-            "x": 50.0,
-            "y": 3270.0
-        },
-        {
-            "name": "Auto_hm2_7i76e_0_7i76_0_0",
-            "comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774459068015113200",
-            "x": 50.0,
-            "y": 850.0
-        },
-        {
-            "name": "Auto_hm2_7i76e_0_stepgen_00",
-            "comp_id": "Auto_hm2_7i76e_0_stepgen_00_1774459068009107300",
-            "x": 50.0,
-            "y": 242.0
-        },
-        {
-            "name": "Auto_hm2_7i76e_0_stepgen_01",
-            "comp_id": "Auto_hm2_7i76e_0_stepgen_01_1774459068029612700",
-            "x": 50.0,
-            "y": 3462.0
-        },
-        {
-            "name": "Auto_hm2_7i76e_0_stepgen_02",
-            "comp_id": "Auto_hm2_7i76e_0_stepgen_02_1774459068023112200",
-            "x": 50.0,
-            "y": 1870.0
-        },
-        {
-            "name": "Auto_hm2_7i76e_0_stepgen_03",
-            "comp_id": "Auto_hm2_7i76e_0_stepgen_03_1774459068008107900",
+            "comp_id": "Auto_axis_y_1774816807180317000",
             "x": 50.0,
             "y": 50.0
         },
         {
-            "name": "Auto_iocontrol_0",
-            "comp_id": "Auto_iocontrol_0_1774459068019111500",
+            "name": "Auto_axis_z",
+            "comp_id": "Auto_axis_z_1774816807191817500",
             "x": 50.0,
-            "y": 1538.0
+            "y": 1758.0
+        },
+        {
+            "name": "Auto_halui_program",
+            "comp_id": "Auto_halui_program_1774816807186817600",
+            "x": 50.0,
+            "y": 1014.0
+        },
+        {
+            "name": "Auto_hm2_7i76e_0_7i76_0_0",
+            "comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774816807201817700",
+            "x": 50.0,
+            "y": 3490.0
+        },
+        {
+            "name": "Auto_hm2_7i76e_0_stepgen_00",
+            "comp_id": "Auto_hm2_7i76e_0_stepgen_00_1774816807196317500",
+            "x": 50.0,
+            "y": 2278.0
+        },
+        {
+            "name": "Auto_hm2_7i76e_0_stepgen_01",
+            "comp_id": "Auto_hm2_7i76e_0_stepgen_01_1774816807211318800",
+            "x": 50.0,
+            "y": 4398.0
+        },
+        {
+            "name": "Auto_hm2_7i76e_0_stepgen_02",
+            "comp_id": "Auto_hm2_7i76e_0_stepgen_02_1774816807192317300",
+            "x": 50.0,
+            "y": 1922.0
+        },
+        {
+            "name": "Auto_hm2_7i76e_0_stepgen_03",
+            "comp_id": "Auto_hm2_7i76e_0_stepgen_03_1774816807185817100",
+            "x": 50.0,
+            "y": 822.0
+        },
+        {
+            "name": "Auto_iocontrol_0",
+            "comp_id": "Auto_iocontrol_0_1774816807183317000",
+            "x": 50.0,
+            "y": 214.0
+        },
+        {
+            "name": "Auto_jogincr",
+            "comp_id": "Auto_jogincr_1774816807210318000",
+            "x": 50.0,
+            "y": 4178.0
         },
         {
             "name": "Auto_joint_0",
-            "comp_id": "Auto_joint_0_1774459068027611700",
+            "comp_id": "Auto_joint_0_1774816807188818100",
             "x": 50.0,
-            "y": 2994.0
+            "y": 1482.0
         },
         {
             "name": "Auto_joint_1",
-            "comp_id": "Auto_joint_1_1774459068035111900",
+            "comp_id": "Auto_joint_1_1774816807184818100",
             "x": 50.0,
-            "y": 3930.0
+            "y": 546.0
         },
         {
             "name": "Auto_joint_2",
-            "comp_id": "Auto_joint_2_1774459068024111100",
+            "comp_id": "Auto_joint_2_1774816807200318200",
             "x": 50.0,
-            "y": 2062.0
+            "y": 3214.0
         },
         {
             "name": "Auto_joint_3",
-            "comp_id": "Auto_joint_3_1774459068030112100",
+            "comp_id": "Auto_joint_3_1774816807187317800",
             "x": 50.0,
-            "y": 3654.0
+            "y": 1206.0
         },
         {
             "name": "Auto_lut5_0",
-            "comp_id": "Auto_lut5_0_1774459068017111700",
+            "comp_id": "Auto_lut5_0_1774816807197317200",
             "x": 50.0,
-            "y": 1182.0
+            "y": 2470.0
         },
         {
             "name": "Auto_motion",
-            "comp_id": "Auto_motion_1774459068017611600",
+            "comp_id": "Auto_motion_1774816807208318000",
             "x": 50.0,
-            "y": 1346.0
+            "y": 3822.0
         },
         {
             "name": "Auto_or2_0",
-            "comp_id": "Auto_or2_0_1774459068026613100",
+            "comp_id": "Auto_or2_0_1774816807197818100",
             "x": 50.0,
-            "y": 2666.0
+            "y": 2634.0
         },
         {
             "name": "Auto_spindle_0",
-            "comp_id": "Auto_spindle_0_1774459068010107400",
+            "comp_id": "Auto_spindle_0_1774816807198318000",
             "x": 50.0,
-            "y": 434.0
+            "y": 2798.0
         }
     ],
     "wires": [
         {
-            "start_comp_id": "7I76EU_TB5_1774459068012107800",
+            "start_comp_id": "7I76EU_TB5_1774816807193316800",
             "start_pin_idx": 5,
-            "end_comp_id": "Auto_and2_0_1774459068037113100",
+            "end_comp_id": "Auto_and2_0_1774816807195818000",
             "end_pin_idx": 2,
             "color": "#3498db"
         },
         {
-            "start_comp_id": "7I76EU_TB5_1774459068012107800",
+            "start_comp_id": "7I76EU_TB5_1774816807193316800",
             "start_pin_idx": 16,
-            "end_comp_id": "Auto_axis_x_1774459068026112500",
+            "end_comp_id": "Auto_axis_x_1774816807209318200",
             "end_pin_idx": 2,
             "color": "#f1c40f"
         },
         {
-            "start_comp_id": "7I76EU_TB5_1774459068012107800",
+            "start_comp_id": "7I76EU_TB5_1774816807193316800",
             "start_pin_idx": 16,
-            "end_comp_id": "Auto_axis_y_1774459068025612900",
+            "end_comp_id": "Auto_axis_y_1774816807180317000",
             "end_pin_idx": 2,
             "color": "#f1c40f"
         },
         {
-            "start_comp_id": "7I76EU_TB5_1774459068012107800",
+            "start_comp_id": "7I76EU_TB5_1774816807193316800",
             "start_pin_idx": 16,
-            "end_comp_id": "Auto_axis_z_1774459068027111500",
+            "end_comp_id": "Auto_axis_z_1774816807191817500",
             "end_pin_idx": 2,
             "color": "#f1c40f"
         },
         {
-            "start_comp_id": "7I76EU_TB5_1774459068012107800",
+            "start_comp_id": "7I76EU_TB5_1774816807193316800",
             "start_pin_idx": 6,
-            "end_comp_id": "Auto_halui_program_1774459068028612000",
+            "end_comp_id": "Auto_halui_program_1774816807186817600",
             "end_pin_idx": 0,
             "color": "#3498db"
         },
         {
-            "start_comp_id": "7I76EU_TB5_1774459068012107800",
+            "start_comp_id": "7I76EU_TB5_1774816807193316800",
             "start_pin_idx": 7,
-            "end_comp_id": "Auto_halui_program_1774459068028612000",
+            "end_comp_id": "Auto_halui_program_1774816807186817600",
             "end_pin_idx": 1,
             "color": "#3498db"
         },
         {
-            "start_comp_id": "7I76EU_TB5_1774459068012107800",
+            "start_comp_id": "7I76EU_TB5_1774816807193316800",
             "start_pin_idx": 8,
-            "end_comp_id": "Auto_halui_program_1774459068028612000",
+            "end_comp_id": "Auto_halui_program_1774816807186817600",
             "end_pin_idx": 2,
             "color": "#3498db"
         },
         {
-            "start_comp_id": "7I76EU_TB5_1774459068012107800",
+            "start_comp_id": "7I76EU_TB5_1774816807193316800",
             "start_pin_idx": 9,
-            "end_comp_id": "Auto_halui_program_1774459068028612000",
+            "end_comp_id": "Auto_halui_program_1774816807186817600",
             "end_pin_idx": 3,
             "color": "#3498db"
         },
         {
-            "start_comp_id": "7I76EU_TB5_1774459068012107800",
+            "start_comp_id": "7I76EU_TB5_1774816807193316800",
             "start_pin_idx": 10,
-            "end_comp_id": "Auto_lut5_0_1774459068017111700",
+            "end_comp_id": "Auto_lut5_0_1774816807197317200",
             "end_pin_idx": 1,
             "color": "#3498db"
         },
         {
-            "start_comp_id": "7I76EU_TB5_1774459068012107800",
+            "start_comp_id": "7I76EU_TB5_1774816807193316800",
             "start_pin_idx": 11,
-            "end_comp_id": "Auto_or2_0_1774459068026613100",
+            "end_comp_id": "Auto_or2_0_1774816807197818100",
             "end_pin_idx": 0,
             "color": "#3498db"
         },
         {
-            "start_comp_id": "7I76EU_TB5_1774459068012107800",
+            "start_comp_id": "7I76EU_TB5_1774816807193316800",
             "start_pin_idx": 11,
-            "end_comp_id": "Auto_or2_0_1774459068026613100",
+            "end_comp_id": "Auto_or2_0_1774816807197818100",
             "end_pin_idx": 1,
             "color": "#3498db"
         },
         {
-            "start_comp_id": "7I76EU_TB6_1774459068020612800",
+            "start_comp_id": "7I76EU_TB6_1774816807189816900",
             "start_pin_idx": 0,
-            "end_comp_id": "Auto_axis_x_1774459068026112500",
+            "end_comp_id": "Auto_axis_x_1774816807209318200",
             "end_pin_idx": 1,
             "color": "#3498db"
         },
         {
-            "start_comp_id": "7I76EU_TB6_1774459068020612800",
+            "start_comp_id": "7I76EU_TB6_1774816807189816900",
             "start_pin_idx": 1,
-            "end_comp_id": "Auto_axis_y_1774459068025612900",
+            "end_comp_id": "Auto_axis_y_1774816807180317000",
             "end_pin_idx": 1,
             "color": "#3498db"
         },
         {
-            "start_comp_id": "7I76EU_TB6_1774459068020612800",
+            "start_comp_id": "7I76EU_TB6_1774816807189816900",
             "start_pin_idx": 2,
-            "end_comp_id": "Auto_axis_z_1774459068027111500",
+            "end_comp_id": "Auto_axis_z_1774816807191817500",
             "end_pin_idx": 1,
             "color": "#3498db"
         },
         {
-            "start_comp_id": "Auto_and2_0_1774459068037113100",
+            "start_comp_id": "7I76EU_TB6_1774816807189816900",
+            "start_pin_idx": 3,
+            "end_comp_id": "Auto_jogincr_1774816807210318000",
+            "end_pin_idx": 0,
+            "color": "#3498db"
+        },
+        {
+            "start_comp_id": "7I76EU_TB6_1774816807189816900",
+            "start_pin_idx": 4,
+            "end_comp_id": "Auto_jogincr_1774816807210318000",
+            "end_pin_idx": 1,
+            "color": "#3498db"
+        },
+        {
+            "start_comp_id": "7I76EU_TB6_1774816807189816900",
+            "start_pin_idx": 5,
+            "end_comp_id": "Auto_jogincr_1774816807210318000",
+            "end_pin_idx": 2,
+            "color": "#3498db"
+        },
+        {
+            "start_comp_id": "7I76EU_TB6_1774816807189816900",
+            "start_pin_idx": 6,
+            "end_comp_id": "Auto_jogincr_1774816807210318000",
+            "end_pin_idx": 3,
+            "color": "#3498db"
+        },
+        {
+            "start_comp_id": "Auto_and2_0_1774816807195818000",
             "start_pin_idx": 1,
-            "end_comp_id": "Auto_iocontrol_0_1774459068019111500",
+            "end_comp_id": "Auto_iocontrol_0_1774816807183317000",
             "end_pin_idx": 8,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774459068015113200",
+            "start_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774816807201817700",
             "start_pin_idx": 0,
-            "end_comp_id": "Auto_joint_0_1774459068027611700",
+            "end_comp_id": "Auto_joint_0_1774816807188818100",
             "end_pin_idx": 4,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774459068015113200",
+            "start_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774816807201817700",
             "start_pin_idx": 1,
-            "end_comp_id": "Auto_joint_1_1774459068035111900",
+            "end_comp_id": "Auto_joint_1_1774816807184818100",
             "end_pin_idx": 4,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774459068015113200",
+            "start_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774816807201817700",
             "start_pin_idx": 3,
-            "end_comp_id": "Auto_joint_2_1774459068024111100",
+            "end_comp_id": "Auto_joint_2_1774816807200318200",
             "end_pin_idx": 4,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774459068015113200",
+            "start_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774816807201817700",
             "start_pin_idx": 2,
-            "end_comp_id": "Auto_joint_3_1774459068030112100",
+            "end_comp_id": "Auto_joint_3_1774816807187317800",
             "end_pin_idx": 4,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774459068015113200",
+            "start_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774816807201817700",
             "start_pin_idx": 8,
-            "end_comp_id": "Auto_lut5_0_1774459068017111700",
+            "end_comp_id": "Auto_lut5_0_1774816807197317200",
             "end_pin_idx": 2,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_hm2_7i76e_0_stepgen_00_1774459068009107300",
+            "start_comp_id": "Auto_hm2_7i76e_0_stepgen_00_1774816807196317500",
             "start_pin_idx": 1,
-            "end_comp_id": "Auto_joint_0_1774459068027611700",
+            "end_comp_id": "Auto_joint_0_1774816807188818100",
             "end_pin_idx": 2,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_hm2_7i76e_0_stepgen_01_1774459068029612700",
+            "start_comp_id": "Auto_hm2_7i76e_0_stepgen_01_1774816807211318800",
             "start_pin_idx": 1,
-            "end_comp_id": "Auto_joint_1_1774459068035111900",
+            "end_comp_id": "Auto_joint_1_1774816807184818100",
             "end_pin_idx": 2,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_hm2_7i76e_0_stepgen_02_1774459068023112200",
+            "start_comp_id": "Auto_hm2_7i76e_0_stepgen_02_1774816807192317300",
             "start_pin_idx": 1,
-            "end_comp_id": "Auto_joint_2_1774459068024111100",
+            "end_comp_id": "Auto_joint_2_1774816807200318200",
             "end_pin_idx": 2,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_hm2_7i76e_0_stepgen_03_1774459068008107900",
+            "start_comp_id": "Auto_hm2_7i76e_0_stepgen_03_1774816807185817100",
             "start_pin_idx": 1,
-            "end_comp_id": "Auto_joint_3_1774459068030112100",
+            "end_comp_id": "Auto_joint_3_1774816807187317800",
             "end_pin_idx": 2,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_iocontrol_0_1774459068019111500",
+            "start_comp_id": "Auto_iocontrol_0_1774816807183317000",
             "start_pin_idx": 1,
-            "end_comp_id": "7I76EU_TB4_1774459068031611900",
+            "end_comp_id": "7I76EU_TB4_1774816807203317400",
             "end_pin_idx": 0,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_iocontrol_0_1774459068019111500",
+            "start_comp_id": "Auto_iocontrol_0_1774816807183317000",
             "start_pin_idx": 2,
-            "end_comp_id": "7I76EU_TB4_1774459068031611900",
+            "end_comp_id": "7I76EU_TB4_1774816807203317400",
             "end_pin_idx": 1,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_iocontrol_0_1774459068019111500",
+            "start_comp_id": "Auto_iocontrol_0_1774816807183317000",
             "start_pin_idx": 0,
-            "end_comp_id": "Auto_and2_0_1774459068037113100",
+            "end_comp_id": "Auto_and2_0_1774816807195818000",
             "end_pin_idx": 0,
             "color": "#3498db"
         },
         {
-            "start_comp_id": "Auto_iocontrol_0_1774459068019111500",
+            "start_comp_id": "Auto_iocontrol_0_1774816807183317000",
             "start_pin_idx": 3,
-            "end_comp_id": "Auto_iocontrol_0_1774459068019111500",
+            "end_comp_id": "Auto_iocontrol_0_1774816807183317000",
             "end_pin_idx": 4,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_iocontrol_0_1774459068019111500",
+            "start_comp_id": "Auto_iocontrol_0_1774816807183317000",
             "start_pin_idx": 6,
-            "end_comp_id": "Auto_iocontrol_0_1774459068019111500",
+            "end_comp_id": "Auto_iocontrol_0_1774816807183317000",
             "end_pin_idx": 7,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_joint_0_1774459068027611700",
-            "start_pin_idx": 0,
-            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_00_1774459068009107300",
-            "end_pin_idx": 3,
-            "color": "#2ecc71"
-        },
-        {
-            "start_comp_id": "Auto_joint_0_1774459068027611700",
-            "start_pin_idx": 3,
-            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_00_1774459068009107300",
-            "end_pin_idx": 2,
-            "color": "#3498db"
-        },
-        {
-            "start_comp_id": "Auto_joint_1_1774459068035111900",
-            "start_pin_idx": 0,
-            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_01_1774459068029612700",
-            "end_pin_idx": 3,
-            "color": "#2ecc71"
-        },
-        {
-            "start_comp_id": "Auto_joint_1_1774459068035111900",
-            "start_pin_idx": 3,
-            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_01_1774459068029612700",
-            "end_pin_idx": 2,
-            "color": "#3498db"
-        },
-        {
-            "start_comp_id": "Auto_joint_2_1774459068024111100",
-            "start_pin_idx": 0,
-            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_02_1774459068023112200",
-            "end_pin_idx": 3,
-            "color": "#2ecc71"
-        },
-        {
-            "start_comp_id": "Auto_joint_2_1774459068024111100",
-            "start_pin_idx": 3,
-            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_02_1774459068023112200",
-            "end_pin_idx": 2,
-            "color": "#3498db"
-        },
-        {
-            "start_comp_id": "Auto_joint_3_1774459068030112100",
-            "start_pin_idx": 0,
-            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_03_1774459068008107900",
-            "end_pin_idx": 3,
-            "color": "#2ecc71"
-        },
-        {
-            "start_comp_id": "Auto_joint_3_1774459068030112100",
-            "start_pin_idx": 3,
-            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_03_1774459068008107900",
-            "end_pin_idx": 2,
-            "color": "#3498db"
-        },
-        {
-            "start_comp_id": "Auto_lut5_0_1774459068017111700",
-            "start_pin_idx": 0,
-            "end_comp_id": "Auto_motion_1774459068017611600",
+            "start_comp_id": "Auto_jogincr_1774816807210318000",
+            "start_pin_idx": 4,
+            "end_comp_id": "Auto_axis_x_1774816807209318200",
             "end_pin_idx": 0,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_or2_0_1774459068026613100",
-            "start_pin_idx": 2,
-            "end_comp_id": "Auto_motion_1774459068017611600",
+            "start_comp_id": "Auto_jogincr_1774816807210318000",
+            "start_pin_idx": 4,
+            "end_comp_id": "Auto_axis_y_1774816807180317000",
+            "end_pin_idx": 0,
+            "color": "#2ecc71"
+        },
+        {
+            "start_comp_id": "Auto_jogincr_1774816807210318000",
+            "start_pin_idx": 4,
+            "end_comp_id": "Auto_axis_z_1774816807191817500",
+            "end_pin_idx": 0,
+            "color": "#2ecc71"
+        },
+        {
+            "start_comp_id": "Auto_joint_0_1774816807188818100",
+            "start_pin_idx": 0,
+            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_00_1774816807196317500",
             "end_pin_idx": 3,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_spindle_0_1774459068010107400",
+            "start_comp_id": "Auto_joint_0_1774816807188818100",
             "start_pin_idx": 3,
-            "end_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774459068015113200",
+            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_00_1774816807196317500",
+            "end_pin_idx": 2,
+            "color": "#3498db"
+        },
+        {
+            "start_comp_id": "Auto_joint_1_1774816807184818100",
+            "start_pin_idx": 0,
+            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_01_1774816807211318800",
+            "end_pin_idx": 3,
+            "color": "#2ecc71"
+        },
+        {
+            "start_comp_id": "Auto_joint_1_1774816807184818100",
+            "start_pin_idx": 3,
+            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_01_1774816807211318800",
+            "end_pin_idx": 2,
+            "color": "#3498db"
+        },
+        {
+            "start_comp_id": "Auto_joint_2_1774816807200318200",
+            "start_pin_idx": 0,
+            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_02_1774816807192317300",
+            "end_pin_idx": 3,
+            "color": "#2ecc71"
+        },
+        {
+            "start_comp_id": "Auto_joint_2_1774816807200318200",
+            "start_pin_idx": 3,
+            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_02_1774816807192317300",
+            "end_pin_idx": 2,
+            "color": "#3498db"
+        },
+        {
+            "start_comp_id": "Auto_joint_3_1774816807187317800",
+            "start_pin_idx": 0,
+            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_03_1774816807185817100",
+            "end_pin_idx": 3,
+            "color": "#2ecc71"
+        },
+        {
+            "start_comp_id": "Auto_joint_3_1774816807187317800",
+            "start_pin_idx": 3,
+            "end_comp_id": "Auto_hm2_7i76e_0_stepgen_03_1774816807185817100",
+            "end_pin_idx": 2,
+            "color": "#3498db"
+        },
+        {
+            "start_comp_id": "Auto_lut5_0_1774816807197317200",
+            "start_pin_idx": 0,
+            "end_comp_id": "Auto_motion_1774816807208318000",
+            "end_pin_idx": 0,
+            "color": "#2ecc71"
+        },
+        {
+            "start_comp_id": "Auto_or2_0_1774816807197818100",
+            "start_pin_idx": 2,
+            "end_comp_id": "Auto_motion_1774816807208318000",
+            "end_pin_idx": 3,
+            "color": "#2ecc71"
+        },
+        {
+            "start_comp_id": "Auto_spindle_0_1774816807198318000",
+            "start_pin_idx": 3,
+            "end_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774816807201817700",
             "end_pin_idx": 4,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_spindle_0_1774459068010107400",
+            "start_comp_id": "Auto_spindle_0_1774816807198318000",
             "start_pin_idx": 4,
-            "end_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774459068015113200",
+            "end_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774816807201817700",
             "end_pin_idx": 5,
             "color": "#2ecc71"
         },
         {
-            "start_comp_id": "Auto_spindle_0_1774459068010107400",
+            "start_comp_id": "Auto_spindle_0_1774816807198318000",
             "start_pin_idx": 6,
-            "end_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774459068015113200",
+            "end_comp_id": "Auto_hm2_7i76e_0_7i76_0_0_1774816807201817700",
             "end_pin_idx": 6,
             "color": "#2ecc71"
         }
@@ -435,7 +490,7 @@
             "x": 10.0,
             "y": 0.0,
             "w": 790.0,
-            "h": 4395.0
+            "h": 4615.0
         }
     ]
 }
