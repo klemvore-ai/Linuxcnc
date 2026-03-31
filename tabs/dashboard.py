@@ -425,6 +425,7 @@ class ToolpathViewer(QGraphicsView):
 
 class PositionFetcherThread(QThread):
     position_fetched = pyqtSignal(dict)
+    error = pyqtSignal(str)
 
     def __init__(self, ip, user, password):
         super().__init__()
@@ -500,7 +501,7 @@ while True:
         def get_pos(axis_idx, joint_idx):
             try:
                 if s.homed[joint_idx]:
-                    return s.actual_position[axis_idx] - s.g5x_offset[axis_idx] - s.g92_offset[axis_idx] - s.tool_offset[axis_idx]
+                    return s.position[axis_idx]
                 else:
                     return s.joint[joint_idx]['input']
             except Exception:
@@ -574,7 +575,7 @@ while True:
                         try:
                             coords = json.loads(line)
                             self.position_fetched.emit(coords)
-                        except Exception: pass
+                        except json.JSONDecodeError: pass
                 proc.terminate()
                 for _ in range(20):
                     if not self.running: break
@@ -594,6 +595,7 @@ while True:
                 stdin, stdout, stderr = ssh.exec_command(self.cmd)
                 stdout.channel.settimeout(1.0)
                 
+                import socket
                 while self.running:
                     try:
                         line = stdout.readline()
@@ -602,17 +604,17 @@ while True:
                         if line.startswith('{') and line.endswith('}'):
                             coords = json.loads(line)
                             self.position_fetched.emit(coords)
-                    except Exception: 
-                        pass # Ignore timeout/socket errors and keep reading until loop breaks naturally
-                    except Exception as e: 
-                        import socket
-                        if isinstance(e, socket.timeout) or "timed out" in str(e).lower():
-                            continue # Ignore normal read timeouts and keep waiting
+                    except (socket.timeout, json.JSONDecodeError):
+                        continue # Ignore read timeouts and malformed JSON and keep waiting
+                    except Exception as e:
+                        if self.running:
+                            self.error.emit(f"Position fetcher error: {e}")
                         break # The socket died or had a fatal error, break to trigger reconnect timer!
                         
                 ssh.close()
-            except Exception:
-                pass
+            except Exception as e:
+                if self.running:
+                    self.error.emit(f"SSH connection failed: {e}")
             
             # Reconnect loop
             for _ in range(20):
@@ -681,8 +683,10 @@ linuxcnc = MockLinuxCNC()
 IS_SIM = True
 
 class MachineDashboard(QWidget):
+    error_signal = pyqtSignal(str)
     def __init__(self, settings, parent=None):
         super().__init__(parent)
+        self.error_signal.connect(self.show_error_message)
         self.settings = settings
         self.home_buttons = {}
         self.dro_labels = {}
@@ -718,6 +722,9 @@ class MachineDashboard(QWidget):
         self.ping_timer.start(3000)  # Ping in the background every 3 seconds
         self.send_ping()
         self.setFocus()  # Ensure focus on startup
+
+    def show_error_message(self, message):
+        QMessageBox.warning(self, "LinuxCNC MDI Error", f"The MDI command failed with the following error:\n\n{message}")
 
     def get_probe_plate_thickness(self):
         val = self.settings.get_setting('Calibration', 'probe_plate_thickness')
@@ -1001,10 +1008,10 @@ except Exception as e:
         mode_layout.setSpacing(5)
         
         btn_work = QPushButton("Work")
-        btn_abs = QPushButton("Abs")
+        btn_abs = QPushButton("Machine")
         btn_dtg = QPushButton("DTG")
         
-        self.dro_mode_buttons = {'WORK': btn_work, 'ABS': btn_abs, 'DTG': btn_dtg}
+        self.dro_mode_buttons = {'WORK': btn_work, 'MACHINE': btn_abs, 'DTG': btn_dtg}
         for mode, btn in self.dro_mode_buttons.items():
             btn.setStyleSheet(f"background-color: {'#2980b9' if mode == self.dro_mode else '#34495e'}; color: white; padding: 4px; border-radius: 3px; font-weight: bold;")
             btn.clicked.connect(lambda _, m=mode: self.set_dro_mode(m))
@@ -1751,7 +1758,56 @@ except Exception as e:
         
         if not ip or not user: return
             
-        py_code = f"import linuxcnc, time\ntry:\n    c=linuxcnc.command()\n    c.mode(linuxcnc.MODE_MDI)\n    time.sleep(0.1)\n    c.mdi('{mdi_cmd}')\nexcept: pass"
+        escaped_mdi_cmd = mdi_cmd.replace("'", "\\'")
+        py_code = f"""import linuxcnc, time, sys
+try:
+    c = linuxcnc.command()
+    s = linuxcnc.stat()
+    e = linuxcnc.error_channel()
+
+    def wait_idle(timeout=10):
+        start_time = time.time()
+        # First, check for any existing errors
+        err = e.poll()
+        if err:
+            sys.stderr.write(str(err[1]))
+            sys.exit(1)
+
+        while time.time() - start_time < timeout:
+            s.poll()
+            if s.interp_state == linuxcnc.INTERP_IDLE:
+                return # Success
+            
+            # Check for errors while waiting
+            err = e.poll()
+            if err:
+                sys.stderr.write(str(err[1]))
+                sys.exit(1)
+            
+            if s.task_state == linuxcnc.STATE_ESTOP:
+                sys.stderr.write("Machine is in E-STOP state.")
+                sys.exit(1)
+
+            time.sleep(0.05)
+            
+        sys.stderr.write("MDI command timed out while waiting for completion.")
+        sys.exit(1)
+
+    s.poll()
+    if s.task_mode != linuxcnc.MODE_MDI:
+        c.mode(linuxcnc.MODE_MDI)
+        wait_idle()
+
+    c.mdi('{escaped_mdi_cmd}')
+    wait_idle()
+
+except linuxcnc.error as e:
+    sys.stderr.write(f"LinuxCNC Error: {{e}}")
+    sys.exit(1)
+except Exception as e:
+    sys.stderr.write(f"An unexpected error occurred: {{e}}")
+    sys.exit(1)
+"""
         def send_cmd():
             self._send_b64_py_cmd(py_code)
         threading.Thread(target=send_cmd, daemon=True).start()
@@ -2287,9 +2343,11 @@ except Exception as e: pass"""
             
             if is_local_ip(ip):
                 try: 
-                    subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
-                except Exception:
-                    pass # Ignore timeouts and errors for local non-critical commands
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+                    if result.stderr:
+                        self.error_signal.emit(result.stderr.strip())
+                except Exception as e:
+                    self.error_signal.emit(str(e))
                 continue
                 
             if HAS_PARAMIKO:
@@ -2298,22 +2356,22 @@ except Exception as e: pass"""
                     ssh = paramiko.SSHClient()
                     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                     ssh.connect(ip, username=user, password=password, timeout=2, banner_timeout=3, auth_timeout=3, look_for_keys=not bool(password), allow_agent=not bool(password))
-                    ssh.exec_command(cmd, timeout=5)
+                    stdin, stdout, stderr = ssh.exec_command(cmd, timeout=5)
+                    error_output = stderr.read().decode().strip()
+                    if error_output:
+                        self.error_signal.emit(error_output)
                 except Exception as e:
-                    # Log paramiko errors for debugging, as they can indicate connection problems
-                    try:
-                        log_path = os.path.join(tempfile.gettempdir(), 'cncfusion_cmd_errors.txt')
-                        with open(log_path, 'a') as f:
-                            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Command '{cmd}' failed: {e}\n")
-                    except: pass
+                    self.error_signal.emit(str(e))
                 finally:
                     if ssh:
                         ssh.close()
             else: # Fallback to system SSH
                 try: 
-                    subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", cmd], capture_output=True, timeout=5)
-                except: 
-                    pass
+                    result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", cmd], capture_output=True, text=True, timeout=5)
+                    if result.stderr:
+                        self.error_signal.emit(result.stderr.strip())
+                except Exception as e:
+                    self.error_signal.emit(str(e))
 
     def set_feed_override(self):
         py_code = f"import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.feedrate({self.feed_slider.value() / 100.0})\nexcept: pass"
@@ -2783,7 +2841,7 @@ except Exception as e: pass"""
                 if axis in ['X', 'Y', 'Z']:
                     if self.dro_mode == 'WORK':
                         val = self.mock_coords.get(axis, 0.0)
-                    elif self.dro_mode == 'ABS':
+                    elif self.dro_mode == 'MACHINE':
                         val = self.mock_coords.get(f'ABSOLUTE_{axis}', 0.0)
                     elif self.dro_mode == 'DTG':
                         val = self.mock_coords.get(f'DTG_{axis}', 0.0)
@@ -3092,6 +3150,7 @@ except Exception as e:
         if (HAS_PARAMIKO or is_local_ip(ip)) and not self.pos_fetcher:
             self.pos_fetcher = PositionFetcherThread(ip, user, password)
             self.pos_fetcher.position_fetched.connect(self.update_real_coords)
+            self.pos_fetcher.error.connect(self.show_error_message)
             self.pos_fetcher.start()
 
     def stop_position_fetcher(self):

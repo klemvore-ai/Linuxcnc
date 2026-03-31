@@ -183,7 +183,7 @@ class SettingsTab(QWidget):
         axis_grid.setHorizontalSpacing(15)
         axis_grid.setColumnStretch(8, 1)
         
-        headers = ["Axis", "Min Limit", "Max Limit", "Max Vel", "Max Accel", "Steps/Rev", "Units/Rev", "Invert Dir"]
+        headers = ["Axis", "Min Limit", "Max Limit", "Max Vel", "Max Accel", "Steps/Rev", "Units/Rev", "Backlash", "Invert Dir"]
         for col, h in enumerate(headers):
             lbl = QLabel(h)
             lbl.setStyleSheet("color: #ecf0f1; font-weight: bold; padding-bottom: 5px;")
@@ -202,8 +202,8 @@ class SettingsTab(QWidget):
                 lbl = QLabel(f"<b>{ax} (Squaring)</b>")
                 axis_grid.addWidget(lbl, row, 0)
                 inherit_lbl = QLabel("<i>(Inherits from Y)</i>")
-                axis_grid.addWidget(inherit_lbl, row, 1, 1, 6)
-                axis_grid.addWidget(self.axis_inputs[key]['invert'], row, 7, Qt.AlignmentFlag.AlignCenter)
+                axis_grid.addWidget(inherit_lbl, row, 1, 1, 7)
+                axis_grid.addWidget(self.axis_inputs[key]['invert'], row, 8, Qt.AlignmentFlag.AlignCenter)
                 self.dynamic_widgets['Y2'].extend([lbl, inherit_lbl, self.axis_inputs[key]['invert']])
             else:
                 self.axis_inputs[key] = {
@@ -213,6 +213,7 @@ class SettingsTab(QWidget):
                     'accel': make_sb(self.sm.get_setting(f'AXIS_{key}', 'accel', 600.0 if key != 'Z' else 150.0), dec=2),
                     'steps': make_sb(self.sm.get_setting(f'AXIS_{key}', 'steps', 5000), dec=0),
                     'units': make_sb(self.sm.get_setting(f'AXIS_{key}', 'units', 10.0 if key != 'Z' else 4.0)),
+                    'backlash': make_sb(self.sm.get_setting(f'AXIS_{key}', 'backlash', 0.0), dec=4),
                     'invert': inv_cb
                 }
                 lbl = QLabel(f"<b>{ax}</b>")
@@ -223,10 +224,11 @@ class SettingsTab(QWidget):
                 axis_grid.addWidget(self.axis_inputs[key]['accel'], row, 4)
                 axis_grid.addWidget(self.axis_inputs[key]['steps'], row, 5)
                 axis_grid.addWidget(self.axis_inputs[key]['units'], row, 6)
-                axis_grid.addWidget(self.axis_inputs[key]['invert'], row, 7, Qt.AlignmentFlag.AlignCenter)
+                axis_grid.addWidget(self.axis_inputs[key]['backlash'], row, 7)
+                axis_grid.addWidget(self.axis_inputs[key]['invert'], row, 8, Qt.AlignmentFlag.AlignCenter)
                 
                 if key in ['A', 'B']:
-                    self.dynamic_widgets[key].extend([lbl, self.axis_inputs[key]['min'], self.axis_inputs[key]['max'], self.axis_inputs[key]['vel'], self.axis_inputs[key]['accel'], self.axis_inputs[key]['steps'], self.axis_inputs[key]['units'], self.axis_inputs[key]['invert']])
+                    self.dynamic_widgets[key].extend([lbl, self.axis_inputs[key]['min'], self.axis_inputs[key]['max'], self.axis_inputs[key]['vel'], self.axis_inputs[key]['accel'], self.axis_inputs[key]['steps'], self.axis_inputs[key]['units'], self.axis_inputs[key]['backlash'], self.axis_inputs[key]['invert']])
             
         # --- Dense Grid: Homing Configuration ---
         homing_group = QGroupBox("Homing & Soft Limits")
@@ -319,7 +321,11 @@ class SettingsTab(QWidget):
         self.chk_spindle_closed_loop = QCheckBox("Enable Closed-Loop Spindle (PID & Encoder)")
         self.chk_spindle_closed_loop.setChecked(self.sm.get_setting('MACHINE_CONFIG', 'spindle_closed_loop', 'False') == 'True')
         
-        features_groupbox = QGroupBox("Optional Machine Features"); features_groupbox.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #555555; background-color: #252526; border-radius: 4px; margin-top: 15px; padding-top: 15px; padding-bottom: 10px; color: #f1c40f; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }"); features_form = QFormLayout(features_groupbox); layout_features.addWidget(features_groupbox); features_form.addRow(self.chk_enable_probe)
+        features_group = QGroupBox("Machine Features")
+        features_form = QFormLayout(features_group)
+        features_form.setHorizontalSpacing(15)
+        
+        features_form.addRow(self.chk_enable_probe)
         features_form.addRow(self.chk_enable_spindle_at_speed)
         features_form.addRow(self.chk_enable_spindle_fault)
         features_form.addRow(self.chk_enable_tool_change)
@@ -751,15 +757,20 @@ class SettingsTab(QWidget):
         QTimer.singleShot(1000, self.check_pending_updates)
 
     def _fetch_current_coords(self):
+        """
+        Attempts to retrieve the current machine coordinates (absolute) from the
+        active dashboard tab. This is needed for "Set to Current Location" functionality.
+        """
         for widget in QApplication.topLevelWidgets():
             if hasattr(widget, 'tabs'):
                 for i in range(widget.tabs.count()):
                     tab = widget.tabs.widget(i)
                     if hasattr(tab, 'mock_coords'):
                         # Park and Tool Setter locations require absolute machine coordinates (G53)
-                        x = tab.mock_coords.get('ABSOLUTE_X', tab.mock_coords.get('X', 0.0))
-                        y = tab.mock_coords.get('ABSOLUTE_Y', tab.mock_coords.get('Y', 0.0))
-                        z = tab.mock_coords.get('ABSOLUTE_Z', tab.mock_coords.get('Z', 0.0))
+                        # Fallback to Work coordinates if absolute are not available (e.g., in simulation)
+                        x = tab.mock_coords.get('ABSOLUTE_X', None)
+                        y = tab.mock_coords.get('ABSOLUTE_Y', None)
+                        z = tab.mock_coords.get('ABSOLUTE_Z', None)
                         return x, y, z
         return None, None, None
 
@@ -1253,6 +1264,9 @@ class SettingsTab(QWidget):
             a_acc = self.axis_inputs[j_axis]['accel'].value()
             a_scale = self.axis_inputs[j_axis]['steps'].value() / max(0.001, self.axis_inputs[j_axis]['units'].value())
             
+            backlash = self.axis_inputs[j_axis].get('backlash', None)
+            backlash_val = backlash.value() if backlash else 0.0
+
             if is_y2:
                 if self.axis_inputs['Y2']['invert'].isChecked():
                     a_scale = -a_scale
@@ -1276,6 +1290,7 @@ class SettingsTab(QWidget):
             
             ini_content.extend([
                 f"[JOINT_{j_idx}]", f"TYPE = {j_type}", f"HOME = {h_pos:.3f}",
+                f"BACKLASH = {backlash_val:.4f}",
                 f"MIN_LIMIT = {j_min:.3f}", f"MAX_LIMIT = {j_max:.3f}",
                 f"MAX_VELOCITY = {a_vel:.2f}", f"MAX_ACCELERATION = {a_acc:.2f}",
                 f"STEPGEN_MAXVEL = {a_vel * 1.20:.2f}", f"STEPGEN_MAXACCEL = {stepgen_a:.2f}",
