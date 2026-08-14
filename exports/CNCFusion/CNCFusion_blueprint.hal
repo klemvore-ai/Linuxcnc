@@ -99,18 +99,18 @@ setp jogincr.in00 0.000000
 setp jogincr.in01 0.001000
 setp jogincr.in02 0.010000
 setp jogincr.in03 0.100000
-setp jogincr.in04 0.100000
-setp jogincr.in05 0.100000
-setp jogincr.in06 0.100000
-setp jogincr.in07 0.100000
-setp jogincr.in08 0.100000
-setp jogincr.in09 0.100000
-setp jogincr.in10 0.100000
-setp jogincr.in11 0.100000
-setp jogincr.in12 0.100000
-setp jogincr.in13 0.100000
-setp jogincr.in14 0.100000
-setp jogincr.in15 0.100000
+setp jogincr.in04 0.125000
+setp jogincr.in05 0.125000
+setp jogincr.in06 0.125000
+setp jogincr.in07 0.125000
+setp jogincr.in08 0.125000
+setp jogincr.in09 0.125000
+setp jogincr.in10 0.125000
+setp jogincr.in11 0.125000
+setp jogincr.in12 0.125000
+setp jogincr.in13 0.125000
+setp jogincr.in14 0.125000
+setp jogincr.in15 0.125000
 net selected-jog-incr   jogincr.out-f                       =>  axis.x.jog-scale axis.y.jog-scale axis.z.jog-scale
 
 net mpg-x-en            hm2_7i76e.0.7i76.0.0.input-00       =>  axis.x.jog-enable

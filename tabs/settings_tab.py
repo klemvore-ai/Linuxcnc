@@ -181,7 +181,7 @@ class SettingsTab(QWidget):
         axis_tuning_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #555555; background-color: #252526; border-radius: 4px; margin-top: 15px; padding-top: 15px; padding-bottom: 10px; color: #f39c12; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
         axis_grid = QGridLayout(axis_tuning_group)
         axis_grid.setHorizontalSpacing(15)
-        axis_grid.setColumnStretch(8, 1)
+        axis_grid.setColumnStretch(9, 1)  # Apply stretch to an empty 10th column instead
         
         headers = ["Axis", "Min Limit", "Max Limit", "Max Vel", "Max Accel", "Steps/Rev", "Units/Rev", "Backlash", "Invert Dir"]
         for col, h in enumerate(headers):
@@ -743,6 +743,7 @@ class SettingsTab(QWidget):
         
         layout_machine.addLayout(wizard_stack)
 
+        layout_features.addWidget(features_group)
         layout_features.addWidget(jog_group)
         layout_features.addWidget(probe_group)
         layout_features.addStretch()

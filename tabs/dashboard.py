@@ -13,6 +13,7 @@ import tempfile
 import math
 import queue
 import time
+import socket
 import re
 
 LOCAL_IPS = ['localhost', '127.0.0.1']
@@ -203,7 +204,7 @@ class ToolpathViewer(QGraphicsView):
         self.tool_marker.setZValue(100) # Always on top
         self.tool_marker.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
 
-    def drawForeground(self, painter, rect):
+    def drawForeground(self, painter: QPainter, rect: QRectF):
         super().drawForeground(painter, rect)
         painter.save()
         painter.resetTransform()
@@ -501,7 +502,11 @@ while True:
         def get_pos(axis_idx, joint_idx):
             try:
                 if s.homed[joint_idx]:
-                    return s.position[axis_idx]
+                    abs_pos = s.actual_position[axis_idx]
+                    g5x = getattr(s, 'g5x_offset', (0.0,)*9)[axis_idx]
+                    g92 = getattr(s, 'g92_offset', (0.0,)*9)[axis_idx]
+                    tool = getattr(s, 'tool_offset', (0.0,)*9)[axis_idx]
+                    return abs_pos - (g5x + g92 + tool)
                 else:
                     return s.joint[joint_idx]['input']
             except Exception:
@@ -650,8 +655,8 @@ class CalibrationWorker(QThread):
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             ssh.connect(ip, username=user, password=password, timeout=10, look_for_keys=not bool(password), allow_agent=not bool(password))
-            stdin, stdout, stderr = ssh.exec_command(cmd)
-            result = stdout.read().decode().strip()
+            stdin, stdout, stderr = ssh.exec_command(cmd, timeout=300)
+            result = stdout.read().decode().strip() # This will block until the remote command finishes
             error = stderr.read().decode().strip()
             ssh.close()
             
@@ -754,7 +759,7 @@ class MachineDashboard(QWidget):
     def start_tool_setter_calibration(self, *args):
         reply = QMessageBox.question(self, "Tool Setter Calibration",
                                      "This will guide you through calibrating the tool setter height.\n\n"
-                                     "You will need a reference tool and a way to set your workpiece Z-zero (like a touch plate).\n\n"
+                                     "You will need a reference tool of known length and a way to set your workpiece Z-zero (like a touch plate).\n\n"
                                      "Do you want to begin?",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply != QMessageBox.StandardButton.Yes:
@@ -777,21 +782,32 @@ if not has_zenity():
     print("ERROR: Zenity is not installed. Please run 'sudo apt install zenity' on the LinuxCNC machine.")
     sys.exit(1)
 
-if prompt('question', 'Step 1: Set Workpiece Zero', 'Please insert your reference tool.\\n\\nManually jog and touch this tool off on your workpiece Z-zero surface (e.g., using a touch plate).\\n\\nClick YES when Z-zero is set correctly.') != 0:
+if prompt('question', 'Step 1: Set Workpiece Zero', 'Please insert your reference tool (e.g., a gauge block of known height).\\n\\nManually jog and touch this tool off on your workpiece Z-zero surface (e.g., using a touch plate).\\n\\nClick YES when Z-zero is set correctly.') != 0:
     print("USER_CANCEL")
     sys.exit(0)
 
 try:
     s = linuxcnc.stat(); c = linuxcnc.command(); s.poll()
     e = getattr(linuxcnc, 'error_channel', lambda: None)()
-    def wait_idle():
-        s.poll()
-        while s.interp_state != linuxcnc.INTERP_IDLE:
-            time.sleep(0.05); s.poll()
-            if getattr(s, 'task_state', 0) == getattr(linuxcnc, 'STATE_ESTOP', 0): sys.exit(1)
-            if e:
-                msg = e.poll()
-                if msg and msg[0] == getattr(linuxcnc, 'NML_ERROR', 1): sys.exit(1)
+    def wait_idle(timeout=120):
+        start_time = time.time()
+        err = e.poll()
+        if err:
+            sys.stderr.write(str(err[1]))
+            sys.exit(1)
+        while time.time() - start_time < timeout:
+            s.poll()
+            if s.interp_state == linuxcnc.INTERP_IDLE: return
+            err = e.poll()
+            if err:
+                sys.stderr.write(str(err[1]))
+                sys.exit(1)
+            if s.task_state == linuxcnc.STATE_ESTOP:
+                sys.stderr.write("Machine is in E-STOP state.")
+                sys.exit(1)
+            time.sleep(0.05)
+        sys.stderr.write("MDI command timed out.")
+        sys.exit(1)
     def run_mdi(cmd):
         c.mdi(cmd); time.sleep(0.05); wait_idle()
 
@@ -817,11 +833,17 @@ try:
     if z_target >= current_z:
         z_target = current_z - 200.0
         
-    run_mdi(f"G38.2 Z{{z_target:.4f}} F{setter_vel}")
-    
+    run_mdi(f"G38.2 Z{{z_target:.4f}} F{setter_vel * 4.0}")
     s.poll()
     if not s.probe_tripped:
-        prompt('error', 'Probe Failed', 'The probe sequence failed to make contact.')
+        prompt('error', 'Probe Failed', 'The fast probe sequence failed to make contact.')
+        sys.exit(1)
+        
+    run_mdi("G91"); run_mdi("G0 Z2.0"); run_mdi("G90")
+    run_mdi(f"G38.2 Z{{z_target:.4f}} F{setter_vel}")
+    s.poll()
+    if not s.probe_tripped:
+        prompt('error', 'Probe Failed', 'The slow probe sequence failed to make contact.')
         sys.exit(1)
         
     setter_height = s.probed_position[2]
@@ -1855,14 +1877,25 @@ try:
     time.sleep(0.2)
     c = linuxcnc.command(); s = linuxcnc.stat()
     e = getattr(linuxcnc, 'error_channel', lambda: None)()
-    def wait_idle():
-        s.poll()
-        while s.interp_state != linuxcnc.INTERP_IDLE:
-            time.sleep(0.05); s.poll()
-            if getattr(s, 'task_state', 0) == getattr(linuxcnc, 'STATE_ESTOP', 0): sys.exit(1)
-            if e:
-                msg = e.poll()
-                if msg and msg[0] == getattr(linuxcnc, 'NML_ERROR', 1): sys.exit(1)
+    def wait_idle(timeout=120):
+        start_time = time.time()
+        err = e.poll()
+        if err:
+            sys.stderr.write(str(err[1]))
+            sys.exit(1)
+        while time.time() - start_time < timeout:
+            s.poll()
+            if s.interp_state == linuxcnc.INTERP_IDLE: return
+            err = e.poll()
+            if err:
+                sys.stderr.write(str(err[1]))
+                sys.exit(1)
+            if s.task_state == linuxcnc.STATE_ESTOP:
+                sys.stderr.write("Machine is in E-STOP state.")
+                sys.exit(1)
+            time.sleep(0.05)
+        sys.stderr.write("MDI command timed out.")
+        sys.exit(1)
     s.poll()
     if s.task_mode != linuxcnc.MODE_MDI: c.mode(linuxcnc.MODE_MDI); wait_idle()
     def run_mdi(cmd_str):
@@ -1890,6 +1923,13 @@ try:
     if z_target >= current_z:
         z_target = current_z - 200.0
         
+    run_mdi(f"G38.2 Z{{z_target:.4f}} F{setter_vel * 4.0}")
+    s.poll()
+    if not s.probe_tripped:
+        os.system("export DISPLAY=:0; zenity --error --title='Probe Failed' --text='Fast search failed to make contact.' --width=300")
+        sys.exit(1)
+        
+    run_mdi("G91"); run_mdi("G0 Z2.0"); run_mdi("G90")
     run_mdi(f"G38.2 Z{{z_target:.4f}} F{setter_vel}")
     s.poll()
     if s.probe_tripped:
@@ -1908,7 +1948,7 @@ try:
         run_mdi("G90")
         run_mdi("G53 G0 Z0")
 except Exception as e: pass"""
-            self._send_b64_py_cmd(py_code)
+            self._send_b64_py_cmd(py_code, timeout=120)
             return
 
         self.probe_selector.setCurrentIndex(1)
@@ -2202,16 +2242,25 @@ try:
     c = linuxcnc.command(); s = linuxcnc.stat()
     e = linuxcnc.error_channel()
     e = getattr(linuxcnc, 'error_channel', lambda: None)()
-    def wait_idle():
-        s.poll()
-        while s.interp_state != linuxcnc.INTERP_IDLE:
-            time.sleep(0.05); s.poll()
-            if getattr(s, 'task_state', 0) == getattr(linuxcnc, 'STATE_ESTOP', 0): sys.exit(1)
-            if e:
-                msg = e.poll()
-                if msg and msg[0] == getattr(linuxcnc, 'NML_ERROR', 1): sys.exit(1)
-            msg = e.poll()
-            if msg and msg[0] == linuxcnc.NML_ERROR: sys.exit(1)
+    def wait_idle(timeout=120):
+        start_time = time.time()
+        err = e.poll()
+        if err:
+            sys.stderr.write(str(err[1]))
+            sys.exit(1)
+        while time.time() - start_time < timeout:
+            s.poll()
+            if s.interp_state == linuxcnc.INTERP_IDLE: return
+            err = e.poll()
+            if err:
+                sys.stderr.write(str(err[1]))
+                sys.exit(1)
+            if s.task_state == linuxcnc.STATE_ESTOP:
+                sys.stderr.write("Machine is in E-STOP state.")
+                sys.exit(1)
+            time.sleep(0.05)
+        sys.stderr.write("MDI command timed out.")
+        sys.exit(1)
     s.poll()
     if s.task_mode != linuxcnc.MODE_MDI: c.mode(linuxcnc.MODE_MDI); wait_idle()
     def run_mdi(cmd_str):
@@ -2234,7 +2283,7 @@ try:
 {final_move}
 except Exception as e: pass"""
         
-        self._send_b64_py_cmd(py_code)
+        self._send_b64_py_cmd(py_code, timeout=120)
 
     def move_to_tool_setter(self):
         if self.is_estopped:
@@ -2260,16 +2309,25 @@ try:
     c = linuxcnc.command(); s = linuxcnc.stat()
     e = linuxcnc.error_channel()
     e = getattr(linuxcnc, 'error_channel', lambda: None)()
-    def wait_idle():
-        s.poll()
-        while s.interp_state != linuxcnc.INTERP_IDLE:
-            time.sleep(0.05); s.poll()
-            if getattr(s, 'task_state', 0) == getattr(linuxcnc, 'STATE_ESTOP', 0): sys.exit(1)
-            if e:
-                msg = e.poll()
-                if msg and msg[0] == getattr(linuxcnc, 'NML_ERROR', 1): sys.exit(1)
-            msg = e.poll()
-            if msg and msg[0] == linuxcnc.NML_ERROR: sys.exit(1)
+    def wait_idle(timeout=30):
+        start_time = time.time()
+        err = e.poll()
+        if err:
+            sys.stderr.write(str(err[1]))
+            sys.exit(1)
+        while time.time() - start_time < timeout:
+            s.poll()
+            if s.interp_state == linuxcnc.INTERP_IDLE: return
+            err = e.poll()
+            if err:
+                sys.stderr.write(str(err[1]))
+                sys.exit(1)
+            if s.task_state == linuxcnc.STATE_ESTOP:
+                sys.stderr.write("Machine is in E-STOP state.")
+                sys.exit(1)
+            time.sleep(0.05)
+        sys.stderr.write("MDI command timed out.")
+        sys.exit(1)
             
     s.poll()
     if s.task_mode != linuxcnc.MODE_MDI:
@@ -2306,16 +2364,25 @@ try:
     c = linuxcnc.command(); s = linuxcnc.stat()
     e = linuxcnc.error_channel()
     e = getattr(linuxcnc, 'error_channel', lambda: None)()
-    def wait_idle():
-        s.poll()
-        while s.interp_state != linuxcnc.INTERP_IDLE:
-            time.sleep(0.05); s.poll()
-            if getattr(s, 'task_state', 0) == getattr(linuxcnc, 'STATE_ESTOP', 0): sys.exit(1)
-            if e:
-                msg = e.poll()
-                if msg and msg[0] == getattr(linuxcnc, 'NML_ERROR', 1): sys.exit(1)
-            msg = e.poll()
-            if msg and msg[0] == linuxcnc.NML_ERROR: sys.exit(1)
+    def wait_idle(timeout=30):
+        start_time = time.time()
+        err = e.poll()
+        if err:
+            sys.stderr.write(str(err[1]))
+            sys.exit(1)
+        while time.time() - start_time < timeout:
+            s.poll()
+            if s.interp_state == linuxcnc.INTERP_IDLE: return
+            err = e.poll()
+            if err:
+                sys.stderr.write(str(err[1]))
+                sys.exit(1)
+            if s.task_state == linuxcnc.STATE_ESTOP:
+                sys.stderr.write("Machine is in E-STOP state.")
+                sys.exit(1)
+            time.sleep(0.05)
+        sys.stderr.write("MDI command timed out.")
+        sys.exit(1)
             
     s.poll()
     if s.task_mode != linuxcnc.MODE_MDI:
@@ -2328,14 +2395,20 @@ try:
 except Exception as e: pass"""
             self._send_b64_py_cmd(py_code)
 
-    def _send_linuxcnc_py_cmd(self, cmd):
-        self.cmd_queue.put(cmd)
+    def _send_linuxcnc_py_cmd(self, cmd, timeout=5):
+        self.cmd_queue.put((cmd, timeout))
 
     def _cmd_worker(self):
         while True:
             cmd = self.cmd_queue.get()
             if cmd is None: break
             
+            # Unpack tuple
+            if isinstance(cmd, tuple):
+                command, timeout = cmd
+            else:
+                command, timeout = cmd, 5 # Default timeout for old-style calls
+
             ip = self.settings.get_setting("SSH", "ip_address", "")
             user = self.settings.get_setting("SSH", "username", "")
             password = self.settings.get_setting("SSH", "password", "")
@@ -2343,7 +2416,7 @@ except Exception as e: pass"""
             
             if is_local_ip(ip):
                 try: 
-                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+                    result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
                     if result.stderr:
                         self.error_signal.emit(result.stderr.strip())
                 except Exception as e:
@@ -2356,7 +2429,7 @@ except Exception as e: pass"""
                     ssh = paramiko.SSHClient()
                     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                     ssh.connect(ip, username=user, password=password, timeout=2, banner_timeout=3, auth_timeout=3, look_for_keys=not bool(password), allow_agent=not bool(password))
-                    stdin, stdout, stderr = ssh.exec_command(cmd, timeout=5)
+                    stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
                     error_output = stderr.read().decode().strip()
                     if error_output:
                         self.error_signal.emit(error_output)
@@ -2367,7 +2440,7 @@ except Exception as e: pass"""
                         ssh.close()
             else: # Fallback to system SSH
                 try: 
-                    result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", cmd], capture_output=True, text=True, timeout=5)
+                    result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", command], capture_output=True, text=True, timeout=timeout)
                     if result.stderr:
                         self.error_signal.emit(result.stderr.strip())
                 except Exception as e:
@@ -2636,15 +2709,15 @@ except Exception as e: pass"""
         else:
             QMessageBox.information(self, "No Changes", "No trailing dots found to clean.")
 
-    def _send_b64_py_cmd(self, py_code, urgent=False):
+    def _send_b64_py_cmd(self, py_code, urgent=False, timeout=60):
         b64_code = base64.b64encode(py_code.encode()).decode()
-        cmd = f"python3 -c \"import base64; exec(base64.b64decode('{b64_code}').decode())\""
+        cmd = f"python3 -u -c \"import base64; exec(base64.b64decode('{b64_code}').decode())\""
         if urgent:
-            threading.Thread(target=self._execute_urgent_cmd, args=(cmd,), daemon=True).start()
+            threading.Thread(target=self._execute_urgent_cmd, args=(cmd, timeout), daemon=True).start()
         else:
-            self._send_linuxcnc_py_cmd(cmd)
+            self._send_linuxcnc_py_cmd(cmd, timeout=timeout)
 
-    def _execute_urgent_cmd(self, cmd):
+    def _execute_urgent_cmd(self, cmd, timeout=60):
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
@@ -2652,7 +2725,7 @@ except Exception as e: pass"""
         
         if is_local_ip(ip):
             try: 
-                subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
             except Exception as e:
                 with open('/tmp/fusion_jog_debug.txt', 'a') as f: f.write(f"\\nURGENT SUBPROCESS EXCEPTION:\\n{e}\\n")
             return
@@ -2662,12 +2735,12 @@ except Exception as e: pass"""
                 ssh = paramiko.SSHClient()
                 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 ssh.connect(ip, username=user, password=password, timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
-                ssh.exec_command(cmd)
+                ssh.exec_command(cmd, timeout=timeout)
                 ssh.close()
             except Exception:
                 pass
         else:
-            try: subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", cmd], capture_output=True, timeout=5)
+            try: subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", cmd], capture_output=True, timeout=timeout)
             except: pass
 
     def toggle_estop(self):
@@ -2768,14 +2841,25 @@ try:
     s = linuxcnc.stat()
     
     e = getattr(linuxcnc, 'error_channel', lambda: None)()
-    def wait_idle():
-        s.poll()
-        while s.interp_state != linuxcnc.INTERP_IDLE:
-            time.sleep(0.05); s.poll()
-            if getattr(s, 'task_state', 0) == getattr(linuxcnc, 'STATE_ESTOP', 0): sys.exit(1)
-            if e:
-                msg = e.poll()
-                if msg and msg[0] == getattr(linuxcnc, 'NML_ERROR', 1): sys.exit(1)
+    def wait_idle(timeout=120):
+        start_time = time.time()
+        err = e.poll()
+        if err:
+            sys.stderr.write(str(err[1]))
+            sys.exit(1)
+        while time.time() - start_time < timeout:
+            s.poll()
+            if s.interp_state == linuxcnc.INTERP_IDLE: return
+            err = e.poll()
+            if err:
+                sys.stderr.write(str(err[1]))
+                sys.exit(1)
+            if s.task_state == linuxcnc.STATE_ESTOP:
+                sys.stderr.write("Machine is in E-STOP state.")
+                sys.exit(1)
+            time.sleep(0.05)
+        sys.stderr.write("MDI command timed out.")
+        sys.exit(1)
 
     s.poll()
     if s.task_mode != linuxcnc.MODE_MDI:
@@ -2818,7 +2902,7 @@ try:
         run_mdi("G90")
         run_mdi("G53 G0 Z0")
 except Exception as e: pass"""
-            self._send_b64_py_cmd(py_code)
+            self._send_b64_py_cmd(py_code, timeout=120)
 
     def set_z_zero(self):
         if self.is_estopped:
