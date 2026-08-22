@@ -1,0 +1,22 @@
+[Unit]
+Description=CNCFusion LinuxCNC Machine Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cncfusion
+Group=cncfusion
+WorkingDirectory=/opt/CNCFusion
+EnvironmentFile=/etc/cncfusion/agent.env
+ExecStart=/usr/bin/python3 -m agent --bind ${CNCFUSION_AGENT_BIND} --port ${CNCFUSION_AGENT_PORT} --ca-file /etc/cncfusion/ca.crt --certificate-file /etc/cncfusion/server.crt --private-key-file /etc/cncfusion/server.key --config-root /home/linuxcnc/linuxcnc/configs --gcode-root /home/linuxcnc/linuxcnc/nc_files --client-fingerprint ${CNCFUSION_CLIENT_FINGERPRINT}
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/cncfusion/updates /home/linuxcnc/linuxcnc/configs /home/linuxcnc/linuxcnc/nc_files
+
+[Install]
+WantedBy=multi-user.target

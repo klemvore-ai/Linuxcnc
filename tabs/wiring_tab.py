@@ -4,6 +4,7 @@ from PyQt6.QtCore import Qt, QRectF, QTimer
 from PyQt6.QtGui import QColor
 from core.canvas import MesaCanvas
 from core.components import MesaComponent, Pin, Wire, ComponentZone
+from core.hal_documents import HALDocumentComposer, HALDocumentError
 import time
 import json
 import os
@@ -414,11 +415,17 @@ class WiringTab(QWidget):
         hal_lines = self.align_hal_lines(hal_lines)
                 
         try:
-            with open(path, 'w', newline='\n') as f:
-                f.write("\n".join(hal_lines) + "\n")
+            composer = HALDocumentComposer(os.path.dirname(path))
+            filename = os.path.basename(path)
+            artifacts = composer.compose("", "", "\n".join(hal_lines))
+            composer.artifact_path(filename).write_text(
+                artifacts["custom_postgui.hal"],
+                encoding="utf-8",
+                newline="\n",
+            )
             self.console.append(f"Successfully exported HAL to: {path}")
             QMessageBox.information(self, "Export Successful", f"HAL file exported to:\n{path}")
-        except Exception as e:
+        except (HALDocumentError, OSError) as e:
             QMessageBox.critical(self, "Export Error", f"Failed to save HAL file:\n{e}")
 
     def import_hal(self, path=None, auto_layout=False):

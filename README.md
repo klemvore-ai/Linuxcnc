@@ -4,6 +4,8 @@ Welcome to **CNC Fusion Pro**, the ultimate integrated development environment (
 
 This application bridges the gap between machine configuration, logic wiring, UI design, and live operator control.
 
+For maintainers and contributors, see the [Architecture Guide](docs/ARCHITECTURE.md) for the service boundaries, security model, lifecycle rules, and future Mesa/EtherCAT extension path.
+
 ---
 
 ## Table of Contents

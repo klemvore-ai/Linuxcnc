@@ -15,6 +15,7 @@ import queue
 import time
 import socket
 import re
+from core.machine_agent import client_from_settings
 
 LOCAL_IPS = ['localhost', '127.0.0.1']
 try:
@@ -439,11 +440,12 @@ class PositionFetcherThread(QThread):
     position_fetched = pyqtSignal(dict)
     error = pyqtSignal(str)
 
-    def __init__(self, ip, user, password):
+    def __init__(self, ip, user, password, agent_client=None):
         super().__init__()
         self.ip = ip
         self.user = user
         self.password = password
+        self.agent_client = agent_client
         self.running = False
         
         # Streaming Payload: Stays alive remotely and squirts JSON updates at 20Hz!
@@ -580,6 +582,19 @@ while True:
         self.cmd = f"python3 -u -c \"import base64; exec(base64.b64decode('{b64}').decode())\""
 
     def run(self):
+        if self.agent_client is not None:
+            self.running = True
+            while self.running:
+                try:
+                    self.position_fetched.emit(self.agent_client.telemetry())
+                except Exception as error:
+                    if self.running:
+                        self.error.emit(f"Machine-agent telemetry failed: {error}")
+                    self.msleep(1000)
+                    continue
+                self.msleep(100)
+            return
+
         if is_local_ip(self.ip):
             self.running = True
             while self.running:
@@ -2317,6 +2332,13 @@ except Exception as e: pass"""
                                        
         if confirm == QMessageBox.StandardButton.Yes:
             print(f"[dashboard.py] Moving to Tool Setter Location: X{setter_x} Y{setter_y}")
+            agent_client = client_from_settings(self.settings)
+            if agent_client is not None:
+                try:
+                    agent_client.move_tool_setter(setter_x, setter_y, setter_z)
+                except Exception as error:
+                    self.error_signal.emit(f"Tool-setter move failed: {error}")
+                return
             py_code = f"""import linuxcnc, time, sys
 try:
     c = linuxcnc.command(); s = linuxcnc.stat()
@@ -2460,10 +2482,24 @@ except Exception as e: pass"""
                     self.error_signal.emit(str(e))
 
     def set_feed_override(self):
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.set_override("feed", self.feed_slider.value() / 100.0)
+            except Exception as error:
+                self.error_signal.emit(f"Feed override failed: {error}")
+            return
         py_code = f"import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.feedrate({self.feed_slider.value() / 100.0})\nexcept: pass"
         self._send_b64_py_cmd(py_code)
 
     def set_spindle_override(self):
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.set_override("spindle", self.spindle_slider.value() / 100.0)
+            except Exception as error:
+                self.error_signal.emit(f"Spindle override failed: {error}")
+            return
         py_code = f"import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.spindleoverride({self.spindle_slider.value() / 100.0})\nexcept: pass"
         self._send_b64_py_cmd(py_code)
 
@@ -2512,9 +2548,18 @@ except Exception as e: pass"""
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
-        if not ip or not user: return
+        agent_client = client_from_settings(self.settings)
+        if agent_client is None and (not ip or not user): return
         
         def task():
+            if agent_client is not None:
+                try:
+                    agent_client.upload_content("gcode", "active_program.ngc", content.encode("utf-8"))
+                    agent_client.open_program("active_program.ngc")
+                except Exception as error:
+                    self.error_signal.emit(f"G-code upload failed: {error}")
+                return
+
             remote_dir = f"/home/{user}/linuxcnc/nc_files"
             remote_path = f"{remote_dir}/active_program.ngc"
             
@@ -2757,6 +2802,13 @@ except Exception as e: pass"""
             except: pass
 
     def toggle_estop(self):
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.machine_command("estop_reset" if self.is_estopped else "estop")
+            except Exception as error:
+                self.error_signal.emit(f"E-stop command failed: {error}")
+            return
         if self.is_estopped:
                 
             # Send real commands to reset E-Stop ONLY
@@ -2774,6 +2826,13 @@ except Exception as e: pass"""
             return
             
         is_powered_on = self.mock_coords.get('MACHINE_ON', False)
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.machine_command("power_off" if is_powered_on else "power_on")
+            except Exception as error:
+                self.error_signal.emit(f"Power command failed: {error}")
+            return
         
         if is_powered_on:
             py_code = "import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.state(linuxcnc.STATE_OFF)\nexcept: pass"
@@ -2788,6 +2847,13 @@ except Exception as e: pass"""
 
     def override_limits(self):
         # Allow overriding even if in E-STOP, as physical limit switches force an E-STOP state!
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.machine_command("override_limits")
+            except Exception as error:
+                self.error_signal.emit(f"Limit override failed: {error}")
+            return
         py_code = "import linuxcnc, time\ntry:\n    c=linuxcnc.command()\n    c.override_limits()\n    time.sleep(0.1)\n    c.state(linuxcnc.STATE_ESTOP_RESET)\n    time.sleep(0.1)\n    c.state(linuxcnc.STATE_ON)\nexcept: pass"
         self._send_b64_py_cmd(py_code, urgent=True)
         
@@ -2798,6 +2864,13 @@ except Exception as e: pass"""
         QMessageBox.information(self, "Limits Overridden", "Limits have been overridden and machine powered ON.\n\nYou can now carefully jog the machine off the switches.")
 
     def home_axis(self, axis):
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.home_axis(axis)
+            except Exception as error:
+                self.error_signal.emit(f"Axis homing failed: {error}")
+            return
         if self.is_estopped:
             return
         
@@ -3242,7 +3315,15 @@ except Exception as e:
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
+        agent_client = client_from_settings(self.settings)
         
+        if agent_client is not None:
+            self.pos_fetcher = PositionFetcherThread(ip, user, password, agent_client)
+            self.pos_fetcher.position_fetched.connect(self.update_real_coords)
+            self.pos_fetcher.error.connect(self.show_error_message)
+            self.pos_fetcher.start()
+            return
+
         if not ip or not user: return
             
         if (HAS_PARAMIKO or is_local_ip(ip)) and not self.pos_fetcher:

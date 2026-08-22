@@ -4,6 +4,8 @@ import json
 import re
 import platform
 import base64
+from core.credentials import CredentialStore, CredentialStoreError
+from core.machine_agent import client_from_settings
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QGroupBox, QLineEdit, QPushButton, QTextEdit,
                              QLabel, QMessageBox, QApplication, QFileDialog, QInputDialog)
@@ -63,6 +65,7 @@ class MesaUtilTab(QWidget):
         self.user_input = QLineEdit(self.settings.get_setting("SSH", "username", "linuxcnc"))
         self.pass_input = QLineEdit(self.settings.get_setting("SSH", "password", ""))
         self.pass_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.pass_input.setPlaceholderText("Stored in OS credential manager")
         
         self.board_input = QLineEdit(self.settings.get_setting("MESA", "board_model", "7i76eu"))
         self.mesa_ip_input = QLineEdit(self.settings.get_setting("MESA", "ip_address", "10.10.10.10"))
@@ -81,6 +84,9 @@ class MesaUtilTab(QWidget):
         
         conn_layout.addWidget(QLabel("SSH Password:"), 1, 2)
         conn_layout.addWidget(self.pass_input, 1, 3)
+        self.credential_status = QLabel(self._credential_status_text())
+        self.credential_status.setStyleSheet("color: #8bc34a; font-style: italic;")
+        conn_layout.addWidget(self.credential_status, 2, 0, 1, 4)
         
         btn_layout = QHBoxLayout()
         self.btn_test_ssh = QPushButton("🔌 Test SSH Connection")
@@ -92,7 +98,7 @@ class MesaUtilTab(QWidget):
         btn_layout.addWidget(self.btn_test_ssh)
         btn_layout.addWidget(self.btn_save_auth)
         btn_layout.addStretch()
-        conn_layout.addLayout(btn_layout, 2, 0, 1, 4)
+        conn_layout.addLayout(btn_layout, 3, 0, 1, 4)
         conn_layout.setColumnStretch(4, 1)
         
         conn_group.setLayout(conn_layout)
@@ -114,7 +120,7 @@ class MesaUtilTab(QWidget):
         self.btn_read_net = QPushButton("🌐 Read Network Config")
         self.btn_read_net.clicked.connect(self.read_network_config)
         self.btn_scan = QPushButton("🔍 Read HMID (Mesaflash)")
-        self.btn_scan.clicked.connect(self.run_mesaflash)
+        self.btn_scan.clicked.connect(self.run_mesaflash_identify)
         self.btn_hal_show = QPushButton("🛠️ Show HAL Pins")
         self.btn_hal_show.clicked.connect(self.run_hal_show)
         self.btn_linuxcnc_status = QPushButton("📊 Show HAL Comps")
@@ -244,9 +250,21 @@ class MesaUtilTab(QWidget):
         self.status_label.setText(text)
         QApplication.processEvents()  # Force the UI to refresh immediately
 
+    def _credential_status_text(self):
+        """Describe whether the OS keyring is available without exposing secrets."""
+        try:
+            CredentialStore()
+            return "SSH password storage: OS credential manager"
+        except CredentialStoreError:
+            return "SSH password storage unavailable: install keyring support"
+
     def run_custom_cmd(self):
         cmd = self.custom_cmd_input.text().strip()
         if not cmd: return
+        if client_from_settings(self.settings) is not None:
+            self.console.append("Custom shell commands are disabled in secure agent mode.")
+            self.set_status("Use an approved machine-agent operation instead.")
+            return
         
         use_sudo = False
         if cmd.startswith("sudo "):
@@ -256,12 +274,16 @@ class MesaUtilTab(QWidget):
         self.execute_remote_command(cmd, use_sudo=use_sudo)
 
     def save_credentials(self):
-        self.settings.save_setting("SSH", "username", self.user_input.text())
-        self.settings.save_setting("SSH", "password", self.pass_input.text())
-        self.settings.save_setting("SSH", "ip_address", self.ip_input.text())
-        self.settings.save_setting("MESA", "board_model", self.board_input.text())
-        self.settings.save_setting("MESA", "ip_address", self.mesa_ip_input.text())
-        QMessageBox.information(self, "Saved", "Settings saved successfully to settings.ini.")
+        try:
+            self.settings.save_setting("SSH", "username", self.user_input.text())
+            self.settings.save_setting("SSH", "password", self.pass_input.text())
+            self.settings.save_setting("SSH", "ip_address", self.ip_input.text())
+            self.settings.save_setting("MESA", "board_model", self.board_input.text())
+            self.settings.save_setting("MESA", "ip_address", self.mesa_ip_input.text())
+            self.credential_status.setText(self._credential_status_text())
+            QMessageBox.information(self, "Saved", "Settings saved. The SSH password is stored in the OS credential manager.")
+        except RuntimeError as error:
+            QMessageBox.critical(self, "Secure Storage Failed", str(error))
 
     def execute_remote_command(self, cmd, use_sudo=False):
         ip = self.ip_input.text()
@@ -327,18 +349,81 @@ class MesaUtilTab(QWidget):
 
     def run_hal_show(self):
         self.set_status("Initializing HAL pin dump. This will take a few seconds...")
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                result = agent_client.show_hal_pins()
+                out = result.get("output", "")
+                err = result.get("error", "")
+                if out:
+                    self.console.append(out)
+                if err:
+                    self.console.append(f"[ERROR]:\n{err}")
+                if "Component Pins:" in out:
+                    self.btn_import.setEnabled(True)
+            except Exception as error:
+                self.console.append(f"[AGENT FAILED]: {error}")
+            return
         out, err = self.execute_remote_command("halcmd show pin")
+
+    def run_mesaflash_identify(self):
+        """Identify the Mesa board through the typed agent operation when enrolled."""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is None:
+            self.run_mesaflash()
+            return
+        try:
+            result = agent_client.identify_mesa(self.board_input.text().strip(), self.mesa_ip_input.text().strip())
+            if result.get("output"):
+                self.console.append(result["output"])
+            if result.get("error"):
+                self.console.append(f"[ERROR]:\n{result['error']}")
+        except Exception as error:
+            self.console.append(f"[AGENT FAILED]: {error}")
         if out and "Component Pins:" in out:
             self.btn_import.setEnabled(True)
 
     def test_ssh(self):
         self.console.clear()
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            self.set_status("Testing secure machine-agent connection...")
+            try:
+                status = agent_client.get("/v1/lifecycle")
+                self.console.append("Secure machine-agent connection successful.")
+                self.console.append(f"LinuxCNC running: {status.get('running', False)}")
+                agent_status = agent_client.agent_status()
+                self.console.append(f"Agent version: {agent_status.get('agent_version', 'unknown')}")
+                self.console.append(f"Role mode: {agent_status.get('role_mode', 'unknown')}")
+                self.console.append("Capabilities: " + ", ".join(agent_status.get("capabilities", [])))
+                self._apply_agent_capabilities(agent_status.get("capabilities", []))
+                QMessageBox.information(self, "Success", "Secure machine-agent connection established.")
+            except Exception as error:
+                self.console.append(f"Machine-agent connection failed: {error}")
+                QMessageBox.critical(self, "Error", "Secure machine-agent connection failed.")
+            return
         self.set_status("Testing SSH Connection...")
         out, err = self.execute_remote_command("echo 'SSH Connection Successful!'")
         if out and "Successful" in out:
             QMessageBox.information(self, "Success", "SSH Connection Established!")
         else:
             QMessageBox.critical(self, "Error", "SSH Connection Failed. Check console.")
+
+    def _apply_agent_capabilities(self, capabilities):
+        """Disable secure UI actions the connected agent does not advertise."""
+        capability_map = {
+            "btn_scan": "mesa_identification",
+            "btn_flash": "mesa_firmware",
+            "btn_backup_config": "backup_transfer",
+            "btn_restore_config": "backup_transfer",
+            "btn_backup_nc": "backup_transfer",
+            "btn_upload_nc": "file_upload",
+        }
+        available = set(capabilities)
+        for button_name, capability in capability_map.items():
+            button = getattr(self, button_name, None)
+            if button is not None:
+                button.setEnabled(capability in available)
 
     def ping_mesa(self):
         mesa_ip = self.mesa_ip_input.text()
@@ -574,6 +659,10 @@ class MesaUtilTab(QWidget):
         self.set_status("Ready.")
 
     def backup_linuxcnc_config(self):
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            self._download_secure_archive(agent_client, "config", "linuxcnc_configs_backup.tar.gz")
+            return
         # Ask for the remote path
         default_remote_path = self.settings.get_setting("PATHS", "last_remote_config_dir", "~/linuxcnc/configs")
         remote_path, ok = QInputDialog.getText(self, "Backup Configuration", 
@@ -636,6 +725,10 @@ class MesaUtilTab(QWidget):
         self.set_status("Ready.")
 
     def backup_nc_files(self):
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            self._download_secure_archive(agent_client, "gcode", "nc_files_backup.tar.gz")
+            return
         # Ask for the remote path
         default_remote_path = self.settings.get_setting("PATHS", "last_remote_nc_dir", "~/linuxcnc/nc_files")
         remote_path, ok = QInputDialog.getText(self, "Backup NC Files", 
@@ -697,6 +790,7 @@ class MesaUtilTab(QWidget):
         self.set_status("Ready.")
 
     def restore_linuxcnc_config(self):
+        agent_client = client_from_settings(self.settings)
         backup_dir = os.path.join(os.getcwd(), "backups")
         if not os.path.exists(backup_dir):
             os.makedirs(backup_dir, exist_ok=True)
@@ -707,6 +801,25 @@ class MesaUtilTab(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "Select Config Backup to Restore", last_dir, "Archives (*.tar.gz);;All Files (*)")
         if not path: return
         self.settings.save_setting("PATHS", "last_backup_dir", os.path.dirname(path))
+
+        if agent_client is not None:
+            confirm = QMessageBox.question(
+                self,
+                "Confirm Secure Restore",
+                f"Restore '{os.path.basename(path)}' to the LinuxCNC configuration root?\n\n"
+                "LinuxCNC must be stopped. The current configuration will be replaced transactionally.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if confirm != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                with open(path, "rb") as archive_file:
+                    content = archive_file.read(16 * 1024 * 1024 + 1)
+                result = agent_client.restore_backup_archive("config", content)
+                QMessageBox.information(self, "Restore Complete", result.get("kind", "Configuration") + " backup restored successfully.")
+            except Exception as error:
+                QMessageBox.critical(self, "Restore Failed", f"Secure configuration restore failed:\n{error}")
+            return
 
         confirm = QMessageBox.question(self, "Confirm Restore", 
                                        f"Are you sure you want to restore the configuration from '{os.path.basename(path)}'?\n\nThis will overwrite existing files on the remote machine with the contents of the archive.", 
@@ -774,6 +887,26 @@ class MesaUtilTab(QWidget):
                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         
         if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            self.set_status("Flashing firmware through secure machine agent...")
+            try:
+                with open(path, "rb") as firmware_file:
+                    result = agent_client.flash_firmware(
+                        board,
+                        mesa_ip,
+                        filename,
+                        firmware_file.read(16 * 1024 * 1024 + 1),
+                    )
+                self.console.append(result.get("output", ""))
+                if result.get("error"):
+                    self.console.append(f"[ERROR]:\n{result['error']}")
+                QMessageBox.information(self, "Firmware Complete", "Mesa firmware was flashed and the FPGA was reloaded.")
+            except Exception as error:
+                QMessageBox.critical(self, "Flash Failed", f"Secure firmware operation failed:\n{error}")
+            self.set_status("Ready.")
             return
 
         self.set_status("Uploading firmware file to remote machine...")
@@ -1096,3 +1229,45 @@ echo "OS Optimization Complete!"
             QMessageBox.information(self, "Success", f"User '{user}' can now execute sudo commands without a password!\n\nYou will no longer be prompted when running hardware diagnostics or network configs.")
             
         self.set_status("Ready.")
+
+    def _save_secure_backup_manifest(self, agent_client, kind, default_name):
+        """Save a checksum manifest for secure backup verification."""
+        backup_dir = os.path.join(os.getcwd(), "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Secure Backup Manifest",
+            os.path.join(backup_dir, default_name),
+            "JSON Files (*.json)",
+        )
+        if not path:
+            return
+        try:
+            manifest = agent_client.backup_manifest(kind)
+            with open(path, "w", encoding="utf-8") as manifest_file:
+                json.dump(manifest, manifest_file, indent=2)
+            self.console.append(f"Secure {kind} backup manifest saved to {path}")
+            QMessageBox.information(self, "Manifest Saved", "Backup inventory and checksums were saved locally.")
+        except Exception as error:
+            QMessageBox.critical(self, "Backup Manifest Failed", str(error))
+
+    def _download_secure_archive(self, agent_client, kind, default_name):
+        """Download a verified secure archive and save it locally."""
+        backup_dir = os.path.join(os.getcwd(), "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Secure Backup",
+            os.path.join(backup_dir, default_name),
+            "Archives (*.tar.gz)",
+        )
+        if not path:
+            return
+        try:
+            content, checksum = agent_client.download_backup_archive(kind)
+            with open(path, "wb") as archive_file:
+                archive_file.write(content)
+            self.console.append(f"Secure {kind} backup saved to {path} ({checksum})")
+            QMessageBox.information(self, "Backup Saved", f"Backup saved successfully.\nSHA-256: {checksum}")
+        except Exception as error:
+            QMessageBox.critical(self, "Backup Failed", str(error))

@@ -1,14 +1,54 @@
 import configparser
 import os
 import json
+from core.credentials import CredentialStore, CredentialStoreError
 
 class SettingsManager:
-    def __init__(self, filename="settings.ini"):
-        self.filename = filename
+    def __init__(self, filename="settings.ini", credential_store=None):
+        self.filename = os.fspath(filename)
+        self.credential_store = credential_store
         self.config = configparser.ConfigParser()
         self._migrate_from_json()
         self._ensure_file_exists()
         self.config.read(self.filename)
+        self._migrate_legacy_ssh_password()
+
+    @staticmethod
+    def _secret_account(section, key):
+        """Return the stable keyring account used for one settings secret."""
+        return f"{section.lower()}_{key.lower()}"
+
+    def _get_credential_store(self):
+        """Return the injected store or construct the OS-backed default."""
+        return self.credential_store or CredentialStore()
+
+    def _migrate_legacy_ssh_password(self):
+        """Move a legacy plaintext SSH password into the OS keyring once."""
+        legacy_password = self.config.get("SSH", "password", fallback="")
+        if not legacy_password:
+            return
+        try:
+            store = self._get_credential_store()
+            account = self._secret_account("SSH", "password")
+            if store.get(account) is None:
+                store.save(account, legacy_password)
+            self.config["SSH"]["password"] = ""
+            self._write_config()
+        except CredentialStoreError:
+            # Keep the legacy value readable until secure storage is available.
+            return
+
+    def save_secret(self, account, secret):
+        """Store a secret outside the INI file using the OS credential store."""
+        CredentialStore().save(account, secret)
+
+    def get_secret(self, account):
+        """Retrieve a secret from the OS credential store, if enrolled."""
+        return CredentialStore().get(account)
+
+    def delete_secret(self, account):
+        """Delete a secret from the OS credential store."""
+        CredentialStore().delete(account)
 
     def _migrate_from_json(self):
         json_file = self.filename.replace('.ini', '.json')
@@ -109,14 +149,31 @@ class SettingsManager:
                 self.config.write(f)
 
     def get_setting(self, section, key, default=None):
+        if section.upper() == "SSH" and key.lower() == "password":
+            try:
+                secret = self._get_credential_store().get(self._secret_account(section, key))
+                if secret is not None:
+                    return secret
+            except CredentialStoreError:
+                pass
         try:
             return self.config[section][key]
         except KeyError:
             return default
 
     def save_setting(self, section, key, value):
+        if section.upper() == "SSH" and key.lower() == "password":
+            try:
+                self._get_credential_store().save(self._secret_account(section, key), str(value))
+                value = ""
+            except CredentialStoreError as error:
+                raise RuntimeError("Unable to store SSH password securely.") from error
         if section not in self.config:
             self.config[section] = {}
         self.config[section][key] = str(value)
+        self._write_config()
+
+    def _write_config(self):
+        """Write the non-secret INI configuration to disk."""
         with open(self.filename, 'w') as f:
             self.config.write(f)

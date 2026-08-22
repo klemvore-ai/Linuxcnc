@@ -4,6 +4,7 @@ import subprocess
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QInputDialog)
 from PyQt6.QtCore import Qt
+from core.machine_agent import client_from_settings
 
 LOCAL_IPS = ['localhost', '127.0.0.1']
 try:
@@ -153,12 +154,25 @@ class ToolTableTab(QWidget):
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
+        agent_client = client_from_settings(self.settings)
+        mach_name = self.settings.get_setting('MACHINE_CONFIG', 'name', 'CNCFusion')
+
+        if agent_client is not None:
+            try:
+                result = agent_client.read_tool_table(f"{mach_name}/tool.tbl")
+                out = result.get("content", "")
+                if result.get("error"):
+                    raise RuntimeError(result["error"])
+                self._populate_table(out)
+                return
+            except Exception as error:
+                QMessageBox.critical(self, "Load Failed", f"Secure tool-table load failed:\n{error}")
+                return
         
         if not ip or not user:
             QMessageBox.warning(self, "Missing Credentials", "Please set SSH credentials in Settings.")
             return
 
-        mach_name = self.settings.get_setting('MACHINE_CONFIG', 'name', 'CNCFusion')
         default_path = self.settings.get_setting("PATHS", "last_tool_table_path", f"~/linuxcnc/configs/{mach_name}/tool.tbl")
         
         remote_path, ok = QInputDialog.getText(self, "Load Tool Table", "Enter remote tool.tbl path:", text=default_path)
@@ -188,53 +202,61 @@ class ToolTableTab(QWidget):
                 QMessageBox.warning(self, "Empty/Not Found", f"No tool table found or file is empty at {remote_path}")
                 return
 
-            self._loading = True
-            self.table.setRowCount(0)
-            for line in out.splitlines():
-                line = line.strip()
-                if not line or line.startswith(';'): continue
-                
-                parts = line.split(';', 1)
-                data_part = parts[0].strip()
-                comment_part = parts[1].strip() if len(parts) > 1 else ""
-                
-                t = p = z = d = "0"
-                for token in data_part.split():
-                    token = token.upper()
-                    if token.startswith('T'): t = token[1:]
-                    elif token.startswith('P'): p = token[1:]
-                    elif token.startswith('Z'): z = token[1:]
-                    elif token.startswith('D'): d = token[1:]
-                
-                row = self.table.rowCount()
-                self.table.insertRow(row)
-                self.table.setItem(row, 0, QTableWidgetItem(t))
-                self.table.setItem(row, 1, QTableWidgetItem(p))
-                self.table.setItem(row, 2, QTableWidgetItem(z))
-                self.table.setItem(row, 3, QTableWidgetItem(d))
-                self.table.setItem(row, 4, QTableWidgetItem(comment_part))
-                
-            self._loading = False
-            self.clear_unsaved()
+            self._populate_table(out)
             QMessageBox.information(self, "Success", "Tool table loaded successfully!")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load tool table:\n{e}")
+
+    def _populate_table(self, content):
+        """Populate the tool table grid from standard LinuxCNC tool-table text."""
+        if not content:
+            raise ValueError("Tool table is empty.")
+        self._loading = True
+        self.table.setRowCount(0)
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith(';'):
+                continue
+            parts = line.split(';', 1)
+            data_part = parts[0].strip()
+            comment_part = parts[1].strip() if len(parts) > 1 else ""
+            values = {"T": "0", "P": "0", "Z": "0", "D": "0"}
+            for token in data_part.split():
+                token = token.upper()
+                if token and token[0] in values:
+                    values[token[0]] = token[1:]
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(values["T"]))
+            self.table.setItem(row, 1, QTableWidgetItem(values["P"]))
+            self.table.setItem(row, 2, QTableWidgetItem(values["Z"]))
+            self.table.setItem(row, 3, QTableWidgetItem(values["D"]))
+            self.table.setItem(row, 4, QTableWidgetItem(comment_part))
+        self._loading = False
+        self.clear_unsaved()
 
     def save_table(self):
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
+        agent_client = client_from_settings(self.settings)
+        mach_name = self.settings.get_setting('MACHINE_CONFIG', 'name', 'CNCFusion')
         
-        if not ip or not user:
+        if agent_client is not None:
+            remote_path = f"{mach_name}/tool.tbl"
+        else:
+            remote_path = ""
+        
+        if agent_client is None and (not ip or not user):
             QMessageBox.warning(self, "Missing Credentials", "Please set SSH credentials in Settings.")
             return
 
-        mach_name = self.settings.get_setting('MACHINE_CONFIG', 'name', 'CNCFusion')
         default_path = self.settings.get_setting("PATHS", "last_tool_table_path", f"~/linuxcnc/configs/{mach_name}/tool.tbl")
         
-        remote_path, ok = QInputDialog.getText(self, "Save Tool Table", "Enter remote tool.tbl path:", text=default_path)
-        if not ok or not remote_path:
-            return
+        if agent_client is None:
+            remote_path, ok = QInputDialog.getText(self, "Save Tool Table", "Enter remote tool.tbl path:", text=default_path)
+            if not ok or not remote_path:
+                return
             
         self.settings.save_setting("PATHS", "last_tool_table_path", remote_path)
         
@@ -254,6 +276,16 @@ class ToolTableTab(QWidget):
         content = "\\n".join(lines) + "\\n"
         
         try:
+            if agent_client is not None:
+                agent_client.upload_content(
+                    "config",
+                    f"{mach_name}/tool.tbl",
+                    content.replace("\\n", "\n").encode("utf-8"),
+                )
+                agent_client.reload_tool_table()
+                self.clear_unsaved()
+                QMessageBox.information(self, "Success", "Tool table securely staged on the machine.")
+                return
             if is_local_ip(ip):
                 with open(os.path.expanduser(remote_path), 'w') as f:
                     f.write(content.replace("\\n", "\n"))

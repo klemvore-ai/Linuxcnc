@@ -1,0 +1,4 @@
+PyQt6>=6.6
+keyring>=25.0
+paramiko>=3.4
+psutil>=5.9

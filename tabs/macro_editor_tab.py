@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QInputDialog, QGraphicsView, QGraphicsScene, QSplitter, QLineEdit)
 from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath, QSyntaxHighlighter, QTextCharFormat, QFont
+from core.machine_agent import client_from_settings
 
 LOCAL_IPS = ['localhost', '127.0.0.1']
 try:
@@ -294,6 +295,15 @@ class MacroEditorTab(QWidget):
 
     def refresh_file_list(self):
         ip, user, password = self.get_ssh_creds()
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                self.file_list.clear()
+                for filename in agent_client.list_gcode().get("files", []):
+                    self.file_list.addItem(filename)
+            except Exception as error:
+                QMessageBox.critical(self, "Error", f"Failed to list secure G-code files:\n{error}")
+            return
         if not ip or not user:
             QMessageBox.warning(self, "No SSH", "Please configure SSH credentials in Settings.")
             return
@@ -357,6 +367,22 @@ class MacroEditorTab(QWidget):
         remote_path = f"{remote_dir}/{filename}"
         
         ip, user, password = self.get_ssh_creds()
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                result = agent_client.read_gcode(filename)
+                if result.get("error"):
+                    raise RuntimeError(result["error"])
+                self._loading = True
+                self.editor.setPlainText(result.get("content", ""))
+                self.current_file = filename
+                self.lbl_current_file.setText(f"Editing: {filename}")
+                self.clear_unsaved()
+                self._loading = False
+                self.update_preview()
+            except Exception as error:
+                QMessageBox.critical(self, "Error", f"Failed to read secure G-code file:\n{error}")
+            return
         cmd = f"cat {remote_path}"
         
         try:
@@ -393,6 +419,16 @@ class MacroEditorTab(QWidget):
         content = self.editor.toPlainText()
         
         ip, user, password = self.get_ssh_creds()
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.upload_content("gcode", self.current_file, content.encode("utf-8"))
+                self.clear_unsaved()
+                QMessageBox.information(self, "Success", f"Saved securely to {self.current_file}")
+                self.refresh_file_list()
+            except Exception as error:
+                QMessageBox.critical(self, "Error", f"Failed to save secure G-code file:\n{error}")
+            return
         
         remote_parent = remote_path.rsplit('/', 1)[0]
         try:

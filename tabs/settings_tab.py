@@ -10,6 +10,12 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFo
                              QPushButton, QGroupBox, QLabel, QComboBox, QLineEdit, QMessageBox, QScrollArea, QInputDialog, QDialog, QTextEdit, QCheckBox)
 from PyQt6.QtCore import pyqtSignal, QTimer, QUrl, QEvent, Qt
 from PyQt6.QtGui import QDesktopServices
+from core.lifecycle import LinuxCNCLifecycle
+from core.machine_agent import client_from_settings
+from core.remote_lifecycle import RemoteLinuxCNCBackend
+from core.config_model import MachineConfig
+from core.hal_documents import HALDocumentComposer
+from tabs.setup_wizard import SetupWizard
 
 LOCAL_IPS = ['localhost', '127.0.0.1']
 try:
@@ -439,6 +445,14 @@ class SettingsTab(QWidget):
         self.btn_generate_configs = QPushButton("✨ Generate Base INI & HAL Files")
         self.btn_generate_configs.setStyleSheet("background-color: #8e44ad; color: white; font-weight: bold; padding: 6px; border-radius: 4px;")
         self.btn_generate_configs.clicked.connect(self.generate_base_configs)
+
+        self.btn_validate_model = QPushButton("🔎 Validate Machine Model")
+        self.btn_validate_model.setStyleSheet("background-color: #455a64; color: white; font-weight: bold; padding: 6px; border-radius: 4px;")
+        self.btn_validate_model.clicked.connect(self.validate_machine_model)
+
+        self.btn_setup_wizard = QPushButton("🧭 Open Setup Wizard")
+        self.btn_setup_wizard.setStyleSheet("background-color: #00695c; color: white; font-weight: bold; padding: 6px; border-radius: 4px;")
+        self.btn_setup_wizard.clicked.connect(self.open_setup_wizard)
         
         self.btn_launch_linuxcnc = QPushButton("🚀 Launch LinuxCNC Remotely")
         self.btn_launch_linuxcnc.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 6px; border-radius: 4px;")
@@ -465,6 +479,8 @@ class SettingsTab(QWidget):
         
         btn_layout_wizard = QHBoxLayout()
         btn_layout_wizard.addWidget(self.btn_generate_configs)
+        btn_layout_wizard.addWidget(self.btn_validate_model)
+        btn_layout_wizard.addWidget(self.btn_setup_wizard)
         btn_layout_wizard.addWidget(self.btn_launch_linuxcnc)
         btn_layout_wizard.addWidget(self.btn_vnc)
         btn_layout_wizard.addWidget(self.btn_pull_log)
@@ -642,6 +658,9 @@ class SettingsTab(QWidget):
         spindle_pid_form.addRow("D (Derivative):", self.pid_d)
         spindle_pid_form.addRow("FF0 (Feedforward 0):", self.pid_ff0)
         spindle_pid_form.addRow("FF1 (Feedforward 1):", self.pid_ff1)
+        self.btn_apply_pid_live = QPushButton("Apply PID to Running LinuxCNC")
+        self.btn_apply_pid_live.clicked.connect(self.apply_pid_live)
+        spindle_pid_form.addRow(self.btn_apply_pid_live)
         spindle_pid_group.setLayout(spindle_pid_form)
         spindle_pid_group.setEnabled(self.chk_spindle_closed_loop.isChecked())
         self.chk_spindle_closed_loop.toggled.connect(spindle_pid_group.setEnabled)
@@ -681,6 +700,10 @@ class SettingsTab(QWidget):
         self.btn_push_settings = QPushButton("📤 Push Settings.ini to Machine")
         self.btn_push_settings.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold; padding: 10px; border-radius: 4px;")
         self.btn_push_settings.clicked.connect(self.push_settings)
+
+        self.btn_activate_settings = QPushButton("✅ Activate Staged Settings")
+        self.btn_activate_settings.setStyleSheet("background-color: #6a1b9a; color: white; font-weight: bold; padding: 10px; border-radius: 4px;")
+        self.btn_activate_settings.clicked.connect(self.activate_staged_settings)
         
         self.btn_install_remote = QPushButton("📦 Install / Update App on Remote Machine")
         self.btn_install_remote.setStyleSheet("background-color: #f39c12; color: black; font-weight: bold; padding: 10px; border-radius: 4px;")
@@ -699,12 +722,15 @@ class SettingsTab(QWidget):
         sync_layout = QVBoxLayout()
         sync_layout.setSpacing(10)
         sync_layout.addWidget(self.btn_generate_configs)
+        sync_layout.addWidget(self.btn_validate_model)
+        sync_layout.addWidget(self.btn_setup_wizard)
         sync_layout.addWidget(self.btn_launch_linuxcnc)
         sync_layout.addWidget(self.btn_stop_linuxcnc)
         sync_layout.addWidget(self.save_btn)
         
         sync_layout.addWidget(self.btn_pull_settings)
         sync_layout.addWidget(self.btn_push_settings)
+        sync_layout.addWidget(self.btn_activate_settings)
         sync_layout.addWidget(self.btn_install_remote)
 
         sync_layout_widget = QGroupBox("Global Actions")
@@ -1010,16 +1036,39 @@ class SettingsTab(QWidget):
         ip = self.sm.get_setting("SSH", "ip_address", "")
         user = self.sm.get_setting("SSH", "username", "")
         password = self.sm.get_setting("SSH", "password", "")
-        if not ip or not user:
+        agent_client = client_from_settings(self.sm)
+        if agent_client is None and (not ip or not user):
             QMessageBox.warning(self, "Push Failed", "SSH credentials are not configured. Please set them in the Mesa Utilities tab.")
             return
         self.save_settings()
+        local_file = os.path.join(os.getcwd(), "settings.ini")
+
+        if agent_client is not None:
+            reply = QMessageBox.question(
+                self,
+                "Confirm Secure Deployment",
+                "Stage the current settings as settings_pending.ini on the machine?\n\n"
+                "The physical operator must approve the pending configuration before it becomes active.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                agent_client.upload_file("config", "settings_pending.ini", local_file)
+                QMessageBox.information(
+                    self,
+                    "Sync Success",
+                    "Settings were securely uploaded and staged for operator approval.",
+                )
+            except Exception as error:
+                QMessageBox.critical(self, "Push Failed", f"Secure settings upload failed:\n{error}")
+            return
+
         remote_base = self.sm.get_setting("PATHS", "last_remote_cncfusion_dir", "~/CNCFusion")
         remote_dir, ok = QInputDialog.getText(self, "Push Settings", "Enter the path to the CNC Fusion folder on the remote machine:", text=remote_base)
         if not ok or not remote_dir: return
         self.sm.save_setting("PATHS", "last_remote_cncfusion_dir", remote_dir)
         remote_file = f"{remote_dir.rstrip('/')}/settings_pending.ini"
-        local_file = os.path.join(os.getcwd(), "settings.ini")
         try:
             if HAS_PARAMIKO:
                 ssh = paramiko.SSHClient()
@@ -1036,12 +1085,38 @@ class SettingsTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Sync Error", f"Failed to push settings.ini:\n{e}")
 
+    def activate_staged_settings(self):
+        """Request explicit activation of settings_pending.ini through the agent."""
+        agent_client = client_from_settings(self.sm)
+        if agent_client is None:
+            QMessageBox.warning(self, "Activation Unavailable", "Secure machine-agent settings are not configured.")
+            return
+        reply = QMessageBox.question(
+            self,
+            "Confirm Settings Activation",
+            "Activate settings_pending.ini as settings.ini?\n\n"
+            "LinuxCNC must be stopped. The current settings.ini will be backed up first.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            agent_client.activate_pending("settings_pending.ini", "settings.ini")
+            QMessageBox.information(
+                self,
+                "Settings Activated",
+                "The staged settings are now active. Restart LinuxCNC to use them.",
+            )
+        except Exception as error:
+            QMessageBox.critical(self, "Activation Failed", f"Settings activation failed:\n{error}")
+
     def install_app_remote(self):
         ip = self.sm.get_setting("SSH", "ip_address", "")
         user = self.sm.get_setting("SSH", "username", "")
         password = self.sm.get_setting("SSH", "password", "")
+        agent_client = client_from_settings(self.sm)
         
-        if not ip or not user:
+        if agent_client is None and (not ip or not user):
             QMessageBox.warning(self, "Install Failed", "SSH credentials are not configured.")
             return
             
@@ -1070,6 +1145,28 @@ class SettingsTab(QWidget):
                         tar.add(full_path, arcname=arcname)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to package app locally:\n{e}")
+            return
+
+        if agent_client is not None:
+            try:
+                with open(tar_path, "rb") as update_file:
+                    content = update_file.read(32 * 1024 * 1024 + 1)
+                if len(content) > 32 * 1024 * 1024:
+                    raise ValueError("Application update archive is too large.")
+                result = agent_client.stage_application_update(content)
+                QMessageBox.information(
+                    self,
+                    "Update Staged",
+                    "Application update was securely staged on the LinuxCNC machine.\n\n"
+                    "A separate local operator approval and installation step is required.",
+                )
+            except Exception as error:
+                QMessageBox.critical(self, "Update Failed", f"Secure application staging failed:\n{error}")
+            finally:
+                if os.path.exists(tar_path):
+                    os.remove(tar_path)
+                if hasattr(self.window(), 'sys_monitor_lbl'):
+                    self.window().sys_monitor_lbl.setText("System Diagnostics Active")
             return
             
         if hasattr(self.window(), 'sys_monitor_lbl'):
@@ -1166,6 +1263,67 @@ class SettingsTab(QWidget):
                 else: out_lines.append(line)
             else: out_lines.append(line)
         return out_lines
+
+    def validate_machine_model(self):
+        """Validate saved settings through the hardware-neutral machine model."""
+        try:
+            config = MachineConfig.from_settings(self.sm)
+            errors = config.validate()
+            if errors:
+                QMessageBox.warning(
+                    self,
+                    "Machine Model Needs Attention",
+                    "\n".join(f"- {error}" for error in errors),
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Machine Model Valid",
+                    "The saved machine settings form a valid LinuxCNC model.",
+                )
+        except (TypeError, ValueError) as error:
+            QMessageBox.critical(self, "Validation Failed", str(error))
+
+    def open_setup_wizard(self):
+        """Open the additive setup wizard using the existing settings manager."""
+        wizard = SetupWizard(self.sm, self)
+        if wizard.exec():
+            self.reload_ui_from_settings()
+
+    def apply_pid_live(self):
+        """Apply named spindle PID values through the secure agent only."""
+        agent_client = client_from_settings(self.sm)
+        if agent_client is None:
+            QMessageBox.warning(self, "Live PID Unavailable", "Secure machine-agent settings are required for live PID tuning.")
+            return
+        reply = QMessageBox.question(
+            self,
+            "Confirm Live PID Tuning",
+            "Apply the current spindle PID values to the running LinuxCNC machine?\n\n"
+            "LinuxCNC must be running and idle.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        values = {
+            "p": self.pid_p.value(),
+            "i": self.pid_i.value(),
+            "d": self.pid_d.value(),
+            "ff0": self.pid_ff0.value(),
+            "ff1": self.pid_ff1.value(),
+        }
+        applied = []
+        try:
+            for field, value in values.items():
+                agent_client.set_pid(field, value)
+                applied.append(field)
+            QMessageBox.information(self, "PID Applied", "Applied PID fields: " + ", ".join(applied))
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "PID Partially Applied",
+                f"Applied fields: {', '.join(applied) or '(none)'}\n\n{error}",
+            )
 
     def generate_base_configs(self):
         name = self.mach_name_input.text().strip().replace(" ", "_")
@@ -1687,14 +1845,24 @@ class SettingsTab(QWidget):
         gui_path = os.path.join(export_dir, "cncfusion_gui.py")
         
         try:
+            hal_composer = HALDocumentComposer(export_dir)
+            existing_postgui = hal_composer.load_postgui()
+            hal_artifacts = hal_composer.compose(
+                "\n".join(hal_content),
+                "\n".join(blueprint_hal),
+                existing_postgui,
+            )
             with open(ini_path, 'w', newline='\n') as f: 
                 f.write("\n".join(ini_content))
-            with open(hal_path, 'w', newline='\n') as f: 
-                f.write("\n".join(hal_content))
-            with open(blueprint_path, 'w', newline='\n') as f: 
-                f.write("\n".join(blueprint_hal))
-            with open(postgui_path, 'w', newline='\n') as f:
-                f.write("\n".join(postgui_hal))
+            hal_composer.artifact_path(os.path.basename(hal_path)).write_text(
+                hal_artifacts["core.hal"], encoding='utf-8', newline='\n'
+            )
+            hal_composer.artifact_path(os.path.basename(blueprint_path)).write_text(
+                hal_artifacts["blueprint.hal"], encoding='utf-8', newline='\n'
+            )
+            hal_composer.artifact_path(os.path.basename(postgui_path)).write_text(
+                hal_artifacts["custom_postgui.hal"], encoding='utf-8', newline='\n'
+            )
             with open(tool_tbl_path, 'w', newline='\n') as f:
                 f.write("\n".join(tool_tbl))
             with open(var_path, 'w', newline='\n') as f:
@@ -1724,6 +1892,35 @@ class SettingsTab(QWidget):
         ip = self.sm.get_setting("SSH", "ip_address", "")
         user = self.sm.get_setting("SSH", "username", "")
         password = self.sm.get_setting("SSH", "password", "")
+        agent_client = client_from_settings(self.sm)
+
+        if agent_client is not None:
+            reply = QMessageBox.question(
+                self,
+                "Confirm Secure Configuration Deployment",
+                f"Stage the reviewed configuration for '{mach_name}' through the secure machine agent?\n\n"
+                "INI, HAL, tool-table, and variable files will be uploaded. Existing custom_postgui.hal will be preserved.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            allowed_suffixes = {".ini", ".hal", ".tbl", ".var"}
+            try:
+                uploaded = []
+                for filename in sorted(os.listdir(local_dir)):
+                    local_path = os.path.join(local_dir, filename)
+                    if os.path.isfile(local_path) and os.path.splitext(filename)[1].lower() in allowed_suffixes:
+                        agent_client.upload_file("config", f"{mach_name}/{filename}", local_path)
+                        uploaded.append(filename)
+                QMessageBox.information(
+                    self,
+                    "Deployment Staged",
+                    "Securely staged files:\n\n" + "\n".join(uploaded) +
+                    "\n\nThe operator must approve activation on the LinuxCNC machine.",
+                )
+            except Exception as error:
+                QMessageBox.critical(self, "Deployment Failed", f"Secure configuration deployment failed:\n{error}")
+            return
         
         if not ip or not user:
             QMessageBox.warning(self, "Deploy Failed", "SSH credentials are not configured. Please set them in the Mesa Utilities tab.")
@@ -1775,8 +1972,9 @@ class SettingsTab(QWidget):
         ip = self.sm.get_setting("SSH", "ip_address", "")
         user = self.sm.get_setting("SSH", "username", "")
         password = self.sm.get_setting("SSH", "password", "")
+        agent_client = client_from_settings(self.sm)
         
-        if not ip or not user:
+        if agent_client is None and (not ip or not user):
             QMessageBox.warning(self, "Launch Failed", "SSH credentials are not configured. Please set them in the Mesa Utilities tab.")
             return
 
@@ -1792,6 +1990,18 @@ class SettingsTab(QWidget):
             
         # Ensure absolute path expansion for the shell command
         abs_ini_path = ini_path.replace("~/", f"/home/{user}/", 1) if ini_path.startswith("~/") else ini_path
+
+        if agent_client is not None:
+            try:
+                lifecycle = LinuxCNCLifecycle(RemoteLinuxCNCBackend(agent_client))
+                result = lifecycle.start(abs_ini_path)
+                if result.success:
+                    QMessageBox.information(self, "LinuxCNC Started", result.message)
+                else:
+                    QMessageBox.critical(self, "Launch Failed", result.message)
+            except Exception as error:
+                QMessageBox.critical(self, "Launch Failed", f"Machine agent request failed: {error}")
+            return
         
         # Check if LinuxCNC is already running to avoid stealing control from physical operator
         check_cmd = "pgrep linuxcnc"
@@ -1924,6 +2134,21 @@ cat /tmp/linuxcnc_launch.log
         ip = self.sm.get_setting("SSH", "ip_address", "")
         user = self.sm.get_setting("SSH", "username", "")
         password = self.sm.get_setting("SSH", "password", "")
+        agent_client = client_from_settings(self.sm)
+
+        if agent_client is not None:
+            try:
+                self.chk_terminal_view.setChecked(True)
+                result = agent_client.read_launch_log()
+                content = result.get("content", "")
+                if result.get("error"):
+                    content = f"[ERROR]\n{result['error']}"
+                self.terminal_view.append("\n--- Secure Launch Log ---")
+                self.terminal_view.append(content if content else "(File is empty or unavailable)")
+                self.terminal_view.verticalScrollBar().setValue(self.terminal_view.verticalScrollBar().maximum())
+            except Exception as error:
+                QMessageBox.critical(self, "Error", f"Failed to pull secure launch log:\n{error}")
+            return
         
         if not ip or not user:
             QMessageBox.warning(self, "Failed", "SSH credentials are not configured. Please set them in the Mesa Utilities tab.")
@@ -1974,8 +2199,8 @@ cat /tmp/linuxcnc_launch.log
 
     def stop_linuxcnc(self):
         confirm = QMessageBox.question(self, "Confirm Stop", 
-                                       "Are you sure you want to force kill LinuxCNC and HAL processes on the remote machine?\n\n"
-                                       "WARNING: If a physical operator is using the machine, this will forcefully shut down their control interface!", 
+                                       "Are you sure you want to shut down LinuxCNC?\n\n"
+                                       "The normal action requests a graceful shutdown so LinuxCNC can clean up safely.", 
                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if confirm != QMessageBox.StandardButton.Yes:
             return
@@ -1983,8 +2208,9 @@ cat /tmp/linuxcnc_launch.log
         ip = self.sm.get_setting("SSH", "ip_address", "")
         user = self.sm.get_setting("SSH", "username", "")
         password = self.sm.get_setting("SSH", "password", "")
+        agent_client = client_from_settings(self.sm)
         
-        if not ip or not user:
+        if agent_client is None and (not ip or not user):
             QMessageBox.warning(self, "Failed", "SSH credentials are not configured. Please set them in the Mesa Utilities tab.")
             return
 
@@ -1992,6 +2218,18 @@ cat /tmp/linuxcnc_launch.log
             self.window().sys_monitor_lbl.setText("⏳ Shutting down LinuxCNC smoothly... please wait.")
             self.window().sys_monitor_lbl.setStyleSheet("color: #f39c12; font-weight: bold; font-size: 14px; padding-right: 15px;")
             QApplication.processEvents()
+
+        if agent_client is not None:
+            try:
+                lifecycle = LinuxCNCLifecycle(RemoteLinuxCNCBackend(agent_client))
+                result = lifecycle.graceful_shutdown(timeout=15.0)
+                if result.success:
+                    QMessageBox.information(self, "LinuxCNC Stopped", result.message)
+                else:
+                    QMessageBox.critical(self, "Shutdown Failed", result.message)
+            except Exception as error:
+                QMessageBox.critical(self, "Shutdown Failed", f"Machine agent request failed: {error}")
+            return
 
         base_cmd = "if pgrep linuxcnc > /dev/null; then python3 -c 'import linuxcnc; c=linuxcnc.command(); c.exit()' 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do if ! pgrep linuxcnc > /dev/null; then break; fi; sleep 1; done; if pgrep linuxcnc > /dev/null; then killall -TERM linuxcnc linuxcncsvr milltask io 2>/dev/null; sleep 2; fi; if pgrep linuxcnc > /dev/null; then halrun -U 2>/dev/null; killall -9 linuxcnc linuxcncsvr milltask io halrun rtapi_app halcmd 2>/dev/null; rm -rf /tmp/linuxcnc.lock* /tmp/linuxcnc.print /tmp/linuxcnc.error 2>/dev/null; rm -f /dev/shm/linuxcnc* /dev/shm/rtapi* /dev/shm/hal* 2>/dev/null; fi; fi; pkill -TERM -f cncfusion_gui 2>/dev/null"
             

@@ -32,6 +32,10 @@ def is_local_ip(ip):
 
 # Import modules
 from settings_manager import SettingsManager
+from core.lifecycle import LinuxCNCLifecycle
+from core.local_lifecycle import LocalLinuxCNCBackend
+from core.machine_agent import client_from_settings
+from core.remote_lifecycle import RemoteLinuxCNCBackend
 from tabs.dashboard import MachineDashboard
 from tabs.settings_tab import SettingsTab
 from tabs.library_tab import LibraryTab
@@ -252,9 +256,20 @@ class CNCFusionApp(QMainWindow):
             if is_local_ip(ip):
                 print("Shutting down local LinuxCNC instance...")
                 try:
-                    subprocess.run(base_cmd, shell=True, timeout=12.0)
-                except subprocess.TimeoutExpired:
-                    pass
+                    lifecycle = LinuxCNCLifecycle(LocalLinuxCNCBackend())
+                    result = lifecycle.graceful_shutdown(timeout=12.0)
+                    print(result.message)
+                except Exception as e:
+                    print(f"Failed to shutdown local LinuxCNC: {e}")
+            elif client_from_settings(self.settings) is not None:
+                print("Shutting down LinuxCNC through the secure machine agent...")
+                try:
+                    agent_client = client_from_settings(self.settings)
+                    lifecycle = LinuxCNCLifecycle(RemoteLinuxCNCBackend(agent_client))
+                    result = lifecycle.graceful_shutdown(timeout=12.0)
+                    print(result.message)
+                except Exception as e:
+                    print(f"Failed to shutdown through the machine agent: {e}")
             elif HAS_PARAMIKO and ip and user:
                 print(f"Shutting down remote LinuxCNC instance at {ip}...")
                 def kill_remote():
