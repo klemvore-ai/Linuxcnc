@@ -190,6 +190,8 @@ class ToolpathViewer(QGraphicsView):
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         self.setStyleSheet("background-color: #111; border: 2px solid #444; border-radius: 4px;")
+        self.machine_units = "mm"  # The units the machine is currently operating in
+        self.display_units = "mm"  # The units the user wants to see
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         
         # Enable drag-to-pan and zoom-to-mouse
@@ -401,12 +403,21 @@ class ToolpathViewer(QGraphicsView):
             data['item'].setZValue(1) # Pop to front
             
     def update_tool_position(self, x, y, z=0.0):
+        # The toolpath is always drawn in mm, so we must scale the live position
+        # if the machine is operating in inches. The incoming x,y,z are already
+        # converted to the display units, so we just need to convert them back to
+        # the canonical 'mm' that the drawing uses.
+        scale = 1.0
+        if self.display_units == "inch": scale = 25.4
+
         try:
-            x, y, z = float(x), float(y), float(z)
+            x, y, z = float(x) * scale, float(y) * scale, float(z) * scale
         except:
             return
+
         cos_a = math.cos(math.radians(30))
         sin_a = math.sin(math.radians(30))
+
         # No offset here, it tracks the same projection mapping relative to path!
         iso_x = (x - y) * cos_a
         iso_y = -(x + y) * sin_a - z
@@ -545,6 +556,7 @@ while True:
         out['LINE'] = getattr(s, 'motion_line', 0)
         out['JOINTS'] = int(getattr(s, 'joints', getattr(s, 'axes', 3)))
         out['AXIS_MASK'] = int(getattr(s, 'axis_mask', 7))
+        out['UNITS'] = "inch" if s.linear_units == 1.0 else "mm"
         
         try:
             out['ABSOLUTE_X'] = s.actual_position[0]
@@ -697,6 +709,7 @@ class MachineDashboard(QWidget):
         self.dro_labels = {}
         self.jog_buttons = {}
         self.status_leds = {}
+        self.display_units = "mm"
         self.mock_coords = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'FEED': 0.0, 'RPM': 0.0}
         self.dro_mode = 'WORK'
         self.dro_mode_buttons = {}
@@ -2942,10 +2955,11 @@ except Exception as e: pass"""
         # Update live tool position in the 3D viewer
         tool_x = self.mock_coords.get('X', 0.0)
         tool_y = self.mock_coords.get('Y', 0.0)
-        tool_pos = (tool_x, tool_y)
+        tool_z = self.mock_coords.get('Z', 0.0)
+        tool_pos = (tool_x, tool_y, tool_z)
         if self._last_update_state.get("tool_pos") != tool_pos:
             if hasattr(self, 'toolpath_viewer'):
-                self.toolpath_viewer.update_tool_position(tool_x, tool_y)
+                self.toolpath_viewer.update_tool_position(tool_x, tool_y, tool_z)
             self._last_update_state["tool_pos"] = tool_pos
 
         if 'FEED_OVR' in self.mock_coords and hasattr(self, 'feed_slider') and not self.feed_slider.isSliderDown():
@@ -3511,5 +3525,12 @@ except Exception as e:
     def update_local_settings(self):
         """Refreshes the dashboard variables when settings change."""
         print("--- [dashboard.py] Signal Received: Updating live settings ---")
+        machine_units_str = self.settings.get_setting('MACHINE_CONFIG', 'units', 'Metric (mm)')
+        display_units_str = self.settings.get_setting('UI_PREFERENCES', 'display_units', 'Metric (mm)')
+        self.display_units = "inch" if "Imperial" in display_units_str else "mm"
+        if hasattr(self, 'toolpath_viewer'):
+            self.toolpath_viewer.machine_units = "inch" if "Imperial" in machine_units_str else "mm"
+            self.toolpath_viewer.display_units = self.display_units
         self.jog_speed = float(self.settings.get_setting('JOG_SETTINGS', 'jog_speed', 100))
         self.turbo_multiplier = float(self.settings.get_setting('JOG_SETTINGS', 'turbo_multiplier', 5.0))
+        self.update_status() # Force a full redraw with new units

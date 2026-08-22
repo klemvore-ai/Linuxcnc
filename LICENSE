@@ -1,20 +1,8 @@
-Copyright (c) 2026 [Darrell Drinkwine]
-All Rights Reserved.
+Copyright (c) 2026 Darrell Drinkwine
 
-This software and associated documentation files (the "Software") are proprietary and confidential. 
-No part of this Software may be reproduced, distributed, transmitted, or otherwise utilized in any 
-form or by any means, electronic or mechanical, including photocopying, recording, or by any 
-information storage and retrieval system, without the prior written permission of the copyright owner.
+CNCFusion is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation, either version 3 of the License, or any later version.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. THE AUTHOR IS NOT RESPONSIBLE FOR 
-ANY DAMAGES OR CLAIMS ARISING FROM ITS USE. THIS SOFTWARE WAS DESIGNED FOR A SPECIFIC HARDWARE 
-CONFIGURATION AND SHOULD BE USED AT YOUR OWN RISK.
-
-The author makes no claims to the validity of this copyright, in part or in whole, as it is unknown if the ideas presented herein are original works or artifacts of equipment and software used in the author's past.
-
-This project is intended to be original work. If any part of this Software is found to inadvertently 
-infringe upon any copyright, the author is committed to giving full credit and adhering to the 
-original license terms upon being notified. There is no intent to violate any intellectual property rights.
-
-This project is built upon the incredible work of the LinuxCNC team, for whom the author has the 
-deepest admiration and respect.
+CNCFusion is provided without warranty and is not a safety-rated machine-control
+system. Physical emergency-stop and other safety systems must remain independent.

@@ -296,8 +296,8 @@ class SettingsTab(QWidget):
         sg_layout = QHBoxLayout(); sg_layout.addWidget(QLabel("StepLen:")); sg_layout.addWidget(self.glob_steplen); sg_layout.addWidget(QLabel("StepSpace:")); sg_layout.addWidget(self.glob_stepspace); sg_layout.addWidget(QLabel("DirSetup:")); sg_layout.addWidget(self.glob_dirsetup); sg_layout.addWidget(QLabel("DirHold:")); sg_layout.addWidget(self.glob_dirhold); sg_layout.addStretch()
         timing_form.addRow("StepGen Timing (ns):", sg_layout)
         
-        self.glob_ferror = make_sb(self.sm.get_setting('GLOBAL_TIMINGS', 'ferror', 10.0))
-        self.glob_min_ferror = make_sb(self.sm.get_setting('GLOBAL_TIMINGS', 'min_ferror', 1.0))
+        self.glob_ferror = make_sb(self.sm.get_setting('GLOBAL_TIMINGS', 'ferror', 2.0))
+        self.glob_min_ferror = make_sb(self.sm.get_setting('GLOBAL_TIMINGS', 'min_ferror', 0.5))
         ferr_layout = QHBoxLayout(); ferr_layout.addWidget(QLabel("Max Error:")); ferr_layout.addWidget(self.glob_ferror); ferr_layout.addWidget(QLabel("Min Error:")); ferr_layout.addWidget(self.glob_min_ferror); ferr_layout.addStretch()
         timing_form.addRow("Following Error (units):", ferr_layout)
         
@@ -539,6 +539,11 @@ class SettingsTab(QWidget):
         self.chk_operator_mode.setChecked(self.sm.get_setting('MACHINE_CONFIG', 'operator_mode', 'False') == 'True')
         ui_form.addRow("Workspace:", self.chk_operator_mode)
         ui_group.setLayout(ui_form)
+
+        self.display_units_cb = NoScrollComboBox()
+        self.display_units_cb.addItems(["Metric (mm)", "Imperial (inch)"])
+        self.display_units_cb.setCurrentText(self.sm.get_setting('UI_PREFERENCES', 'display_units', 'Metric (mm)'))
+        ui_form.addRow("UI Display Units:", self.display_units_cb)
 
         # --- Probing & Locations Configuration Group ---
         probe_group = QGroupBox("Probing & Locations")
@@ -932,6 +937,7 @@ class SettingsTab(QWidget):
         self.sm.save_setting('JOG_SETTINGS', 'mpg_suppress_no_input', str(self.chk_mpg_suppress.isChecked()))
         self.sm.save_setting('JOG_SETTINGS', 'mpg_increments', self.mpg_increments_input.text())
         self.sm.save_setting('UI_PREFERENCES', 'auto_save_interval_minutes', str(self.auto_save_input.value()))
+        self.sm.save_setting('UI_PREFERENCES', 'display_units', self.display_units_cb.currentText())
         self.sm.save_setting('PROBING', 'tool_setter_x', str(self.tool_setter_x.value()))
         self.sm.save_setting('PROBING', 'tool_setter_y', str(self.tool_setter_y.value()))
         self.sm.save_setting('PROBING', 'tool_setter_z', str(self.tool_setter_z.value()))
@@ -1238,12 +1244,17 @@ class SettingsTab(QWidget):
             f"[TRAJ]", f"COORDINATES = {coords}", f"LINEAR_UNITS = {units}",
             f"ANGULAR_UNITS = degree", f"DEFAULT_LINEAR_VELOCITY = {self.axis_inputs['X']['vel'].value() * 0.1:.2f}",
             f"MAX_LINEAR_VELOCITY = {self.axis_inputs['X']['vel'].value():.2f}", f"",
+            f"[HAL]", f"HALUI = halui", f"HALFILE = {name}.hal", f"HALFILE = {name}_blueprint.hal", f"POSTGUI_HALFILE = custom_postgui.hal", f""]
+
+        # Set the startup code to match the selected units, ensuring G-code is interpreted correctly.
+        startup_code = "G21" if units == "mm" else "G20"
+        ini_content.extend([
             f"[HAL]", f"HALUI = halui", f"HALFILE = {name}.hal", f"HALFILE = {name}_blueprint.hal", f"POSTGUI_HALFILE = custom_postgui.hal", f"",
-            f"[RS274NGC]", f"PARAMETER_FILE = linuxcnc.var", f"RS274NGC_STARTUP_CODE = G21 G40 G90 G94 G97 G64 P0.025", f"",
+            f"[RS274NGC]", f"PARAMETER_FILE = linuxcnc.var", f"RS274NGC_STARTUP_CODE = {startup_code} G40 G90 G94 G97 G64 P0.025", f"",
             f"[TASK]", f"TASK = milltask", f"CYCLE_TIME = 0.010", f"",
             f"[EMCIO]", f"EMCIO = io", f"CYCLE_TIME = 0.100", f"TOOL_TABLE = tool.tbl", f"",
-            f"[EMCMOT]", f"EMCMOT = motmod", f"COMM_TIMEOUT = 1.0", f"SERVO_PERIOD = 1000000", f""
-        ]
+            f"[EMCMOT]", f"EMCMOT = motmod", f"COMM_TIMEOUT = 1.0", f"SERVO_PERIOD = 1000000", f"" # Base thread for stepper/servo
+        ])
         
         for axis in axes_list:
             a_min = self.axis_inputs[axis]['min'].value()
@@ -1263,7 +1274,11 @@ class SettingsTab(QWidget):
             a_max = self.axis_inputs[j_axis]['max'].value()
             a_vel = self.axis_inputs[j_axis]['vel'].value()
             a_acc = self.axis_inputs[j_axis]['accel'].value()
-            a_scale = self.axis_inputs[j_axis]['steps'].value() / max(0.001, self.axis_inputs[j_axis]['units'].value())
+            
+            # Unit-aware scale calculation
+            units_per_rev = self.axis_inputs[j_axis]['units'].value()
+            if units == "inch": units_per_rev /= 25.4
+            a_scale = self.axis_inputs[j_axis]['steps'].value() / max(0.001, units_per_rev)
             
             backlash = self.axis_inputs[j_axis].get('backlash', None)
             backlash_val = backlash.value() if backlash else 0.0
