@@ -656,6 +656,25 @@ while True:
     def stop(self):
         self.running = False
 
+
+class AgentCapabilityFetcherThread(QThread):
+    """Fetch supported agent capabilities without blocking Dashboard startup."""
+
+    capabilities_fetched = pyqtSignal(list)
+
+    def __init__(self, agent_client):
+        super().__init__()
+        self.agent_client = agent_client
+
+    def run(self):
+        try:
+            status = self.agent_client.agent_status()
+            capabilities = status.get("capabilities", [])
+            if isinstance(capabilities, list) and all(isinstance(item, str) for item in capabilities):
+                self.capabilities_fetched.emit(capabilities)
+        except Exception:
+            return
+
 class CalibrationWorker(QThread):
     """
     Runs the remote tool setter calibration script in a background thread
@@ -740,6 +759,7 @@ class MachineDashboard(QWidget):
         self.ping_timer.timeout.connect(self.send_ping)
         
         self.pos_fetcher = None
+        self.capability_fetcher = None
 
         self.ui_file_watcher = QFileSystemWatcher(self)
         self.ui_file_watcher.fileChanged.connect(self.on_ui_file_changed)
@@ -751,13 +771,48 @@ class MachineDashboard(QWidget):
         self.cmd_thread.start()
 
         self.init_ui()
+        QTimer.singleShot(0, self.refresh_agent_capabilities)
         self.init_heartbeat()
-        self.ping_timer.start(3000)  # Ping in the background every 3 seconds
-        self.send_ping()
+        if client_from_settings(self.settings) is not None:
+            self.start_position_fetcher()
+        else:
+            self.ping_timer.start(3000)  # Ping in the background every 3 seconds
+            self.send_ping()
         self.setFocus()  # Ensure focus on startup
 
     def show_error_message(self, message):
         QMessageBox.warning(self, "LinuxCNC MDI Error", f"The MDI command failed with the following error:\n\n{message}")
+
+    def refresh_agent_capabilities(self):
+        """Discover optional secure controls after the Dashboard has rendered."""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is None:
+            return
+        self.capability_fetcher = AgentCapabilityFetcherThread(agent_client)
+        self.capability_fetcher.capabilities_fetched.connect(self.apply_agent_capabilities)
+        self.capability_fetcher.start()
+
+    def apply_agent_capabilities(self, capabilities):
+        """Disable typed controls unavailable on an older enrolled machine agent."""
+        available = set(capabilities)
+        capability_map = {
+            "program_control": [self.btn_cycle_start, self.btn_cycle_pause],
+            "mode_control": [self.btn_mode_manual, self.btn_mode_auto],
+            "spindle_control": [self.btn_m3, self.btn_m4, self.btn_m5],
+            "coolant_control": [self.btn_m7, self.btn_m8, self.btn_m9],
+            "home_all": [self.btn_home_all],
+            "tool_change": [self.btn_load_tool],
+            "tool_setter_move": [self.btn_move_setter, self.btn_park],
+            "raw_z_probe": [self.btn_raw_probe_z, self.input_raw_probe_distance],
+            "touch_off_z": [self.btn_touch_off_z],
+        }
+        for capability, controls in capability_map.items():
+            if capability in available:
+                continue
+            message = f"This machine agent does not support {capability.replace('_', ' ')}."
+            for control in controls:
+                control.setEnabled(False)
+                control.setToolTip(message)
 
     def get_probe_plate_thickness(self):
         val = self.settings.get_setting('Calibration', 'probe_plate_thickness')
@@ -931,7 +986,7 @@ except Exception as e:
     def build_default_ui(self):
         # 2. DEFINE THE DICTIONARY IMMEDIATELY (Prevents KeyError)
         self.status_leds = {
-            "SSH": QLabel("SSH: OFFLINE"),
+            "CONNECTION": QLabel("MACHINE: OFFLINE"),
             "ESTOP": QLabel("ESTOP"),
             "POWER": QLabel("POWER"),
             "HOMED": QLabel("HOMED"),
@@ -995,10 +1050,10 @@ except Exception as e:
         self.mdi_input.setPlaceholderText("MDI Command (e.g. M3 S1000) + Enter")
         self.mdi_input.setStyleSheet("background-color: #111; color: #39FF14; font-family: 'Consolas', 'Courier New', monospace; font-size: 14px; border: 1px solid #555; border-radius: 3px; padding: 4px;")
         
-        btn_mdi_exec = QPushButton("Execute")
-        btn_mdi_exec.setStyleSheet("QPushButton { background-color: #d35400; color: white; padding: 4px 10px; border-radius: 3px; font-weight: bold; } QPushButton:pressed { background-color: #a04000; }")
+        self.btn_mdi_exec = QPushButton("Execute")
+        self.btn_mdi_exec.setStyleSheet("QPushButton { background-color: #d35400; color: white; padding: 4px 10px; border-radius: 3px; font-weight: bold; } QPushButton:pressed { background-color: #a04000; }")
         mdi_layout.addWidget(self.mdi_input)
-        mdi_layout.addWidget(btn_mdi_exec)
+        mdi_layout.addWidget(self.btn_mdi_exec)
         gcode_vbox.addLayout(mdi_layout)
         
         btn_load.clicked.connect(lambda: self.load_gcode(self.default_gcode_editor))
@@ -1010,8 +1065,14 @@ except Exception as e:
         btn_optimize.clicked.connect(self.fix_fusion_rapids)
         self.default_gcode_editor.line_double_clicked.connect(self.run_from_line)
         
-        btn_mdi_exec.clicked.connect(self.run_mdi_from_input)
+        self.btn_mdi_exec.clicked.connect(self.run_mdi_from_input)
         self.mdi_input.returnPressed.connect(self.run_mdi_from_input)
+        if client_from_settings(self.settings) is not None:
+            message = "Secure mode permits only named, approved machine operations."
+            self.mdi_input.setEnabled(False)
+            self.mdi_input.setToolTip(message)
+            self.btn_mdi_exec.setEnabled(False)
+            self.btn_mdi_exec.setToolTip(message)
         
         gcode_group.setLayout(gcode_vbox)
         gcode_preview_layout.addWidget(gcode_group, 1)
@@ -1126,6 +1187,22 @@ except Exception as e:
         btn_fast_probe.clicked.connect(self.fast_probe)
         btn_fast_probe.setStyleSheet("QPushButton { background-color: #d35400; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:pressed { background-color: #a04000; }")
         plate_layout.addWidget(btn_fast_probe)
+
+        self.input_raw_probe_distance = QLineEdit("-10")
+        self.input_raw_probe_distance.setPlaceholderText("Downward Z travel")
+        self.input_raw_probe_distance.setToolTip("Negative distance only. This operation does not change work offsets.")
+        self.btn_raw_probe_z = QPushButton("Raw Z Probe (No Offset)")
+        self.btn_raw_probe_z.setStyleSheet("QPushButton { background-color: #34495e; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:pressed { background-color: #2c3e50; }")
+        self.btn_raw_probe_z.clicked.connect(self.run_raw_z_probe)
+        raw_probe_layout = QHBoxLayout()
+        raw_probe_layout.addWidget(self.input_raw_probe_distance)
+        raw_probe_layout.addWidget(self.btn_raw_probe_z)
+        plate_layout.addLayout(raw_probe_layout)
+
+        self.btn_touch_off_z = QPushButton("Touch Plate Z Offset")
+        self.btn_touch_off_z.setStyleSheet("QPushButton { background-color: #8e44ad; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:pressed { background-color: #732d91; }")
+        self.btn_touch_off_z.clicked.connect(self.run_touch_off_z)
+        plate_layout.addWidget(self.btn_touch_off_z)
         plate_layout.addStretch()
         probe_tabs.addTab(plate_tab, "Plate")
         
@@ -1145,6 +1222,7 @@ except Exception as e:
             btn = QPushButton(text)
             btn.setStyleSheet("QPushButton { background-color: #2980b9; color: white; font-weight: bold; padding: 6px; border-radius: 4px; } QPushButton:pressed { background-color: #1f618d; }")
             btn.clicked.connect(lambda _, a=action: self.trigger_probing(a))
+            btn.setObjectName(f"probe_{action}")
             out_grid.addWidget(btn, i // 3, i % 3)
         out_group.setLayout(out_grid)
         
@@ -1197,6 +1275,7 @@ except Exception as e:
             btn = QPushButton(text)
             btn.setStyleSheet("QPushButton { background-color: #27ae60; color: white; font-weight: bold; padding: 6px; border-radius: 4px; } QPushButton:pressed { background-color: #229954; }")
             btn.clicked.connect(lambda _, a=action: self.trigger_probing(a))
+            btn.setObjectName(f"probe_{action}")
             in_grid.addWidget(btn, i // 3, i % 3)
         in_group.setLayout(in_grid)
         
@@ -1213,12 +1292,12 @@ except Exception as e:
         self.input_tool_num = QLineEdit()
         self.input_tool_num.setPlaceholderText("Tool #")
         self.input_tool_num.setStyleSheet("max-width: 60px;")
-        btn_load_tool = QPushButton("Load Tool (M6)")
-        btn_load_tool.setStyleSheet("QPushButton { background-color: #34495e; color: white; font-weight: bold; padding: 6px; border-radius: 4px; } QPushButton:pressed { background-color: #2c3e50; }")
-        btn_load_tool.clicked.connect(self.load_tool)
+        self.btn_load_tool = QPushButton("Load Tool (M6)")
+        self.btn_load_tool.setStyleSheet("QPushButton { background-color: #34495e; color: white; font-weight: bold; padding: 6px; border-radius: 4px; } QPushButton:pressed { background-color: #2c3e50; }")
+        self.btn_load_tool.clicked.connect(self.load_tool)
         tool_load_layout.addWidget(QLabel("Tool:"))
         tool_load_layout.addWidget(self.input_tool_num)
-        tool_load_layout.addWidget(btn_load_tool)
+        tool_load_layout.addWidget(self.btn_load_tool)
         tool_load_layout.addStretch()
         tool_layout.addLayout(tool_load_layout)
         
@@ -1230,10 +1309,10 @@ except Exception as e:
         self.input_tool_setter.textChanged.connect(lambda t: self.settings.save_setting("PROBING", "setter_ref_z", t))
         tool_layout.addWidget(self.input_tool_setter)
         
-        btn_move_setter = QPushButton("Move to Tool Change / Setter")
-        btn_move_setter.setStyleSheet("QPushButton { background-color: #2980b9; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:pressed { background-color: #1f618d; }")
-        btn_move_setter.clicked.connect(self.move_to_tool_setter)
-        tool_layout.addWidget(btn_move_setter)
+        self.btn_move_setter = QPushButton("Move to Tool Change / Setter")
+        self.btn_move_setter.setStyleSheet("QPushButton { background-color: #2980b9; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:pressed { background-color: #1f618d; }")
+        self.btn_move_setter.clicked.connect(self.move_to_tool_setter)
+        tool_layout.addWidget(self.btn_move_setter)
         
         btn_tool_probe = QPushButton("Probe Tool Height")
         btn_tool_probe.setStyleSheet("QPushButton { background-color: #27ae60; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:pressed { background-color: #229954; }")
@@ -1246,14 +1325,25 @@ except Exception as e:
         tool_layout.addWidget(btn_tool_probe)
         tool_layout.addStretch()
         probe_tabs.addTab(tool_tab, "Tool Setter")
+
+        if client_from_settings(self.settings) is not None:
+            message = "This multi-step probing workflow is not available through the secure management connection."
+            for button in [btn_set_z, btn_fast_probe, btn_probe_z, btn_tool_probe, btn_calibrate_setter]:
+                button.setEnabled(False)
+                button.setToolTip(message)
+            for button in touch_tab.findChildren(QPushButton):
+                button.setEnabled(False)
+                button.setToolTip(message)
+            self.probe_selector.setEnabled(False)
+            self.probe_selector.setToolTip("Select and verify the probe source locally before using secure probe operations.")
         
         # --- PARK TAB ---
         park_tab = QWidget()
         park_layout = QVBoxLayout(park_tab)
-        btn_park = QPushButton("Safely Park Machine")
-        btn_park.setStyleSheet("QPushButton { background-color: #3498db; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:pressed { background-color: #2980b9; }")
-        btn_park.clicked.connect(self.park_machine)
-        park_layout.addWidget(btn_park)
+        self.btn_park = QPushButton("Safely Park Machine")
+        self.btn_park.setStyleSheet("QPushButton { background-color: #3498db; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:pressed { background-color: #2980b9; }")
+        self.btn_park.clicked.connect(self.park_machine)
+        park_layout.addWidget(self.btn_park)
         park_layout.addStretch()
         probe_tabs.addTab(park_tab, "Park")
         
@@ -1277,29 +1367,29 @@ except Exception as e:
         rpm_layout.addWidget(self.spindle_rpm_input)
         rpm_layout.addStretch()
         
-        btn_m3 = QPushButton("M3 (CW)")
-        btn_m4 = QPushButton("M4 (CCW)")
-        btn_m5 = QPushButton("M5 (Stop)")
-        btn_m7 = QPushButton("M7 (Mist)")
-        btn_m8 = QPushButton("M8 (Flood)")
-        btn_m9 = QPushButton("M9 (Off)")
+        self.btn_m3 = QPushButton("M3 (CW)")
+        self.btn_m4 = QPushButton("M4 (CCW)")
+        self.btn_m5 = QPushButton("M5 (Stop)")
+        self.btn_m7 = QPushButton("M7 (Mist)")
+        self.btn_m8 = QPushButton("M8 (Flood)")
+        self.btn_m9 = QPushButton("M9 (Off)")
         
-        for btn in [btn_m3, btn_m4, btn_m5, btn_m7, btn_m8, btn_m9]:
+        for btn in [self.btn_m3, self.btn_m4, self.btn_m5, self.btn_m7, self.btn_m8, self.btn_m9]:
             btn.setStyleSheet("QPushButton { background-color: #2980b9; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:pressed { background-color: #1f618d; }")
             
-        btn_m5.setStyleSheet("QPushButton { background-color: #c0392b; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:pressed { background-color: #922b21; }")
-        btn_m9.setStyleSheet("QPushButton { background-color: #c0392b; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:pressed { background-color: #922b21; }")
+        self.btn_m5.setStyleSheet("QPushButton { background-color: #c0392b; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:pressed { background-color: #922b21; }")
+        self.btn_m9.setStyleSheet("QPushButton { background-color: #c0392b; color: white; font-weight: bold; padding: 8px; border-radius: 4px; } QPushButton:pressed { background-color: #922b21; }")
         
-        btn_m3.clicked.connect(lambda: self.confirm_and_execute_mdi(f"M3 S{self.spindle_rpm_input.text()}", "Spindle CW"))
-        btn_m4.clicked.connect(lambda: self.confirm_and_execute_mdi(f"M4 S{self.spindle_rpm_input.text()}", "Spindle CCW"))
-        btn_m5.clicked.connect(lambda: self.confirm_and_execute_mdi("M5", "Spindle Stop"))
-        btn_m7.clicked.connect(lambda: self._send_b64_py_cmd("import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.mist(1)\nexcept: pass"))
-        btn_m8.clicked.connect(lambda: self._send_b64_py_cmd("import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.flood(1)\nexcept: pass"))
-        btn_m9.clicked.connect(lambda: self._send_b64_py_cmd("import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.mist(0)\n    c.flood(0)\nexcept: pass"))
+        self.btn_m3.clicked.connect(lambda: self.set_spindle_direction("forward"))
+        self.btn_m4.clicked.connect(lambda: self.set_spindle_direction("reverse"))
+        self.btn_m5.clicked.connect(lambda: self.set_spindle_direction("stop"))
+        self.btn_m7.clicked.connect(lambda: self.set_coolant("mist_on"))
+        self.btn_m8.clicked.connect(lambda: self.set_coolant("flood_on"))
+        self.btn_m9.clicked.connect(lambda: self.set_coolant("off"))
         
         macro_layout.addLayout(rpm_layout, 0, 0, 1, 3)
-        macro_layout.addWidget(btn_m3, 1, 0); macro_layout.addWidget(btn_m4, 1, 1); macro_layout.addWidget(btn_m5, 1, 2)
-        macro_layout.addWidget(btn_m7, 2, 0); macro_layout.addWidget(btn_m8, 2, 1); macro_layout.addWidget(btn_m9, 2, 2)
+        macro_layout.addWidget(self.btn_m3, 1, 0); macro_layout.addWidget(self.btn_m4, 1, 1); macro_layout.addWidget(self.btn_m5, 1, 2)
+        macro_layout.addWidget(self.btn_m7, 2, 0); macro_layout.addWidget(self.btn_m8, 2, 1); macro_layout.addWidget(self.btn_m9, 2, 2)
         
         # Add Subroutine Options
         self.combo_ocodes = QComboBox()
@@ -1343,11 +1433,11 @@ except Exception as e:
             btn.setStyleSheet("QPushButton { background-color: #34495e; color: white; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #2c3e50; }")
             run_layout.addWidget(btn)
             
-        self.btn_mode_manual.clicked.connect(lambda: self._send_b64_py_cmd("import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.mode(linuxcnc.MODE_MANUAL)\nexcept: pass"))
-        self.btn_mode_auto.clicked.connect(lambda: self._send_b64_py_cmd("import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.mode(linuxcnc.MODE_AUTO)\nexcept: pass"))
-        self.btn_cycle_start.clicked.connect(lambda: self._send_b64_py_cmd("import linuxcnc, time\ntry:\n    c=linuxcnc.command()\n    c.mode(linuxcnc.MODE_AUTO)\n    time.sleep(0.1)\n    c.auto(linuxcnc.AUTO_RUN, 0)\nexcept: pass"))
-        self.btn_cycle_pause.clicked.connect(lambda: self._send_b64_py_cmd("import linuxcnc\ntry:\n    c=linuxcnc.command(); s=linuxcnc.stat(); s.poll()\n    if getattr(s, 'interp_state', 0) == linuxcnc.INTERP_PAUSED:\n        c.auto(linuxcnc.AUTO_RESUME)\n    else:\n        c.auto(linuxcnc.AUTO_PAUSE)\nexcept: pass", urgent=True))
-        self.btn_cycle_stop.clicked.connect(lambda: self._send_b64_py_cmd("import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.abort()\nexcept: pass", urgent=True))
+        self.btn_mode_manual.clicked.connect(lambda: self.select_machine_mode("manual"))
+        self.btn_mode_auto.clicked.connect(lambda: self.select_machine_mode("auto"))
+        self.btn_cycle_start.clicked.connect(self.start_cycle)
+        self.btn_cycle_pause.clicked.connect(self.pause_or_resume_cycle)
+        self.btn_cycle_stop.clicked.connect(self.stop_cycle)
             
         self.btn_cycle_start.setStyleSheet("QPushButton { background-color: #27ae60; color: white; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #229954; }")
         self.btn_cycle_pause.setStyleSheet("QPushButton { background-color: #f39c12; color: black; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #c87f0a; }")
@@ -1380,7 +1470,15 @@ except Exception as e:
         btn_z_pos = QPushButton("Z+")
         btn_z_neg = QPushButton("Z-")
         
-        for btn in [btn_y_pos, btn_y_neg, btn_x_pos, btn_x_neg, btn_z_pos, btn_z_neg]:
+        self.jog_buttons = {
+            "Y+": btn_y_pos,
+            "Y-": btn_y_neg,
+            "X+": btn_x_pos,
+            "X-": btn_x_neg,
+            "Z+": btn_z_pos,
+            "Z-": btn_z_neg,
+        }
+        for btn in self.jog_buttons.values():
             btn.setFixedSize(60, 60)
             btn.setStyleSheet("QPushButton { background-color: #2c3e50; color: white; font-weight: bold; font-size: 16px; border-radius: 5px; } QPushButton:pressed { background-color: #1a252f; padding-top: 2px; padding-left: 2px; }")
             
@@ -1408,6 +1506,14 @@ except Exception as e:
         btn_z_neg.released.connect(lambda: self.jog_button_released('Z'))
         
         btn_grid.setColumnStretch(3, 1)
+
+        if client_from_settings(self.settings) is not None:
+            message = "Jogging is CNC-PC-local only and unavailable through the secure management connection."
+            self.jog_speed_slider.setEnabled(False)
+            self.jog_speed_slider.setToolTip(message)
+            for btn in self.jog_buttons.values():
+                btn.setEnabled(False)
+                btn.setToolTip(message)
         
         jog_layout.addLayout(btn_grid)
         jog_group.setLayout(jog_layout)
@@ -1732,6 +1838,10 @@ except Exception as e:
         QTimer.singleShot(200, lambda: self.load_custom_ui(path))
 
     def send_halcmd_setp(self, pin_name, value_str):
+        if client_from_settings(self.settings) is not None:
+            self.error_signal.emit("Secure mode does not permit arbitrary HAL pin writes.")
+            return
+
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
@@ -1756,6 +1866,14 @@ except Exception as e:
             self.probe_selector.setStyleSheet("background-color: #d35400; color: white; font-weight: bold; padding: 6px; border-radius: 4px; margin-bottom: 5px;")
 
     def run_from_line(self, line_number):
+        if client_from_settings(self.settings) is not None:
+            QMessageBox.information(
+                self,
+                "Run From Line Not Available",
+                "Secure mode does not permit arbitrary program-line execution.",
+            )
+            return
+
         if self.is_estopped:
             QMessageBox.warning(self, "E-STOP", "Machine is in E-STOP state. Release E-STOP before running.")
             return
@@ -1793,7 +1911,108 @@ except Exception as e:
         if confirm == QMessageBox.StandardButton.Yes:
             self.execute_mdi(mdi_cmd)
 
+    def set_coolant(self, mode):
+        """Apply one named coolant action without accepting arbitrary MDI in secure mode."""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            commands = {
+                "mist_on": "coolant_mist_on",
+                "flood_on": "coolant_flood_on",
+                "off": "coolant_off",
+            }
+            try:
+                agent_client.machine_command(commands[mode])
+            except Exception as error:
+                self.error_signal.emit(f"Coolant control failed: {error}")
+            return
+
+        commands = {
+            "mist_on": "import linuxcnc\nc=linuxcnc.command(); c.mist(1)",
+            "flood_on": "import linuxcnc\nc=linuxcnc.command(); c.flood(1)",
+            "off": "import linuxcnc\nc=linuxcnc.command(); c.mist(0); c.flood(0)",
+        }
+        self._send_b64_py_cmd(commands[mode])
+
+    def set_spindle_direction(self, action):
+        """Apply a bounded spindle direction command without arbitrary MDI in secure mode."""
+        try:
+            rpm = float(self.spindle_rpm_input.text()) if action != "stop" else 0.0
+        except ValueError:
+            QMessageBox.warning(self, "Invalid RPM", "Enter a numeric spindle RPM.")
+            return
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.spindle_command(action, rpm)
+            except Exception as error:
+                self.error_signal.emit(f"Spindle control failed: {error}")
+            return
+        mdi = {"forward": f"M3 S{rpm:g}", "reverse": f"M4 S{rpm:g}", "stop": "M5"}
+        self.confirm_and_execute_mdi(mdi[action], f"Spindle {action.title()}")
+
+    def stop_cycle(self):
+        """Abort the active program through the typed agent when enrolled."""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.machine_command("abort")
+            except Exception as error:
+                self.error_signal.emit(f"Cycle stop failed: {error}")
+            return
+        self._send_b64_py_cmd("import linuxcnc\nc=linuxcnc.command(); c.abort()", urgent=True)
+
+    def start_cycle(self):
+        """Start the loaded program through a typed command when enrolled."""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.machine_command("program_start")
+            except Exception as error:
+                self.error_signal.emit(f"Cycle start failed: {error}")
+            return
+        self._send_b64_py_cmd(
+            "import linuxcnc, time\nc=linuxcnc.command(); c.mode(linuxcnc.MODE_AUTO); time.sleep(0.1); c.auto(linuxcnc.AUTO_RUN, 0)"
+        )
+
+    def select_machine_mode(self, mode):
+        """Select Manual or Auto through the typed agent when enrolled."""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.machine_command(f"mode_{mode}")
+            except Exception as error:
+                self.error_signal.emit(f"Mode selection failed: {error}")
+            return
+        legacy_code = {
+            "manual": "import linuxcnc\nc=linuxcnc.command(); c.mode(linuxcnc.MODE_MANUAL)",
+            "auto": "import linuxcnc\nc=linuxcnc.command(); c.mode(linuxcnc.MODE_AUTO)",
+        }
+        self._send_b64_py_cmd(legacy_code[mode])
+
+    def pause_or_resume_cycle(self):
+        """Pause or resume the program through a typed command when enrolled."""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.machine_command("program_pause_resume")
+            except Exception as error:
+                self.error_signal.emit(f"Pause/resume failed: {error}")
+            return
+        self._send_b64_py_cmd(
+            "import linuxcnc\nc=linuxcnc.command(); s=linuxcnc.stat(); s.poll(); "
+            "c.auto(linuxcnc.AUTO_RESUME if s.interp_state == linuxcnc.INTERP_PAUSED else linuxcnc.AUTO_PAUSE)",
+            urgent=True,
+        )
+
     def execute_mdi(self, mdi_cmd):
+        if client_from_settings(self.settings) is not None:
+            QMessageBox.information(
+                self,
+                "MDI Not Available",
+                "Secure mode does not permit arbitrary MDI commands. Use a named, approved machine operation instead.",
+            )
+            return
+
         if self.is_estopped:
             QMessageBox.warning(self, "E-STOP", "Machine is in E-STOP state. Release E-STOP before running.")
             return
@@ -1873,6 +2092,13 @@ except Exception as e:
     def load_tool(self):
         tool_num = getattr(self, 'input_tool_num', QLineEdit()).text().strip()
         if tool_num.isdigit():
+            agent_client = client_from_settings(self.settings)
+            if agent_client is not None:
+                try:
+                    agent_client.change_tool(int(tool_num))
+                except Exception as error:
+                    self.error_signal.emit(f"Tool change failed: {error}")
+                return
             self.execute_mdi(f"T{tool_num} M6 G43")
         else:
             QMessageBox.warning(self, "Invalid Tool", "Please enter a valid numeric tool number.")
@@ -2394,6 +2620,14 @@ except Exception as e: pass"""
                                        
         if confirm == QMessageBox.StandardButton.Yes:
             print(f"[dashboard.py] Parking Machine: X{park_x} Y{park_y}")
+            agent_client = client_from_settings(self.settings)
+            if agent_client is not None:
+                try:
+                    agent_client.move_tool_setter(park_x, park_y, park_z)
+                except Exception as error:
+                    self.error_signal.emit(f"Park move failed: {error}")
+                return
+
             py_code = f"""import linuxcnc, time, sys
 try:
     c = linuxcnc.command(); s = linuxcnc.stat()
@@ -2768,6 +3002,12 @@ except Exception as e: pass"""
             QMessageBox.information(self, "No Changes", "No trailing dots found to clean.")
 
     def _send_b64_py_cmd(self, py_code, urgent=False, timeout=60):
+        if client_from_settings(self.settings) is not None:
+            self.error_signal.emit(
+                "Secure mode blocked a legacy remote command. Use a named machine-agent operation instead."
+            )
+            return
+
         b64_code = base64.b64encode(py_code.encode()).decode()
         cmd = f"python3 -u -c \"import base64; exec(base64.b64decode('{b64_code}').decode())\""
         if urgent:
@@ -3000,6 +3240,73 @@ except Exception as e: pass"""
         except ValueError:
             print("[dashboard.py] Invalid input for Z Zero")
 
+    def run_raw_z_probe(self):
+        """Run the typed downward probe primitive without selecting hardware or changing offsets."""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is None:
+            QMessageBox.information(
+                self,
+                "Raw Z Probe Not Available",
+                "Raw Z Probe is available only through the secure machine agent.",
+            )
+            return
+        try:
+            target = float(self.input_raw_probe_distance.text())
+            velocity = float(self.settings.get_setting("PROBING", "probe_vel", 100.0))
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Probe Input", "Enter a numeric downward Z travel distance.")
+            return
+        if target >= 0:
+            QMessageBox.warning(self, "Invalid Probe Input", "Raw Z Probe requires a negative downward travel distance.")
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Confirm Raw Z Probe",
+            f"Probe downward {abs(target):g} units at {velocity:g} velocity, then retract 2 units?\n\n"
+            "This operation does not change work offsets or select probe hardware.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            agent_client.probe_z(target, velocity)
+        except Exception as error:
+            self.error_signal.emit(f"Raw Z probe failed: {error}")
+
+    def run_touch_off_z(self):
+        """Run the typed local-touch-plate workflow and set only the Z work offset."""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is None:
+            QMessageBox.information(
+                self,
+                "Touch Plate Z Offset Not Available",
+                "This touch-off workflow is available only through the secure machine agent.",
+            )
+            return
+        try:
+            target = float(self.input_raw_probe_distance.text())
+            plate_thickness = float(self.input_z_thickness.text())
+            velocity = float(self.settings.get_setting("PROBING", "probe_vel", 100.0))
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Touch-Off Input", "Enter numeric plate thickness and downward Z travel values.")
+            return
+        if target >= 0:
+            QMessageBox.warning(self, "Invalid Touch-Off Input", "Touch-off requires a negative downward Z travel distance.")
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Confirm Touch Plate Z Offset",
+            f"Probe downward {abs(target):g} units at {velocity:g} velocity, set the Z work offset to {plate_thickness:g}, then retract 2 units?\n\n"
+            "The probe source must already be selected and verified locally.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            agent_client.touch_off_z(target, velocity, plate_thickness)
+        except Exception as error:
+            self.error_signal.emit(f"Touch-off failed: {error}")
+
     def update_status(self):
         """Refreshes DRO labels and LED indicator colors."""
         if getattr(self, '_last_update_state', None) is None:
@@ -3055,8 +3362,8 @@ except Exception as e: pass"""
         current_time = time.time()
         if self.ssh_connected:
             if self._last_update_state.get("ssh") != "online":
-                self.status_leds["SSH"].setStyleSheet("background-color: #00FF00; color: black; border-radius: 4px; font-weight: bold; padding: 8px;")
-                self.status_leds["SSH"].setText("SSH: ONLINE")
+                self.status_leds["CONNECTION"].setStyleSheet("background-color: #00FF00; color: black; border-radius: 4px; font-weight: bold; padding: 8px;")
+                self.status_leds["CONNECTION"].setText("MACHINE: ONLINE")
                 self._last_update_state["ssh"] = "online"
             self._was_connected_once = True
         else:
@@ -3064,16 +3371,16 @@ except Exception as e: pass"""
                 blink_state = "reconnect_1" if int(current_time * 2) % 2 == 0 else "reconnect_2"
                 if self._last_update_state.get("ssh") != blink_state:
                     if blink_state == "reconnect_1":
-                        self.status_leds["SSH"].setStyleSheet("background-color: #f39c12; color: black; border-radius: 4px; font-weight: bold; padding: 8px;")
-                        self.status_leds["SSH"].setText("RECONNECTING...")
+                        self.status_leds["CONNECTION"].setStyleSheet("background-color: #f39c12; color: black; border-radius: 4px; font-weight: bold; padding: 8px;")
+                        self.status_leds["CONNECTION"].setText("MACHINE: RECONNECTING")
                     else:
-                        self.status_leds["SSH"].setStyleSheet("background-color: #c0392b; color: white; border-radius: 4px; font-weight: bold; padding: 8px;")
-                        self.status_leds["SSH"].setText("CONNECTION LOST")
+                        self.status_leds["CONNECTION"].setStyleSheet("background-color: #c0392b; color: white; border-radius: 4px; font-weight: bold; padding: 8px;")
+                        self.status_leds["CONNECTION"].setText("MACHINE: CONNECTION LOST")
                     self._last_update_state["ssh"] = blink_state
             else:
                 if self._last_update_state.get("ssh") != "offline":
-                    self.status_leds["SSH"].setStyleSheet("background-color: red; color: white; border-radius: 4px; font-weight: bold; padding: 8px;")
-                    self.status_leds["SSH"].setText("SSH: OFFLINE")
+                    self.status_leds["CONNECTION"].setStyleSheet("background-color: red; color: white; border-radius: 4px; font-weight: bold; padding: 8px;")
+                    self.status_leds["CONNECTION"].setText("MACHINE: OFFLINE")
                     self._last_update_state["ssh"] = "offline"
 
         # Update LED Visuals
@@ -3242,6 +3549,14 @@ except Exception as e: pass"""
             if confirm != QMessageBox.StandardButton.Yes:
                 return
 
+            agent_client = client_from_settings(self.settings)
+            if agent_client is not None:
+                try:
+                    agent_client.machine_command("unhome_all")
+                except Exception as error:
+                    self.error_signal.emit(f"Unhome all failed: {error}")
+                return
+
             print("[dashboard.py] Unhoming all axes remotely...")
             py_code = """import linuxcnc, time
 try:
@@ -3263,6 +3578,14 @@ except Exception as e:
     pass
 """
             self._send_b64_py_cmd(py_code)
+            return
+
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.machine_command("home_all")
+            except Exception as error:
+                self.error_signal.emit(f"Home all failed: {error}")
             return
 
         print("[dashboard.py] Homing all axes remotely...")
@@ -3292,6 +3615,8 @@ except Exception as e:
 
     def send_ping(self):
         """Silently checks if the LinuxCNC machine is reachable on the network."""
+        if client_from_settings(self.settings) is not None:
+            return
         if self.ping_process.state() == QProcess.ProcessState.NotRunning:
             ip = self.settings.get_setting("SSH", "ip_address", "")
             if not ip:
@@ -3303,6 +3628,8 @@ except Exception as e:
                 self.ping_process.start("ping", ["-c", "1", "-W", "1", ip])
 
     def handle_ping_result(self, exitCode, exitStatus):
+        if client_from_settings(self.settings) is not None:
+            return
         was_connected = self.ssh_connected
         self.ssh_connected = (exitCode == 0 and exitStatus == QProcess.ExitStatus.NormalExit)
         
@@ -3319,8 +3646,8 @@ except Exception as e:
         
         if agent_client is not None:
             self.pos_fetcher = PositionFetcherThread(ip, user, password, agent_client)
-            self.pos_fetcher.position_fetched.connect(self.update_real_coords)
-            self.pos_fetcher.error.connect(self.show_error_message)
+            self.pos_fetcher.position_fetched.connect(self.handle_secure_telemetry)
+            self.pos_fetcher.error.connect(self.handle_secure_telemetry_error)
             self.pos_fetcher.start()
             return
 
@@ -3331,6 +3658,17 @@ except Exception as e:
             self.pos_fetcher.position_fetched.connect(self.update_real_coords)
             self.pos_fetcher.error.connect(self.show_error_message)
             self.pos_fetcher.start()
+
+    def handle_secure_telemetry(self, coords):
+        """Treat a successful authenticated telemetry snapshot as machine connectivity."""
+        self.ssh_connected = True
+        self.update_real_coords(coords)
+
+    def handle_secure_telemetry_error(self, message):
+        """Mark the secure transport offline without presenting polling errors as motion errors."""
+        self.ssh_connected = False
+        if hasattr(self, 'status_leds') and "CONNECTION" in self.status_leds:
+            self.status_leds["CONNECTION"].setToolTip(message)
 
     def stop_position_fetcher(self):
         if self.pos_fetcher:
@@ -3343,11 +3681,11 @@ except Exception as e:
             if axis in coords:
                 self.mock_coords[axis] = coords[axis]
                 
-        for key in ['HOMED_COUNT', 'MACHINE_ON', 'ESTOP_ACTIVATED', 'JOINTS', 'AXIS_MASK', 'STATUS', 'MODE', 'TOTAL_LINES', 'LINE']:
+        for key in ['HOMED_COUNT', 'MACHINE_ON', 'ESTOP_ACTIVATED', 'JOINTS', 'AXIS_MASK', 'STATUS', 'MODE', 'PROGRAM_LOADED', 'TOTAL_LINES', 'LINE']:
             if key in coords:
                 self.mock_coords[key] = coords[key]
                 
-        for key in ['ABSOLUTE_X', 'ABSOLUTE_Y', 'ABSOLUTE_Z', 'DTG_X', 'DTG_Y', 'DTG_Z']:
+        for key in ['FEED_OVR', 'SPINDLE_OVR', 'ABSOLUTE_X', 'ABSOLUTE_Y', 'ABSOLUTE_Z', 'DTG_X', 'DTG_Y', 'DTG_Z']:
             if key in coords:
                 self.mock_coords[key] = coords[key]
                 
@@ -3414,6 +3752,10 @@ except Exception as e:
         return is_gantry, is_4_axis, is_5_axis, total_joints
 
     def jog_button_pressed(self, axis, direction, speed_multiplier=1):
+        if client_from_settings(self.settings) is not None:
+            self.error_signal.emit("Jogging is CNC-PC-local only and is unavailable through the secure management connection.")
+            return
+
         if self.is_estopped:
             return
 
@@ -3474,6 +3816,9 @@ except Exception as e:
         self._send_b64_py_cmd(py_code)
 
     def jog_button_released(self, axis=None):
+        if client_from_settings(self.settings) is not None:
+            return
+
         axes_to_stop = [axis] if axis else list(self.active_jogs)
         for ax in axes_to_stop:
             if ax in self.active_jogs:
@@ -3531,6 +3876,13 @@ except Exception as e:
             return
 
         if self.is_estopped:
+            return
+
+        if client_from_settings(self.settings) is not None:
+            if key in [Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown]:
+                event.accept()
+            else:
+                super().keyPressEvent(event)
             return
 
         # Jogging Logic with PyQt6 naming and speed multiplier

@@ -6,6 +6,8 @@ The initial API is:
 
 - `GET /v1/lifecycle` returns `{ "running": true|false }`.
 - `GET /v1/hal/pins` runs the fixed HAL pin inspection operation and returns bounded output.
+- `GET /v1/hal/components` runs the fixed HAL component inspection operation and returns bounded output.
+- `POST /v1/hal/values` returns one read-only snapshot for 1 through 16 validated, unique HAL pin names.
 - `POST /v1/mesa/identify` runs read-only Mesa HMID identification from a validated board identifier and IP address.
 - `POST /v1/lifecycle/actions` accepts `graceful_shutdown`, `recovery_shutdown`, or `start` with an approved `ini_path`.
 - `POST /v1/files` accepts bounded, checksum-verified `config` or `gcode` uploads using relative paths.
@@ -36,19 +38,27 @@ Dashboard program loading uploads `active_program.ngc` and then calls `POST /v1/
 
 Runtime-safe tuning uses `POST /v1/tuning/override` with a bounded `feed` or `spindle` value from `0.0` through `2.0`. The agent calls LinuxCNC's command API directly; arbitrary Python and shell tuning commands are not accepted.
 
+Spindle direction uses `POST /v1/spindle/command` with an allowlisted `forward`, `reverse`, or `stop` action. Forward and reverse require RPM from `1` through `100000`; the agent requires powered LinuxCNC and never accepts MDI text.
+
+Tool loading uses `POST /v1/tool/change` with one integer tool number from `0` through `9999`. The agent requires powered, idle LinuxCNC and executes only the fixed `Tn M6 G43` sequence.
+
 Machine state is available at `GET /v1/machine/state`. Program loading and PID tuning require LinuxCNC to be running and idle. Configuration activation, archive restore, and firmware flashing require LinuxCNC to be stopped.
 
-Dashboard machine controls use `POST /v1/machine/command` with one of `abort`, `power_on`, `power_off`, `estop`, `estop_reset`, or `override_limits`. Arbitrary MDI strings are intentionally not accepted by the secure API.
+Dashboard machine controls use `POST /v1/machine/command` with named actions for abort, power, E-stop, limit override, coolant, program start/pause/resume, Manual/Auto mode, and Home All/Unhome All. Each action is checked against LinuxCNC state on the machine. Arbitrary MDI strings are intentionally not accepted by the secure API.
 
 Axis homing uses `POST /v1/machine/home-axis` with a validated axis name and requires powered LinuxCNC.
 
-The first probing operation is `POST /v1/machine/probe-z`, which accepts a bounded target and velocity and requires powered, idle LinuxCNC. Multi-step tool-setter and edge-finding calibration sequences remain separate until their motion and fault behavior is individually specified.
+The first probing operation is `POST /v1/machine/probe-z`, which accepts a bounded downward target and velocity, requires powered, idle LinuxCNC, verifies that the local probe input tripped, and then performs a fixed retract. It does not select probe hardware or change work offsets. Multi-step tool-setter and edge-finding calibration sequences remain separate until their motion and fault behavior is individually specified.
+
+`POST /v1/machine/touch-off-z` is the first complete touch-plate workflow. It accepts bounded downward travel, velocity, plate thickness, and retract values; requires a locally selected probe input to trip; checks LinuxCNC's local error channel after each motion and offset step; applies only `G10 L20 P0 Z<plate_thickness>`; and then retracts. If retract fails after the offset succeeds, the returned error explicitly reports that the Z work offset was already applied. It does not select probe hardware, calibrate tool length, or execute edge-finding sequences.
+
+Tool-height calibration and edge-finding remain local-only until they have explicit bounded contracts for approach/retract motion, probe-source selection, contact/timeouts, tool-table mutation and reload, offset activation, and partial-completion reporting.
 
 Tool-setter positioning uses `POST /v1/machine/tool-setter` with bounded absolute X/Y/Z coordinates and requires powered, idle LinuxCNC. The operation is technician-only; it does not execute arbitrary MDI.
 
 Macro file management uses the typed G-code list/read endpoints and checksum-verified uploads. Macro execution is intentionally not exposed as a generic operation; a future named execution workflow must define its allowed programs, state checks, and confirmation policy.
 
-Dashboard polling uses `GET /v1/telemetry` when the secure agent is enrolled. It returns one bounded operator snapshot per request; the Dashboard reconnects after temporary Wi-Fi loss and does not use the management link as a real-time control loop.
+Dashboard polling uses `GET /v1/telemetry` when the secure agent is enrolled. It returns one bounded operator snapshot per request, including position, distance-to-go, feed/spindle overrides, interpreter status, mode, program-loaded state, and the current motion line. The Dashboard reconnects after temporary Wi-Fi loss and does not use the management link as a real-time control loop.
 
 Spindle PID tuning uses `POST /v1/tuning/pid` and accepts only one of `p`, `i`, `d`, `ff0`, or `ff1` per request. LinuxCNC must be running and idle; the agent rejects arbitrary HAL parameter names.
 
@@ -58,13 +68,13 @@ Backup inventory uses `GET /v1/backups/config` and `GET /v1/backups/gcode`. Thes
 
 Archive transfer uses `GET /v1/backups/config/archive` or `GET /v1/backups/gcode/archive`. Restore uses the matching `POST /restore` endpoint with a checksum and base64 archive. Archives are size-limited, reject traversal/links/devices, require LinuxCNC to be stopped, extract into a temporary directory, and replace the approved root transactionally.
 
-Machine-agent roles are enforced per endpoint: `monitor` can inspect state, logs, HAL pins, and tool tables; `operator` can load programs and set feed/spindle overrides; `technician` can tune spindle PID; `administrator` can deploy, restore, flash firmware, and perform recovery operations. Administrators inherit lower-risk roles.
+Machine-agent roles are enforced per endpoint: `monitor` can inspect state, logs, HAL pins/components/values, and tool tables; `operator` can load programs and set feed/spindle overrides; `technician` can tune spindle PID; `administrator` can deploy, restore, flash firmware, and perform recovery operations. Administrators inherit lower-risk roles.
 
-Application updates use `POST /v1/application/update` to stage a bounded, checksum-verified archive. The agent validates archive members and stores the update without extracting or executing code. Installation and service replacement remain separate local approval operations.
+Application updates use `POST /v1/application/update` to stage a bounded, checksum-verified archive after validating its members. `GET /v1/application/update` reports whether an archive is staged plus the last local apply result. `GET /v1/agent/preflight` reports read-only prerequisites for application updates: the installed release tree, Python executable, update directory, and agent write access. Install `cncfusion-apply-update.service` once on the machine. A local administrator then approves a staged update with `sudo systemctl start cncfusion-apply-update`; before replacement it requires `main.py`, `requirements.txt`, and the agent package entry points including `agent/status.py`, then replaces `/opt/CNCFusion` transactionally, moves the existing `.venv` without copying it, removes the consumed archive, records `applied`, `failed`, or `rolled_back` together with the replacement release identity, and restarts the agent and HAL helper. The network endpoint cannot invoke this installation step.
 
 Agent discovery uses `GET /v1/agent/status`, which returns the agent version, supported typed capabilities, role mode, and current LinuxCNC state. CNCFusion should use this response before enabling optional controls.
 
-Capability discovery is a UI convenience only. The agent still enforces certificate roles and machine-state policy on every operation.
+Capability discovery is a UI convenience only. The agent still enforces certificate roles and machine-state policy on every operation. Recent operator capabilities include `program_control`, `mode_control`, `coolant_control`, `spindle_control`, `tool_change`, and `home_all`; a missing capability means that an older agent deployment does not support the corresponding desktop control.
 
 Example:
 
@@ -80,7 +90,7 @@ The service should be bound to the management interface, protected by a firewall
 
 ## systemd deployment
 
-`cncfusion-agent.service` is a hardened service template for the LinuxCNC host. Copy it into `/etc/systemd/system/`, copy `agent.env.example` to `/etc/cncfusion/agent.env`, and replace the example management bind address, port, and client certificate fingerprint. The environment file must be readable only by the service administrator and agent service account.
+`cncfusion-agent.service` is a hardened service template for the LinuxCNC host. `cncfusion-hal-helper.service` is its local-only companion for HAL inspection, bounded value snapshots, and LinuxCNC status polling: it runs as the LinuxCNC owner, accepts only `show_hal_pins`, `show_hal_components`, validated `read_hal_values`, and `linuxcnc_status` requests over `/run/cncfusion/hal-helper.sock`, and has no network listener. The network-facing agent remains `cncfusion` and cannot access RTAPI or LinuxCNC NML status directly. Copy both units into `/etc/systemd/system/`, copy `agent.env.example` to `/etc/cncfusion/agent.env`, and replace the example management bind address, port, client certificate fingerprint, and helper `User=` value. The environment file must be readable only by the service administrator and agent service account.
 
 Before enabling the service, create the `cncfusion` service account, install the application under `/opt/CNCFusion`, create `/etc/cncfusion/`, install the CA/server certificate/private key with restrictive permissions, and verify that the configured bind address belongs to the management interface. Do not use the control NIC address as the agent bind address.
 
@@ -91,6 +101,8 @@ For production, configure one or more authorized desktop certificates with repea
 ```text
   --client-fingerprint 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
+
+Use SSH only to bootstrap the agent, enroll or rotate certificates, and perform explicitly approved recovery. Once mTLS enrollment succeeds, normal monitoring, deployment, diagnostics, and named machine operations use the HTTPS agent. Rotate a desktop certificate by adding the new fingerprint to the agent allowlist, verifying the new client connection, and only then removing the old fingerprint.
 
 ## CNCFusion client settings
 

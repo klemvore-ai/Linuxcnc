@@ -42,6 +42,14 @@ class MachineAgentClient:
         """Return the machine's bounded HAL pin listing."""
         return self.get("/v1/hal/pins")
 
+    def show_hal_components(self):
+        """Return the machine's bounded HAL component listing."""
+        return self.get("/v1/hal/components")
+
+    def read_hal_values(self, pins):
+        """Return one bounded snapshot for validated HAL pin names."""
+        return self.post("/v1/hal/values", {"pins": pins})
+
     def identify_mesa(self, board, address):
         """Request fixed read-only Mesa hardware identification."""
         return self.post("/v1/mesa/identify", {"board": board, "address": address})
@@ -96,6 +104,14 @@ class MachineAgentClient:
         """Execute one allowlisted operator machine command."""
         return self.post("/v1/machine/command", {"command": command})
 
+    def spindle_command(self, action, rpm=0.0):
+        """Apply one allowlisted spindle direction command at a bounded RPM."""
+        return self.post("/v1/spindle/command", {"action": action, "rpm": rpm})
+
+    def change_tool(self, tool):
+        """Run the fixed tool-change sequence for one validated tool number."""
+        return self.post("/v1/tool/change", {"tool": tool})
+
     def home_axis(self, axis):
         """Request homing for one named axis."""
         return self.post("/v1/machine/home-axis", {"axis": axis})
@@ -105,6 +121,18 @@ class MachineAgentClient:
         return self.post(
             "/v1/machine/probe-z",
             {"operation": "probe_z", "target": target, "velocity": velocity},
+        )
+
+    def touch_off_z(self, target, velocity, plate_thickness, retract=2.0):
+        """Probe a locally selected plate, set the Z work offset, and retract."""
+        return self.post(
+            "/v1/machine/touch-off-z",
+            {
+                "target": target,
+                "velocity": velocity,
+                "plate_thickness": plate_thickness,
+                "retract": retract,
+            },
         )
 
     def move_tool_setter(self, x, y, z):
@@ -153,6 +181,14 @@ class MachineAgentClient:
             "content": base64.b64encode(content).decode("ascii"),
         }
         return self.post("/v1/application/update", payload)
+
+    def application_update_status(self):
+        """Return the staged update and last local-apply status from the machine."""
+        return self.get("/v1/application/update")
+
+    def deployment_preflight(self):
+        """Return read-only prerequisites for secure application updates."""
+        return self.get("/v1/agent/preflight")
 
     def flash_firmware(self, board, address, filename, content):
         """Send one bounded Mesa firmware image through the secure agent."""
@@ -249,7 +285,18 @@ class MachineAgentClient:
                 if not response_body:
                     return {}
                 return json.loads(response_body.decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as error:
+        except HTTPError as error:
+            try:
+                response_body = error.read(1024 * 1024 + 1)
+                if len(response_body) <= 1024 * 1024:
+                    payload = json.loads(response_body.decode("utf-8"))
+                    message = payload.get("error") if isinstance(payload, dict) else None
+                    if isinstance(message, str) and message:
+                        raise MachineAgentError(message) from error
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                pass
+            raise MachineAgentError("Machine agent request failed.") from error
+        except (URLError, TimeoutError, json.JSONDecodeError) as error:
             raise MachineAgentError("Machine agent request failed.") from error
 
 

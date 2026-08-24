@@ -5,6 +5,7 @@ from PyQt6.QtGui import QColor
 from core.canvas import MesaCanvas
 from core.components import MesaComponent, Pin, Wire, ComponentZone
 from core.hal_documents import HALDocumentComposer, HALDocumentError
+from core.machine_agent import client_from_settings
 import time
 import json
 import os
@@ -685,6 +686,16 @@ class WiringTab(QWidget):
         self.canvas.scene.update()
 
     def deploy_hal(self):
+        settings = self.library_tab.parent_app.settings
+        if client_from_settings(settings) is not None:
+            QMessageBox.information(
+                self,
+                "Secure Deployment Required",
+                "Secure mode does not permit arbitrary HAL compilation or remote shell deployment. "
+                "Deploy approved configuration artifacts through the Settings configuration workflow.",
+            )
+            return
+
         ui_pins = self.get_ui_pins()
         processed_wires = set()
         hal_lines = ["# --- Auto-Generated CNC Fusion HAL Output ---"]
@@ -751,7 +762,6 @@ class WiringTab(QWidget):
         # Re-capture the text in case the user made manual edits in the preview window
         hal_content = preview_text.toPlainText()
         
-        settings = self.library_tab.parent_app.settings
         mach_name = settings.get_setting('MACHINE_CONFIG', 'name', 'CNCFusion')
         default_path = settings.get_setting("DEPLOY", "remote_path", f"~/linuxcnc/configs/{mach_name}/custom_postgui.hal")
         

@@ -113,7 +113,7 @@ class HardwareNetworkPage(QWizardPage):
         self.setTitle("Hardware and Network")
         self.setSubTitle("Choose the control hardware and administration network path.")
         form = QFormLayout(self)
-        self.board_input = QLineEdit(settings.get_setting("MESA", "board_model", "7i76e"))
+        self.board_input = QLineEdit(settings.get_setting("MESA", "board_model", "7i76eu"))
         self.control_address_input = QLineEdit(settings.get_setting("MESA", "ip_address", "10.10.10.10"))
         self.network_role_input = QComboBox()
         self.network_role_input.addItems([

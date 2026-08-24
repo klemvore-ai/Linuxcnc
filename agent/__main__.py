@@ -17,6 +17,7 @@ def parse_args():
     parser.add_argument("--private-key-file", required=True)
     parser.add_argument("--config-root", action="append", required=True)
     parser.add_argument("--gcode-root", required=True)
+    parser.add_argument("--hal-helper-socket")
     parser.add_argument("--client-fingerprint", action="append", default=[])
     parser.add_argument("--client-role", action="append", default=[])
     return parser.parse_args()
@@ -26,6 +27,12 @@ def main():
     """Create the configured agent and run it until interrupted."""
     args = parse_args()
     client_roles = parse_role_mapping(args.client_role)
+    fingerprints = [
+        fingerprint.strip()
+        for entry in args.client_fingerprint
+        for fingerprint in entry.split(",")
+        if fingerprint.strip()
+    ]
     tls_context = create_server_tls_context(
         args.ca_file,
         args.certificate_file,
@@ -34,10 +41,10 @@ def main():
     server = MachineAgentServer(
         (args.bind, args.port),
         tls_context,
-        LinuxCNCRuntime(),
+        LinuxCNCRuntime(hal_helper_socket=args.hal_helper_socket),
         args.config_root,
         args.gcode_root,
-        args.client_fingerprint,
+        fingerprints,
         client_roles,
     )
     try:

@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent.policy import AgentPolicyError, validate_action, validate_upload, validate_activation, validate_restart_activation, validate_mesa_identification, validate_tool_table_path, validate_gcode_path, validate_override, validate_pid, validate_firmware, validate_machine_command, validate_home_axis, validate_probe_operation, validate_tool_setter_move
+from agent.policy import AgentPolicyError, validate_action, validate_upload, validate_activation, validate_restart_activation, validate_mesa_identification, validate_tool_table_path, validate_gcode_path, validate_override, validate_pid, validate_firmware, validate_machine_command, validate_spindle_command, validate_tool_change, validate_home_axis, validate_probe_operation, validate_touch_off_z, validate_tool_setter_move, validate_hal_value_request
 
 
 class AgentPolicyTests(unittest.TestCase):
@@ -45,6 +45,57 @@ class AgentPolicyTests(unittest.TestCase):
     def test_rejects_extra_fields_on_shutdown(self):
         with self.assertRaises(AgentPolicyError):
             validate_action({"action": "graceful_shutdown", "force": True}, [self.root])
+
+    def test_accepts_named_coolant_machine_commands(self):
+        self.assertEqual(
+            validate_machine_command({"command": "coolant_mist_on"}),
+            "coolant_mist_on",
+        )
+        self.assertEqual(
+            validate_machine_command({"command": "coolant_flood_on"}),
+            "coolant_flood_on",
+        )
+
+    def test_accepts_named_program_machine_commands(self):
+        self.assertEqual(
+            validate_machine_command({"command": "program_start"}),
+            "program_start",
+        )
+        self.assertEqual(
+            validate_machine_command({"command": "program_pause_resume"}),
+            "program_pause_resume",
+        )
+        self.assertEqual(
+            validate_machine_command({"command": "mode_manual"}),
+            "mode_manual",
+        )
+        self.assertEqual(
+            validate_machine_command({"command": "home_all"}),
+            "home_all",
+        )
+
+    def test_validates_bounded_named_spindle_commands(self):
+        self.assertEqual(validate_spindle_command({"action": "forward", "rpm": 12000}), ("forward", 12000.0))
+        self.assertEqual(validate_spindle_command({"action": "stop", "rpm": 0}), ("stop", 0.0))
+        with self.assertRaises(AgentPolicyError):
+            validate_spindle_command({"action": "forward", "rpm": 0})
+        with self.assertRaises(AgentPolicyError):
+            validate_spindle_command({"action": "forward", "rpm": 100001})
+
+    def test_validates_bounded_tool_change(self):
+        self.assertEqual(validate_tool_change({"tool": 42}), 42)
+        with self.assertRaises(AgentPolicyError):
+            validate_tool_change({"tool": 10000})
+
+    def test_validates_bounded_unique_hal_value_pin_list(self):
+        self.assertEqual(
+            validate_hal_value_request({"pins": ["joint.0.pos-fb", "hm2_7i76e.0.input-00"]}),
+            ["joint.0.pos-fb", "hm2_7i76e.0.input-00"],
+        )
+        with self.assertRaises(AgentPolicyError):
+            validate_hal_value_request({"pins": ["joint.0.pos-fb", "joint.0.pos-fb"]})
+        with self.assertRaises(AgentPolicyError):
+            validate_hal_value_request({"pins": ["joint.0.pos-fb;id"]})
 
     def test_accepts_config_upload_inside_root(self):
         kind, destination = validate_upload(
@@ -236,6 +287,18 @@ class AgentPolicyTests(unittest.TestCase):
             validate_probe_operation({"operation": "mdi", "target": 0, "velocity": 50})
         with self.assertRaises(AgentPolicyError):
             validate_probe_operation({"operation": "probe_z", "target": 0, "velocity": 0})
+        with self.assertRaises(AgentPolicyError):
+            validate_probe_operation({"operation": "probe_z", "target": 1, "velocity": 50})
+
+    def test_touch_off_policy_requires_bounded_downward_probe_and_retract(self):
+        self.assertEqual(
+            validate_touch_off_z({"target": -10, "velocity": 50, "plate_thickness": 6.35, "retract": 2}),
+            (-10.0, 50.0, 6.35, 2.0),
+        )
+        with self.assertRaises(AgentPolicyError):
+            validate_touch_off_z({"target": 1, "velocity": 50, "plate_thickness": 6.35, "retract": 2})
+        with self.assertRaises(AgentPolicyError):
+            validate_touch_off_z({"target": -10, "velocity": 50, "plate_thickness": 6.35, "retract": 0})
 
     def test_tool_setter_move_requires_bounded_coordinates(self):
         self.assertEqual(

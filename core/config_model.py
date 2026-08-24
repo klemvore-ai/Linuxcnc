@@ -62,7 +62,7 @@ class HardwareConfig:
     """Describe the real-time hardware backend and its device identity."""
 
     backend: str = "mesa"
-    board_model: str = "7i76e"
+    board_model: str = "7i76eu"
     address: str = "10.10.10.10"
 
 
@@ -262,7 +262,7 @@ class MachineConfig:
             kinematics=kinematics_map.get(kinematics_text, "trivkins coordinates=xyz"),
             hardware=HardwareConfig(
                 backend="mesa",
-                board_model=settings.get_setting("MESA", "board_model", "7i76e"),
+                board_model=settings.get_setting("MESA", "board_model", "7i76eu"),
                 address=settings.get_setting("MESA", "ip_address", "10.10.10.10"),
             ),
             axes=axes,

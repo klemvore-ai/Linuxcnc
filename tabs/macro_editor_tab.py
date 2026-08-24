@@ -214,7 +214,7 @@ class MacroEditorTab(QWidget):
 
         # Top Toolbar
         toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel("Remote Macro Directory:"))
+        toolbar.addWidget(QLabel("CNC PC Macro Directory:"))
         
         default_macro_dir = self.settings.get_setting("PATHS", "last_macro_dir", "~/linuxcnc/nc_files")
         self.path_input = QLineEdit(default_macro_dir)

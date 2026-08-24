@@ -345,34 +345,47 @@ class ToolTableTab(QWidget):
         threading.Thread(target=run, daemon=True).start()
 
     def highlight_active_tool(self):
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                result = agent_client.read_hal_values(["iocontrol.0.tool-number"])
+                if result.get("error"):
+                    raise RuntimeError(result["error"])
+                out = result.get("values", {}).get("iocontrol.0.tool-number", "")
+            except Exception as error:
+                QMessageBox.warning(self, "Warning", f"Could not determine active tool:\n{error}")
+                return
+        else:
+            out = ""
+
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
-        
-        if not ip or not user:
+
+        if agent_client is None and (not ip or not user):
             QMessageBox.warning(self, "Missing Credentials", "Please set SSH credentials in Settings.")
             return
             
         cmd = "halcmd getp iocontrol.0.tool-number"
         
         try:
-            out = ""
-            if is_local_ip(ip):
-                res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-                out = res.stdout.strip()
-            elif HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                stdin, stdout, stderr = ssh.exec_command(cmd)
-                out = stdout.read().decode().strip()
-                ssh.close()
-            else:
-                res = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", cmd], capture_output=True, text=True, timeout=10)
-                out = res.stdout.strip()
+            if agent_client is None:
+                if is_local_ip(ip):
+                    res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                    out = res.stdout.strip()
+                elif HAS_PARAMIKO:
+                    ssh = paramiko.SSHClient()
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
+                    stdin, stdout, stderr = ssh.exec_command(cmd)
+                    out = stdout.read().decode().strip()
+                    ssh.close()
+                else:
+                    res = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", cmd], capture_output=True, text=True, timeout=10)
+                    out = res.stdout.strip()
 
             try:
-                active_tool = int(out)
+                active_tool = int(float(out))
             except ValueError:
                 QMessageBox.warning(self, "Warning", f"Could not determine active tool. Is LinuxCNC running?\nOutput: {out}")
                 return

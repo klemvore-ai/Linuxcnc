@@ -454,11 +454,11 @@ class SettingsTab(QWidget):
         self.btn_setup_wizard.setStyleSheet("background-color: #00695c; color: white; font-weight: bold; padding: 6px; border-radius: 4px;")
         self.btn_setup_wizard.clicked.connect(self.open_setup_wizard)
         
-        self.btn_launch_linuxcnc = QPushButton("🚀 Launch LinuxCNC Remotely")
+        self.btn_launch_linuxcnc = QPushButton("🚀 Launch LinuxCNC on CNC PC")
         self.btn_launch_linuxcnc.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 6px; border-radius: 4px;")
         self.btn_launch_linuxcnc.clicked.connect(self.launch_linuxcnc)
         
-        self.btn_pull_log = QPushButton("📄 View Remote Log")
+        self.btn_pull_log = QPushButton("📄 View CNC PC Launch Log")
         self.btn_pull_log.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold; padding: 6px; border-radius: 4px;")
         self.btn_pull_log.clicked.connect(self.pull_remote_log)
         
@@ -693,21 +693,31 @@ class SettingsTab(QWidget):
         self.save_btn.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold; padding: 10px; border-radius: 4px;")
         self.save_btn.clicked.connect(self.save_settings)
         
-        self.btn_pull_settings = QPushButton("📥 Pull Settings.ini from Machine")
+        self.btn_pull_settings = QPushButton("📥 Pull Settings.ini from CNC PC")
         self.btn_pull_settings.setStyleSheet("background-color: #d35400; color: white; font-weight: bold; padding: 10px; border-radius: 4px;")
         self.btn_pull_settings.clicked.connect(self.pull_settings)
         
-        self.btn_push_settings = QPushButton("📤 Push Settings.ini to Machine")
+        self.btn_push_settings = QPushButton("📤 Stage Settings.ini on CNC PC")
         self.btn_push_settings.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold; padding: 10px; border-radius: 4px;")
         self.btn_push_settings.clicked.connect(self.push_settings)
 
         self.btn_activate_settings = QPushButton("✅ Activate Staged Settings")
         self.btn_activate_settings.setStyleSheet("background-color: #6a1b9a; color: white; font-weight: bold; padding: 10px; border-radius: 4px;")
         self.btn_activate_settings.clicked.connect(self.activate_staged_settings)
-        
-        self.btn_install_remote = QPushButton("📦 Install / Update App on Remote Machine")
+
+        self.btn_secure_deploy = QPushButton("🚀 Confirm CNC PC Deployment")
+        self.btn_secure_deploy.setStyleSheet("background-color: #f39c12; color: black; font-weight: bold; padding: 10px; border-radius: 4px;")
+        self.btn_secure_deploy.setToolTip("Stage and approve the secure application update on the CNC PC.")
+        self.btn_secure_deploy.clicked.connect(self.install_app_remote)
+
+        self.btn_install_remote = QPushButton("📦 Stage App Update on CNC PC")
         self.btn_install_remote.setStyleSheet("background-color: #f39c12; color: black; font-weight: bold; padding: 10px; border-radius: 4px;")
         self.btn_install_remote.clicked.connect(self.install_app_remote)
+        self.btn_install_remote.setToolTip("Legacy label retained as a compatibility alias for the secure deployment flow.")
+
+        self.btn_update_status = QPushButton("🔎 View Update Status")
+        self.btn_update_status.setStyleSheet("background-color: #34495e; color: white; font-weight: bold; padding: 10px; border-radius: 4px;")
+        self.btn_update_status.clicked.connect(self.show_application_update_status)
         
         # Global Action Bar / Sidebar
         action_sidebar = QVBoxLayout()
@@ -731,7 +741,9 @@ class SettingsTab(QWidget):
         sync_layout.addWidget(self.btn_pull_settings)
         sync_layout.addWidget(self.btn_push_settings)
         sync_layout.addWidget(self.btn_activate_settings)
+        sync_layout.addWidget(self.btn_secure_deploy)
         sync_layout.addWidget(self.btn_install_remote)
+        sync_layout.addWidget(self.btn_update_status)
 
         sync_layout_widget = QGroupBox("Global Actions")
         sync_layout_widget.setStyleSheet("QGroupBox { border: 1px solid #444; border-top: 2px solid #3498db; border-radius: 4px; padding-top: 20px; padding-bottom: 10px; color: #ecf0f1; font-weight: bold; background-color: #1e1e1e; } QGroupBox::title { left: 10px; }")
@@ -743,6 +755,8 @@ class SettingsTab(QWidget):
         diag_layout.addWidget(diag_lbl)
         diag_layout.addWidget(self.btn_vnc)
         diag_layout.addWidget(self.btn_pull_log)
+
+        self.apply_secure_mode_restrictions()
         diag_layout.addWidget(self.chk_terminal_view)
         diag_layout.addWidget(self.chk_auto_launch_local)
         diag_layout.addStretch()
@@ -995,7 +1009,44 @@ class SettingsTab(QWidget):
         QTimer.singleShot(1500, lambda: self.save_btn.setText("Apply & Save Settings"))
         QTimer.singleShot(1500, lambda: self.save_btn.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold; padding: 10px;"))
 
+    def apply_secure_mode_restrictions(self):
+        """Disable Settings actions that only have a legacy SSH/VNC implementation."""
+        if client_from_settings(self.sm) is None:
+            return
+        message = "This action requires legacy SSH or VNC access and is unavailable in secure agent mode."
+        for control in [self.btn_pull_settings, self.btn_vnc]:
+            control.setEnabled(False)
+            control.setToolTip(message)
+
+    def apply_agent_capabilities(self, capabilities):
+        """Disable secure Settings actions unavailable on an older machine agent."""
+        if client_from_settings(self.sm) is None:
+            return
+        available = set(capabilities)
+        capability_map = {
+            "lifecycle": [self.btn_launch_linuxcnc, self.btn_stop_linuxcnc],
+            "configuration_activation": [self.btn_activate_settings],
+            "file_upload": [self.btn_push_settings],
+            "application_update": [self.btn_secure_deploy, self.btn_install_remote, self.btn_update_status],
+            "pid_tuning": [self.btn_apply_pid_live],
+        }
+        for capability, controls in capability_map.items():
+            if capability in available:
+                continue
+            message = f"This machine agent does not support {capability.replace('_', ' ')}."
+            for control in controls:
+                control.setEnabled(False)
+                control.setToolTip(message)
+
     def pull_settings(self):
+        if client_from_settings(self.sm) is not None:
+            QMessageBox.information(
+                self,
+                "Pull Settings Not Available",
+                "Secure mode does not retrieve arbitrary CNC PC settings files. Use staged configuration deployment instead.",
+            )
+            return
+
         ip = self.sm.get_setting("SSH", "ip_address", "")
         user = self.sm.get_setting("SSH", "username", "")
         password = self.sm.get_setting("SSH", "password", "")
@@ -1003,7 +1054,7 @@ class SettingsTab(QWidget):
             QMessageBox.warning(self, "Pull Failed", "SSH credentials are not configured. Please set them in the Mesa Utilities tab.")
             return
         remote_base = self.sm.get_setting("PATHS", "last_remote_cncfusion_dir", "~/CNCFusion")
-        remote_dir, ok = QInputDialog.getText(self, "Pull Settings", "Enter the path to the CNC Fusion folder on the remote machine:", text=remote_base)
+        remote_dir, ok = QInputDialog.getText(self, "Pull Settings", "Enter the path to the CNCFusion folder on the CNC PC:", text=remote_base)
         if not ok or not remote_dir: return
         self.sm.save_setting("PATHS", "last_remote_cncfusion_dir", remote_dir)
         remote_file = f"{remote_dir.rstrip('/')}/settings.ini"
@@ -1028,7 +1079,7 @@ class SettingsTab(QWidget):
             
             self.reload_ui_from_settings()
             
-            QMessageBox.information(self, "Sync Success", "Settings successfully pulled from the remote machine and hot-reloaded into the UI.")
+            QMessageBox.information(self, "Sync Success", "Settings successfully pulled from the CNC PC and hot-reloaded into the UI.")
         except Exception as e:
             QMessageBox.critical(self, "Sync Error", f"Failed to pull settings.ini:\n{e}")
 
@@ -1065,7 +1116,7 @@ class SettingsTab(QWidget):
             return
 
         remote_base = self.sm.get_setting("PATHS", "last_remote_cncfusion_dir", "~/CNCFusion")
-        remote_dir, ok = QInputDialog.getText(self, "Push Settings", "Enter the path to the CNC Fusion folder on the remote machine:", text=remote_base)
+        remote_dir, ok = QInputDialog.getText(self, "Push Settings", "Enter the path to the CNCFusion folder on the CNC PC:", text=remote_base)
         if not ok or not remote_dir: return
         self.sm.save_setting("PATHS", "last_remote_cncfusion_dir", remote_dir)
         remote_file = f"{remote_dir.rstrip('/')}/settings_pending.ini"
@@ -1081,7 +1132,7 @@ class SettingsTab(QWidget):
                 ssh.close()
             else:
                 subprocess.run(["scp", "-o", "BatchMode=yes", local_file, f"{user}@{ip}:{remote_file}"], capture_output=True, timeout=10)
-            QMessageBox.information(self, "Sync Success", "Settings successfully pushed and staged on the remote machine!\n\nThe operator will be prompted to approve the update on the physical machine.")
+            QMessageBox.information(self, "Sync Success", "Settings successfully pushed and staged on the CNC PC!\n\nThe CNC PC operator will be prompted to approve the update.")
         except Exception as e:
             QMessageBox.critical(self, "Sync Error", f"Failed to push settings.ini:\n{e}")
 
@@ -1110,6 +1161,60 @@ class SettingsTab(QWidget):
         except Exception as error:
             QMessageBox.critical(self, "Activation Failed", f"Settings activation failed:\n{error}")
 
+    def show_application_update_status(self):
+        """Display staged archive metadata and the last local update result from the agent."""
+        agent_client = client_from_settings(self.sm)
+        if agent_client is None:
+            QMessageBox.information(
+                self,
+                "Update Status Not Available",
+                "Application update status is available only through the secure machine agent.",
+            )
+            return
+        try:
+            status = agent_client.application_update_status()
+            lines = [
+                "Staged update: " + ("yes" if status.get("staged") else "no"),
+            ]
+            try:
+                preflight = agent_client.deployment_preflight()
+                ready = all(preflight.values())
+                lines.append("Deployment preflight: " + ("ready" if ready else "not ready"))
+                if not ready:
+                    missing = [name.replace("_", " ") for name, value in preflight.items() if not value]
+                    lines.append("Missing: " + ", ".join(missing))
+            except Exception:
+                lines.append("Deployment preflight: unavailable")
+            if status.get("staged"):
+                lines.append(f"Staged size: {status.get('staged_size', 0)} bytes")
+                if status.get("staged_sha256"):
+                    lines.append(f"SHA-256: {status['staged_sha256']}")
+            last_apply = status.get("last_apply")
+            if isinstance(last_apply, dict):
+                lines.append(f"Last local apply: {last_apply.get('status', 'unknown')}")
+                if last_apply.get("agent_version"):
+                    lines.append(f"Applied agent version: {last_apply['agent_version']}")
+                if isinstance(last_apply.get("capabilities"), list):
+                    lines.append(f"Applied capability count: {len(last_apply['capabilities'])}")
+                if last_apply.get("archive_sha256"):
+                    lines.append(f"Applied archive SHA-256: {last_apply['archive_sha256']}")
+                if last_apply.get("error"):
+                    lines.append(f"Details: {last_apply['error']}")
+            try:
+                live_agent = agent_client.agent_status()
+                live_version = live_agent.get("agent_version", "unknown")
+                lines.append(f"Live agent version: {live_version}")
+                if isinstance(last_apply, dict) and last_apply.get("agent_version"):
+                    if last_apply["agent_version"] == live_version:
+                        lines.append("Applied and live agent versions match.")
+                    else:
+                        lines.append("Warning: applied and live agent versions differ.")
+            except Exception:
+                lines.append("Live agent version: unavailable")
+            QMessageBox.information(self, "Application Update Status", "\n".join(lines))
+        except Exception as error:
+            QMessageBox.critical(self, "Update Status Failed", f"Failed to read secure update status:\n{error}")
+
     def install_app_remote(self):
         ip = self.sm.get_setting("SSH", "ip_address", "")
         user = self.sm.get_setting("SSH", "username", "")
@@ -1120,7 +1225,7 @@ class SettingsTab(QWidget):
             QMessageBox.warning(self, "Install Failed", "SSH credentials are not configured.")
             return
             
-        reply = QMessageBox.question(self, "Confirm Remote Deployment", 
+        reply = QMessageBox.question(self, "Confirm CNC PC Deployment", 
                                      f"Are you sure you want to package and send the CNC Fusion application to {ip}?\n\nThis will prompt the physical machine operator to accept the installation.", 
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply != QMessageBox.StandardButton.Yes:
@@ -1135,11 +1240,11 @@ class SettingsTab(QWidget):
         
         try:
             with tarfile.open(tar_path, "w:gz") as tar:
-                source_dir = os.getcwd()
+                source_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 for root, dirs, files in os.walk(source_dir):
-                    dirs[:] = [d for d in dirs if d not in ['__pycache__', '.git', 'exports', 'backups', 'recovery', 'dist', 'build', 'CNCFusion_layout_editor']]
+                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['.venv', '__pycache__', 'exports', 'backups', 'recovery', 'dist', 'build', 'CNCFusion_layout_editor']]
                     for file in files:
-                        if file.endswith(('.pyc', '.ini', '.hal', '.json')) or file == "cncfusion_install.tar.gz": continue
+                        if file.startswith('.') or file.endswith(('.pyc', '.ini', '.hal')) or file == "cncfusion_install.tar.gz": continue
                         full_path = os.path.join(root, file)
                         arcname = os.path.relpath(full_path, source_dir)
                         tar.add(full_path, arcname=arcname)
@@ -1154,11 +1259,16 @@ class SettingsTab(QWidget):
                 if len(content) > 32 * 1024 * 1024:
                     raise ValueError("Application update archive is too large.")
                 result = agent_client.stage_application_update(content)
+                update_status = agent_client.application_update_status()
+                staged_size = update_status.get("staged_size", 0)
                 QMessageBox.information(
                     self,
                     "Update Staged",
                     "Application update was securely staged on the LinuxCNC machine.\n\n"
-                    "A separate local operator approval and installation step is required.",
+                    f"Staged archive size: {staged_size} bytes\n\n"
+                    "To approve and install locally on the LinuxCNC machine, run:\n\n"
+                    "sudo systemctl start cncfusion-apply-update\n\n"
+                    "The installer replaces /opt/CNCFusion transactionally and preserves its .venv.",
                 )
             except Exception as error:
                 QMessageBox.critical(self, "Update Failed", f"Secure application staging failed:\n{error}")
@@ -1214,7 +1324,7 @@ class SettingsTab(QWidget):
                 ssh.exec_command(install_cmd)
                 ssh.close()
                 
-                QMessageBox.information(self, "Success", "App successfully installed!\n\nA shortcut has been generated on the remote machine's desktop.")
+                QMessageBox.information(self, "Success", "App successfully installed!\n\nA shortcut has been generated on the CNC PC desktop.")
             else:
                 QMessageBox.critical(self, "Failed", "Paramiko is required to deploy the app. Please install it (pip install paramiko).")
         except Exception as e:
@@ -1333,7 +1443,7 @@ class SettingsTab(QWidget):
         units = "mm" if "Metric" in self.mach_units_cb.currentText() else "inch"
         drive = self.mach_drive_cb.currentText()
         
-        board_model = self.sm.get_setting("MESA", "board_model", "7i76e").lower().replace("eu", "e")
+        board_model = self.sm.get_setting("MESA", "board_model", "7i76eu").lower()
         
         if kinematics == "XYZ (3-Axis)":
             coords, joints, k_str = "X Y Z", 3, "trivkins coordinates=xyz"
@@ -1927,7 +2037,7 @@ class SettingsTab(QWidget):
             return
             
         remote_base = self.sm.get_setting("PATHS", "last_remote_config_dir", "~/linuxcnc/configs")
-        remote_dir, ok = QInputDialog.getText(self, "Remote Directory", "Enter remote config directory path:", text=f"{remote_base}/{mach_name}")
+        remote_dir, ok = QInputDialog.getText(self, "CNC PC Directory", "Enter CNC PC config directory path:", text=f"{remote_base}/{mach_name}")
         
         if not ok or not remote_dir:
             return
@@ -1984,7 +2094,7 @@ class SettingsTab(QWidget):
         remote_base = self.sm.get_setting("PATHS", "last_remote_config_dir", "~/linuxcnc/configs")
         default_ini_path = f"{remote_base}/{name}/{name}.ini"
 
-        ini_path, ok = QInputDialog.getText(self, "Launch LinuxCNC", "Enter remote INI path to launch:", text=default_ini_path)
+        ini_path, ok = QInputDialog.getText(self, "Launch LinuxCNC", "Enter CNC PC INI path to launch:", text=default_ini_path)
         if not ok or not ini_path:
             return
             
@@ -2026,7 +2136,7 @@ class SettingsTab(QWidget):
             
         if is_running:
             reply = QMessageBox.question(self, "LinuxCNC is already running!", 
-                                         "LinuxCNC is currently active on the remote machine. This means the physical operator might be using it.\n\n"
+                                         "LinuxCNC is currently active on the CNC PC. This means the local operator might be using it.\n\n"
                                          "Launching it remotely will FORCE KILL their session and take control.\n\n"
                                          "Are you absolutely sure you want to take over?", 
                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -2094,7 +2204,7 @@ cat /tmp/linuxcnc_launch.log
             if self.chk_terminal_view.isChecked() or "error" in full_log.lower() or "traceback" in full_log.lower():
                 msg = QMessageBox(self)
                 msg.setWindowTitle("LinuxCNC Launch Log")
-                msg.setText("Here is the exact output from the remote machine:")
+                msg.setText("Here is the exact output from the CNC PC:")
                 msg.setDetailedText(full_log if full_log else "(No output received. Check if it launched!)")
                 msg.setStyleSheet("QLabel{min-width: 400px; font-weight: bold;}")
                 msg.exec()
@@ -2155,7 +2265,7 @@ cat /tmp/linuxcnc_launch.log
             return
 
         default_log_path = "/tmp/linuxcnc_launch.log"
-        log_path, ok = QInputDialog.getText(self, "Pull Remote Log", "Enter remote log file path:", text=default_log_path)
+        log_path, ok = QInputDialog.getText(self, "Pull CNC PC Log", "Enter CNC PC log file path:", text=default_log_path)
         if not ok or not log_path:
             return
         
@@ -2190,7 +2300,7 @@ cat /tmp/linuxcnc_launch.log
                 
             full_log = (out.strip() + "\n" + err.strip()).strip()
             
-            self.terminal_view.append(f"\n--- Pulled Remote Log: {log_path} ---")
+            self.terminal_view.append(f"\n--- Pulled CNC PC Log: {log_path} ---")
             self.terminal_view.append(full_log if full_log else "(File is empty or does not exist)")
             self.terminal_view.verticalScrollBar().setValue(self.terminal_view.verticalScrollBar().maximum())
             

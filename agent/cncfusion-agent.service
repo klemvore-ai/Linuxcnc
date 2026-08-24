@@ -2,6 +2,8 @@
 Description=CNCFusion LinuxCNC Machine Agent
 After=network-online.target
 Wants=network-online.target
+Requires=cncfusion-hal-helper.service
+After=cncfusion-hal-helper.service
 
 [Service]
 Type=simple
@@ -9,14 +11,14 @@ User=cncfusion
 Group=cncfusion
 WorkingDirectory=/opt/CNCFusion
 EnvironmentFile=/etc/cncfusion/agent.env
-ExecStart=/usr/bin/python3 -m agent --bind ${CNCFUSION_AGENT_BIND} --port ${CNCFUSION_AGENT_PORT} --ca-file /etc/cncfusion/ca.crt --certificate-file /etc/cncfusion/server.crt --private-key-file /etc/cncfusion/server.key --config-root /home/linuxcnc/linuxcnc/configs --gcode-root /home/linuxcnc/linuxcnc/nc_files --client-fingerprint ${CNCFUSION_CLIENT_FINGERPRINT}
+ExecStart=/opt/CNCFusion/.venv/bin/python -m agent --bind ${CNCFUSION_AGENT_BIND} --port ${CNCFUSION_AGENT_PORT} --ca-file /etc/cncfusion/ca.crt --certificate-file /etc/cncfusion/server.crt --private-key-file /etc/cncfusion/server.key --config-root /home/darrell/linuxcnc/configs --gcode-root /home/darrell/linuxcnc/nc_files --hal-helper-socket /run/cncfusion/hal-helper.sock --client-fingerprint ${CNCFUSION_CLIENT_FINGERPRINT}
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
-PrivateTmp=true
+PrivateTmp=false
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/cncfusion/updates /home/linuxcnc/linuxcnc/configs /home/linuxcnc/linuxcnc/nc_files
+ReadWritePaths=/var/lib/cncfusion/updates /home/darrell/linuxcnc/configs /home/darrell/linuxcnc/nc_files
 
 [Install]
 WantedBy=multi-user.target

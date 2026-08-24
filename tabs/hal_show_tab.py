@@ -7,6 +7,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QTableWidgetItem, QHeaderView, QCheckBox, QMessageBox, QLineEdit, QInputDialog, QFileDialog)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 
+from core.machine_agent import client_from_settings
+
 LOCAL_IPS = ['localhost', '127.0.0.1']
 try:
     _out = subprocess.check_output("hostname -I", shell=True, text=True, stderr=subprocess.DEVNULL)
@@ -127,6 +129,38 @@ while True:
             for _ in range(20):
                 if not self.running: break
                 self.msleep(100)
+
+    def stop(self):
+        self.running = False
+
+
+class AgentHalFetcherThread(QThread):
+    """Poll typed HAL pin listings through an enrolled machine agent."""
+
+    data_fetched = pyqtSignal(str)
+    error_occurred = pyqtSignal(str)
+
+    def __init__(self, agent_client):
+        super().__init__()
+        self.agent_client = agent_client
+        self.running = False
+
+    def run(self):
+        self.running = True
+        while self.running:
+            try:
+                result = self.agent_client.show_hal_pins()
+                output = result.get("output", "")
+                error = result.get("error", "")
+                if output:
+                    self.data_fetched.emit(output)
+                if error:
+                    self.error_occurred.emit(error)
+                    return
+            except Exception as error:
+                self.error_occurred.emit(f"HAL pin polling failed: {error}")
+                return
+            self.msleep(1000)
 
     def stop(self):
         self.running = False
@@ -269,6 +303,16 @@ class HalShowTab(QWidget):
             self.btn_live.setText("▶ Start Live Monitor")
             self.btn_live.setStyleSheet("background-color: #27ae60;")
         else:
+            agent_client = client_from_settings(self.settings)
+            if agent_client is not None:
+                self.fetcher = AgentHalFetcherThread(agent_client)
+                self.fetcher.data_fetched.connect(self.handle_new_data)
+                self.fetcher.error_occurred.connect(self.handle_error)
+                self.fetcher.start()
+                self.btn_live.setText("⏹ Stop Live Monitor")
+                self.btn_live.setStyleSheet("background-color: #c0392b;")
+                return
+
             ip = self.settings.get_setting("SSH", "ip_address", "")
             user = self.settings.get_setting("SSH", "username", "")
             password = self.settings.get_setting("SSH", "password", "")
@@ -392,9 +436,12 @@ class HalShowTab(QWidget):
                     led_container = QWidget()
                     led_layout = QHBoxLayout(led_container)
                     led = LedIndicator()
-                    
-                    led.setCursor(Qt.CursorShape.PointingHandCursor)
-                    led.setToolTip("Click to manually force state (halcmd setp)")
+                    secure_mode = client_from_settings(self.settings) is not None
+                    if secure_mode:
+                        led.setToolTip("Secure mode does not permit arbitrary HAL pin writes")
+                    else:
+                        led.setCursor(Qt.CursorShape.PointingHandCursor)
+                        led.setToolTip("Click to manually force state (halcmd setp)")
                     led.clicked_led.connect(lambda new_state, name=p['name']: self.toggle_pin_state(name, new_state))
                     
                     led_layout.addWidget(led)
@@ -406,7 +453,11 @@ class HalShowTab(QWidget):
                     item = QTableWidgetItem()
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     if p['type'] in ['float', 's32', 'u32']:
-                        item.setToolTip("Double-click to set value (halcmd setp)")
+                        item.setToolTip(
+                            "Secure mode does not permit arbitrary HAL pin writes"
+                            if client_from_settings(self.settings) is not None
+                            else "Double-click to set value (halcmd setp)"
+                        )
                     table_widget.setItem(i, 4, item)
                     
         # Update live values smoothly without rebuilding the table
@@ -497,6 +548,14 @@ class HalShowTab(QWidget):
 
     def prompt_set_value(self, row, col, table_widget):
         if col != 4: return
+
+        if client_from_settings(self.settings) is not None:
+            QMessageBox.information(
+                self,
+                "HAL Write Not Available",
+                "Secure mode does not permit arbitrary HAL pin writes. Use a named, approved tuning operation instead.",
+            )
+            return
         
         name_item = table_widget.item(row, 1)
         type_item = table_widget.item(row, 2)
@@ -512,6 +571,14 @@ class HalShowTab(QWidget):
                 self.send_setp_cmd(pin_name, new_val.strip())
 
     def send_setp_cmd(self, name, value_str):
+        if client_from_settings(self.settings) is not None:
+            QMessageBox.information(
+                self,
+                "HAL Write Not Available",
+                "Secure mode does not permit arbitrary HAL pin writes. Use a named, approved tuning operation instead.",
+            )
+            return
+
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")

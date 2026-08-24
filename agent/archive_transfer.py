@@ -72,10 +72,13 @@ def validate_application_archive(content, expected_sha256):
     archive_path = validate_archive(content, expected_sha256)
     invalid_root = False
     with tarfile.open(archive_path, "r:gz") as archive:
+        names = set()
         for member in archive.getmembers():
             if member.name.startswith("/") or member.name.startswith("."):
                 invalid_root = True
                 break
+            if member.isfile():
+                names.add(member.name)
     if invalid_root:
         os.unlink(archive_path)
         raise ArchiveError("Application archive contains an invalid root path.")

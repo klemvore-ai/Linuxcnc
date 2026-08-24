@@ -71,6 +71,8 @@ The existing Settings tab currently exposes this bridge through **Validate Machi
 
 The current compatibility checkpoint covers the standard INI sections, gantry joint structure, and Mesa `7i76eu` naming. The Generate button must continue using the established generator until the new HAL backend also represents project I/O wiring, MPG/encoder behavior, spindle options, safety signals, and blueprint output.
 
+For Mesa 7i76E hardware, preserve `7i76eu` as the Mesaflash device identifier. HAL rendering deliberately normalizes this to the LinuxCNC HostMot2 prefix `hm2_7i76e`; these are distinct tool-specific names for the same board.
+
 `IOMapping` is the first explicit HAL wiring layer. The settings bridge currently imports joint home/limit signals and external E-stop mappings into semantic LinuxCNC targets, and the Mesa renderer emits those mappings with inversion handling. Blueprint wiring, MPG, spindle, and richer safety logic remain separate migration slices so their behavior can be verified against known-good HAL files.
 
 Generated net names use stable hyphenated identifiers derived from the semantic target; the target pin remains the LinuxCNC pin name. This keeps signal naming separate from physical Mesa addresses and leaves room for EtherCAT mappings later.
@@ -176,6 +178,8 @@ CNCFusion project metadata may preserve wizard state, but LinuxCNC must not requ
 - Use separate management and control network interfaces when available.
 - Do not send real-time motion or safety traffic over Wi-Fi.
 - Do not accept arbitrary remote shell commands in the agent.
+- Treat SSH as bootstrap, certificate-enrollment, and explicitly approved recovery transport only. Normal monitoring, deployment, diagnostics, and named machine operations use the mTLS agent after enrollment.
+- Rotate desktop client certificates with overlap: authorize the replacement fingerprint, verify its mTLS connection, then remove the old fingerprint. Never replace or revoke the only working client identity before the replacement has been tested.
 - Enrolled secure-agent mode disables the legacy custom-shell command UI; add typed agent operations for supported diagnostics instead.
 - Validate paths, file types, payload sizes, checksums, and machine state.
 - Keep startup, graceful shutdown, recovery, deployment, and motion authorization distinct.
@@ -183,6 +187,10 @@ CNCFusion project metadata may preserve wizard state, but LinuxCNC must not requ
 Axis homing uses the named `POST /v1/machine/home-axis` operation. It accepts only a standard axis identifier and requires powered LinuxCNC on the machine. Arbitrary homing or MDI strings are not sent through the secure agent.
 
 The first typed probe operation is `POST /v1/machine/probe-z`, restricted to the `technician` role and powered/idle LinuxCNC. Existing tool-setter and edge-finding workflows contain multiple motion steps and remain legacy until they are decomposed into reviewed, bounded operations.
+
+The first typed touch-off workflow is `POST /v1/machine/touch-off-z`. It requires the probe source to be selected locally, verifies a downward probe contact, applies only the requested Z work offset, and retracts a bounded distance. Tool-height calibration and edge-finding remain separate workflows because they combine multiple moves, additional measurements, and persistent result handling.
+
+Before tool-height calibration is exposed through the secure agent, define and test its complete contract: a locally selected and verified tool-setter input; bounded machine-coordinate approach and clearance moves; fast and slow probe passes; contact, timeout, and local error-channel handling at every step; the exact formula using the configured setter reference; atomic tool-table persistence and reload; post-update offset activation; safe retract/return behavior; and an explicit partial-completion record if a later step fails after the tool table changed. Edge-finding requires an equivalent reviewed contract per supported geometry.
 
 Tool-setter positioning is the first decomposed calibration operation at `POST /v1/machine/tool-setter`. It accepts bounded coordinates, requires powered/idle LinuxCNC, and uses fixed local MDI commands. Full tool-setter calibration remains separate because it includes multi-step probing and result calculation.
 
@@ -195,6 +203,8 @@ Legacy SSH consumers remain compatible during migration. When `keyring` is insta
 The machine agent applies role checks in its request handler. Certificates may be mapped with `--client-role FINGERPRINT=role,role`; the operation matrix is `monitor` for inspection, `operator` for program loading and overrides, `technician` for PID tuning, and `administrator` for deployment, restore, firmware, and recovery. The desktop UI is not the security boundary; the agent repeats these checks on the LinuxCNC host.
 
 The LinuxCNC host deployment template is [agent/cncfusion-agent.service](../agent/cncfusion-agent.service), with deployment variables shown in [agent/agent.env.example](../agent/agent.env.example). The agent should bind to the management interface, while the control NIC remains dedicated to Mesa/EtherCAT real-time traffic. Service hardening and firewall configuration are required before production use.
+
+The operator-facing installation walkthrough is [docs/LINUXCNC_BEGINNER_SETUP.md](LINUXCNC_BEGINNER_SETUP.md). It assumes little Linux experience, labels command locations, verifies the project copy before installation, and explains the `requirements.txt` error without requiring users to understand Python packaging internals.
 
 `tests/test_agent_http.py` provides an in-process HTTP harness with an injected peer certificate and fake runtime. It verifies request routing, certificate allowlisting, combined monitor/operator roles, and machine-state rejection without requiring LinuxCNC or TLS certificates on the development machine.
 
@@ -216,3 +226,5 @@ python -m unittest tests.test_agent_policy tests.test_lifecycle tests.test_remot
 ```
 
 Before enabling remote deployment on a machine, test certificate enrollment, firewall/interface selection, graceful shutdown, staged upload, rollback, and recovery on a non-production LinuxCNC host.
+
+Before treating a machine as ready for normal secure operation, complete the real-machine acceptance checklist in [docs/LINUXCNC_BEGINNER_SETUP.md](LINUXCNC_BEGINNER_SETUP.md): verify service health, mTLS capability discovery, read-only diagnostics, named controls in safe states, local update approval, and the local-only jogging boundary. Multi-step probing and coordinate-offset workflows remain local-only until their complete safety contracts are implemented.

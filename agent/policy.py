@@ -11,6 +11,24 @@ class AgentPolicyError(ValueError):
     pass
 
 
+HAL_PIN_NAME_PATTERN = re.compile(r"[A-Za-z0-9_.:-]{1,160}")
+MAX_HAL_VALUE_PINS = 16
+
+
+def validate_hal_value_request(payload):
+    """Validate one bounded read-only HAL value snapshot request."""
+    if not isinstance(payload, dict) or set(payload) != {"pins"}:
+        raise AgentPolicyError("HAL value request fields are invalid.")
+    pins = payload["pins"]
+    if not isinstance(pins, list) or not 1 <= len(pins) <= MAX_HAL_VALUE_PINS:
+        raise AgentPolicyError(f"Request between 1 and {MAX_HAL_VALUE_PINS} HAL pins.")
+    if not all(isinstance(pin, str) and HAL_PIN_NAME_PATTERN.fullmatch(pin) for pin in pins):
+        raise AgentPolicyError("HAL pin name is invalid.")
+    if len(set(pins)) != len(pins):
+        raise AgentPolicyError("HAL pin names must be unique.")
+    return pins
+
+
 def validate_action(payload, allowed_config_roots):
     """Validate a lifecycle payload and return its action plus normalized INI."""
     if not isinstance(payload, dict) or not isinstance(payload.get("action"), str):
@@ -205,10 +223,51 @@ def validate_machine_command(payload):
     """Validate one explicitly named operator machine command."""
     if not isinstance(payload, dict) or set(payload) != {"command"}:
         raise AgentPolicyError("Machine command fields are invalid.")
-    allowed = {"abort", "power_on", "power_off", "estop", "estop_reset", "override_limits"}
+    allowed = {
+        "abort",
+        "power_on",
+        "power_off",
+        "estop",
+        "estop_reset",
+        "override_limits",
+        "coolant_mist_on",
+        "coolant_flood_on",
+        "coolant_off",
+        "program_start",
+        "program_pause_resume",
+        "mode_manual",
+        "mode_auto",
+        "home_all",
+        "unhome_all",
+    }
     if payload["command"] not in allowed:
         raise AgentPolicyError("Machine command is not supported.")
     return payload["command"]
+
+
+def validate_spindle_command(payload):
+    """Validate one named spindle direction command and bounded RPM."""
+    if not isinstance(payload, dict) or set(payload) != {"action", "rpm"}:
+        raise AgentPolicyError("Spindle command fields are invalid.")
+    action = payload["action"]
+    rpm = payload["rpm"]
+    if action not in {"forward", "reverse", "stop"}:
+        raise AgentPolicyError("Spindle action is not supported.")
+    if not isinstance(rpm, (int, float)) or isinstance(rpm, bool) or not 0.0 <= rpm <= 100000.0:
+        raise AgentPolicyError("Spindle RPM is outside the allowed range.")
+    if action != "stop" and rpm < 1.0:
+        raise AgentPolicyError("Spindle RPM must be at least 1.")
+    return action, float(rpm)
+
+
+def validate_tool_change(payload):
+    """Validate one bounded tool number for the fixed tool-change sequence."""
+    if not isinstance(payload, dict) or set(payload) != {"tool"}:
+        raise AgentPolicyError("Tool-change fields are invalid.")
+    tool = payload["tool"]
+    if not isinstance(tool, int) or isinstance(tool, bool) or not 0 <= tool <= 9999:
+        raise AgentPolicyError("Tool number is outside the allowed range.")
+    return tool
 
 
 def validate_home_axis(payload):
@@ -229,11 +288,33 @@ def validate_probe_operation(payload):
         raise AgentPolicyError("Probe operation is not supported.")
     if not all(isinstance(payload[field], (int, float)) and not isinstance(payload[field], bool) for field in ("target", "velocity")):
         raise AgentPolicyError("Probe target and velocity must be numeric.")
-    if not -10000.0 <= payload["target"] <= 10000.0:
-        raise AgentPolicyError("Probe target is outside the allowed range.")
+    if not -10000.0 <= payload["target"] < 0.0:
+        raise AgentPolicyError("Probe target must be a bounded downward Z distance.")
     if not 1.0 <= payload["velocity"] <= 10000.0:
         raise AgentPolicyError("Probe velocity is outside the allowed range.")
     return float(payload["target"]), float(payload["velocity"])
+
+
+def validate_touch_off_z(payload):
+    """Validate bounded parameters for one touch-plate Z work-offset operation."""
+    required = {"target", "velocity", "plate_thickness", "retract"}
+    if not isinstance(payload, dict) or set(payload) != required:
+        raise AgentPolicyError("Touch-off fields are invalid.")
+    if not all(isinstance(payload[field], (int, float)) and not isinstance(payload[field], bool) for field in required):
+        raise AgentPolicyError("Touch-off values must be numeric.")
+    target = float(payload["target"])
+    velocity = float(payload["velocity"])
+    plate_thickness = float(payload["plate_thickness"])
+    retract = float(payload["retract"])
+    if not -10000.0 <= target < 0.0:
+        raise AgentPolicyError("Touch-off target must be a bounded downward Z distance.")
+    if not 1.0 <= velocity <= 10000.0:
+        raise AgentPolicyError("Touch-off velocity is outside the allowed range.")
+    if not -1000.0 <= plate_thickness <= 1000.0:
+        raise AgentPolicyError("Touch-plate thickness is outside the allowed range.")
+    if not 0.1 <= retract <= 100.0:
+        raise AgentPolicyError("Touch-off retract is outside the allowed range.")
+    return target, velocity, plate_thickness, retract
 
 
 def validate_tool_setter_move(payload):

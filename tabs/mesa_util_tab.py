@@ -89,7 +89,8 @@ class MesaUtilTab(QWidget):
         conn_layout.addWidget(self.credential_status, 2, 0, 1, 4)
         
         btn_layout = QHBoxLayout()
-        self.btn_test_ssh = QPushButton("🔌 Test SSH Connection")
+        connection_test_label = "🔌 Test Machine-Agent Connection" if client_from_settings(self.settings) else "🔌 Test SSH Connection"
+        self.btn_test_ssh = QPushButton(connection_test_label)
         self.btn_test_ssh.setStyleSheet("background-color: #8e44ad;")
         self.btn_test_ssh.clicked.connect(self.test_ssh)
         self.btn_save_auth = QPushButton("💾 Save Credentials")
@@ -124,7 +125,7 @@ class MesaUtilTab(QWidget):
         self.btn_hal_show = QPushButton("🛠️ Show HAL Pins")
         self.btn_hal_show.clicked.connect(self.run_hal_show)
         self.btn_linuxcnc_status = QPushButton("📊 Show HAL Comps")
-        self.btn_linuxcnc_status.clicked.connect(lambda: self.execute_remote_command("halcmd show comp"))
+        self.btn_linuxcnc_status.clicked.connect(self.run_hal_components)
         self.btn_kill_hal = QPushButton("🛑 Kill LinuxCNC/HAL")
         self.btn_kill_hal.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;")
         self.btn_kill_hal.clicked.connect(self.kill_linuxcnc)
@@ -186,7 +187,7 @@ class MesaUtilTab(QWidget):
         os_layout = QVBoxLayout(os_group)
         os_layout.setSpacing(10)
 
-        self.btn_vnc = QPushButton("🖥️ Remote Desktop (VNC)")
+        self.btn_vnc = QPushButton("🖥️ CNC PC Desktop (VNC)")
         self.btn_vnc.setStyleSheet("background-color: #3498db; color: white; font-weight: bold;")
         self.btn_vnc.clicked.connect(self.launch_vnc)
         self.btn_dl_vnc = QPushButton("🌐 Download VNC Viewer")
@@ -245,10 +246,34 @@ class MesaUtilTab(QWidget):
         self.status_label = QLabel("Ready.")
         self.status_label.setStyleSheet("color: #aaaaaa; font-style: italic; padding-top: 5px;")
         layout.addWidget(self.status_label)
+        self.apply_secure_mode_restrictions()
 
     def set_status(self, text):
         self.status_label.setText(text)
         QApplication.processEvents()  # Force the UI to refresh immediately
+
+    def apply_secure_mode_restrictions(self):
+        """Disable controls that only have a legacy SSH or shell implementation."""
+        if client_from_settings(self.settings) is None:
+            return
+        message = "This action requires legacy SSH or shell access and is unavailable in secure agent mode."
+        controls = [
+            self.btn_ping,
+            self.btn_read_net,
+            self.btn_kill_hal,
+            self.custom_cmd_input,
+            self.btn_custom_cmd,
+            self.btn_backup,
+            self.btn_vnc,
+            self.btn_autostart,
+            self.btn_setup_nic,
+            self.btn_optimize_nic,
+            self.btn_optimize_os,
+            self.btn_nopasswd_sudo,
+        ]
+        for control in controls:
+            control.setEnabled(False)
+            control.setToolTip(message)
 
     def _credential_status_text(self):
         """Describe whether the OS keyring is available without exposing secrets."""
@@ -286,6 +311,12 @@ class MesaUtilTab(QWidget):
             QMessageBox.critical(self, "Secure Storage Failed", str(error))
 
     def execute_remote_command(self, cmd, use_sudo=False):
+        if client_from_settings(self.settings) is not None:
+            message = "Generic remote shell commands are disabled in secure agent mode. Use an approved machine-agent operation instead."
+            self.console.append(message)
+            self.set_status("Use an approved machine-agent operation instead.")
+            return None, message
+
         ip = self.ip_input.text()
         user = self.user_input.text()
         password = self.pass_input.text()
@@ -366,6 +397,21 @@ class MesaUtilTab(QWidget):
             return
         out, err = self.execute_remote_command("halcmd show pin")
 
+    def run_hal_components(self):
+        """Show HAL components through the typed agent when it is enrolled."""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                result = agent_client.show_hal_components()
+                if result.get("output"):
+                    self.console.append(result["output"])
+                if result.get("error"):
+                    self.console.append(f"[ERROR]:\n{result['error']}")
+            except Exception as error:
+                self.console.append(f"[AGENT FAILED]: {error}")
+            return
+        self.execute_remote_command("halcmd show comp")
+
     def run_mesaflash_identify(self):
         """Identify the Mesa board through the typed agent operation when enrolled."""
         agent_client = client_from_settings(self.settings)
@@ -380,8 +426,6 @@ class MesaUtilTab(QWidget):
                 self.console.append(f"[ERROR]:\n{result['error']}")
         except Exception as error:
             self.console.append(f"[AGENT FAILED]: {error}")
-        if out and "Component Pins:" in out:
-            self.btn_import.setEnabled(True)
 
     def test_ssh(self):
         self.console.clear()

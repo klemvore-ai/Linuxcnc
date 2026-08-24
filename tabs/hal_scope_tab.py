@@ -9,6 +9,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor, QPen, QPainter, QBrush, QPainterPath
 
+from core.machine_agent import client_from_settings
+
 LOCAL_IPS = ['localhost', '127.0.0.1']
 try:
     _out = subprocess.check_output("hostname -I", shell=True, text=True, stderr=subprocess.DEVNULL)
@@ -124,6 +126,48 @@ while True:
             for _ in range(20):
                 if not self.running: break
                 self.msleep(100)
+
+    def stop(self):
+        self.running = False
+
+
+class AgentScopeFetcherThread(QThread):
+    """Poll bounded HAL value snapshots through the enrolled machine agent."""
+
+    data_fetched = pyqtSignal(dict)
+    error_occurred = pyqtSignal(str)
+
+    def __init__(self, agent_client, pins):
+        super().__init__()
+        self.agent_client = agent_client
+        self.pins = pins
+        self.running = False
+
+    def run(self):
+        self.running = True
+        while self.running:
+            try:
+                result = self.agent_client.read_hal_values(self.pins)
+                values = {}
+                for pin, value in result.get("values", {}).items():
+                    if value.lower() == "true":
+                        values[pin] = 1.0
+                    elif value.lower() == "false":
+                        values[pin] = 0.0
+                    else:
+                        values[pin] = float(value)
+                if values:
+                    self.data_fetched.emit(values)
+                if result.get("error"):
+                    self.error_occurred.emit(result["error"])
+                    return
+            except (TypeError, ValueError) as error:
+                self.error_occurred.emit(f"HAL value response is invalid: {error}")
+                return
+            except Exception as error:
+                self.error_occurred.emit(f"HAL value polling failed: {error}")
+                return
+            self.msleep(100)
 
     def stop(self):
         self.running = False
@@ -373,6 +417,16 @@ class HalScopeTab(QWidget):
         else:
             if not self.active_pins:
                 QMessageBox.information(self, "No Pins", "Please add HAL pins to monitor first.")
+                return
+
+            agent_client = client_from_settings(self.settings)
+            if agent_client is not None:
+                self.fetcher = AgentScopeFetcherThread(agent_client, list(self.active_pins.keys()))
+                self.fetcher.data_fetched.connect(self.handle_new_data)
+                self.fetcher.error_occurred.connect(self.handle_error)
+                self.fetcher.start()
+                self.btn_run.setText("⏹ Stop Scope")
+                self.btn_run.setStyleSheet("background-color: #c0392b;")
                 return
                 
             ip = self.settings.get_setting("SSH", "ip_address", "")

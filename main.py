@@ -1,9 +1,14 @@
 import sys
 import os
+import shutil
 import threading
 from PyQt6.QtWidgets import QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QLabel, QMessageBox
 from PyQt6.QtCore import QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QShortcut, QKeySequence, QIcon
+
+
+APPLICATION_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
+os.chdir(APPLICATION_DIRECTORY)
 
 HAS_PSUTIL = False
 try:
@@ -29,6 +34,22 @@ except:
 
 def is_local_ip(ip):
     return ip in LOCAL_IPS
+
+
+def user_settings_path():
+    """Return a writable per-user settings path outside the deployed application."""
+    home = os.path.expanduser("~")
+    if os.name == "nt":
+        config_root = os.environ.get("APPDATA", os.path.join(home, "AppData", "Roaming"))
+    else:
+        config_root = os.environ.get("XDG_CONFIG_HOME", os.path.join(home, ".config"))
+    settings_directory = os.path.join(config_root, "CNCFusion")
+    os.makedirs(settings_directory, exist_ok=True)
+    destination = os.path.join(settings_directory, "settings.ini")
+    legacy_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.ini")
+    if not os.path.exists(destination) and os.path.isfile(legacy_path):
+        shutil.copyfile(legacy_path, destination)
+    return destination
 
 # Import modules
 from settings_manager import SettingsManager
@@ -100,6 +121,22 @@ class SSHSyncWorker(QThread):
         except Exception as e:
             self.sync_complete.emit(False, str(e))
 
+
+class AgentStatusWorker(QThread):
+    """Discover the enrolled machine agent without blocking application startup."""
+
+    status_complete = pyqtSignal(bool, object)
+
+    def __init__(self, agent_client):
+        super().__init__()
+        self.agent_client = agent_client
+
+    def run(self):
+        try:
+            self.status_complete.emit(True, self.agent_client.agent_status())
+        except Exception as error:
+            self.status_complete.emit(False, str(error))
+
 class CNCFusionApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -110,7 +147,7 @@ class CNCFusionApp(QMainWindow):
         self.setWindowIcon(QIcon("assets/CNCFusionWindowsicon.ico"))
 
         # Initialize the Settings Manager
-        self.settings = SettingsManager("settings.ini")
+        self.settings = SettingsManager(user_settings_path())
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -184,6 +221,13 @@ class CNCFusionApp(QMainWindow):
         self.perform_auto_sync()
 
     def perform_auto_sync(self):
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            self.agent_status_worker = AgentStatusWorker(agent_client)
+            self.agent_status_worker.status_complete.connect(self.on_agent_status_complete)
+            self.agent_status_worker.start()
+            return
+
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
@@ -194,7 +238,7 @@ class CNCFusionApp(QMainWindow):
             self.sync_worker.sync_complete.connect(self.on_auto_sync_complete)
             self.sync_worker.start()
         else:
-            self.sync_status_lbl.setText("Local Dev Mode")
+            self.sync_status_lbl.setText("Development PC Mode")
             self.sync_status_lbl.setStyleSheet("color: #3498db; font-weight: bold; padding-left: 15px;")
             
     def on_auto_sync_complete(self, success, msg):
@@ -207,8 +251,21 @@ class CNCFusionApp(QMainWindow):
                 self.sync_status_lbl.setText("Connect via Setup Wizard")
                 self.sync_status_lbl.setStyleSheet("color: #7f8c8d; font-weight: bold; padding-left: 15px;")
             else:
-                self.sync_status_lbl.setText("🟡 Control Machine Offline (Using Local Mode)")
+                self.sync_status_lbl.setText("🟡 CNC PC Offline (Development PC Mode)")
                 self.sync_status_lbl.setStyleSheet("color: #f1c40f; font-weight: bold; padding-left: 15px;")
+
+    def on_agent_status_complete(self, success, result):
+        """Update startup status from the secure machine agent discovery response."""
+        if success:
+            version = result.get("agent_version", "unknown")
+            capabilities = result.get("capabilities", [])
+            self.dashboard_tab.apply_agent_capabilities(capabilities)
+            self.settings_tab.apply_agent_capabilities(capabilities)
+            self.sync_status_lbl.setText(f"🟢 Secure Agent {version} ({len(capabilities)} capabilities)")
+            self.sync_status_lbl.setStyleSheet("color: #27ae60; font-weight: bold; padding-left: 15px;")
+        else:
+            self.sync_status_lbl.setText("🟡 Secure Agent Unreachable")
+            self.sync_status_lbl.setStyleSheet("color: #f1c40f; font-weight: bold; padding-left: 15px;")
 
     def apply_tab_visibility(self):
         self.tabs.clear()

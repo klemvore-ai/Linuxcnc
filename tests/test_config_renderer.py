@@ -26,7 +26,7 @@ class ConfigurationRendererTests(unittest.TestCase):
                 ("MACHINE_CONFIG", "name"): "Shop Mill",
                 ("MACHINE_CONFIG", "units"): "Metric (mm)",
                 ("MACHINE_CONFIG", "kinematics"): "XYYZ (Gantry 3-Axis)",
-                ("MESA", "board_model"): "7i76e",
+                ("MESA", "board_model"): "7i76eu",
                 ("MESA", "ip_address"): "10.10.10.20",
                 ("AXIS_X", "min"): "0",
                 ("AXIS_X", "max"): "1000",

@@ -4,10 +4,11 @@ import json
 import ssl
 import base64
 import binascii
+import traceback
 from urllib.parse import unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from agent.policy import AgentPolicyError, validate_action, validate_upload, validate_activation, validate_restart_activation, validate_mesa_identification, validate_tool_table_path, validate_gcode_path, validate_override, validate_pid, validate_firmware, validate_machine_command, validate_home_axis, validate_probe_operation, validate_tool_setter_move
+from agent.policy import AgentPolicyError, validate_action, validate_upload, validate_activation, validate_restart_activation, validate_mesa_identification, validate_tool_table_path, validate_gcode_path, validate_override, validate_pid, validate_firmware, validate_machine_command, validate_spindle_command, validate_tool_change, validate_home_axis, validate_probe_operation, validate_touch_off_z, validate_tool_setter_move, validate_hal_value_request
 from agent.bundles import BundleError, approve_bundle, bundle_status
 from agent.backups import BackupError, backup_manifest
 from agent.archive_transfer import ArchiveError, create_archive, restore_archive
@@ -56,14 +57,26 @@ class MachineAgentServer:
                 if self.path == "/v1/hal/pins":
                     self._send_json(200, runtime.show_hal_pins())
                     return
+                if self.path == "/v1/hal/components":
+                    self._send_json(200, runtime.show_hal_components())
+                    return
                 if self.path == "/v1/machine/state":
                     self._send_json(200, runtime.machine_state())
                     return
                 if self.path == "/v1/telemetry":
-                    self._send_json(200, runtime.telemetry())
+                    try:
+                        self._send_json(200, runtime.telemetry())
+                    except Exception as error:
+                        self._send_error(503, f"Machine telemetry is unavailable: {str(error)[-512:]}")
                     return
                 if self.path == "/v1/agent/status":
                     self._send_json(200, build_status(runtime, role_mode))
+                    return
+                if self.path == "/v1/agent/preflight":
+                    self._send_json(200, runtime.deployment_preflight(application_staging_root))
+                    return
+                if self.path == "/v1/application/update":
+                    self._send_json(200, runtime.application_update_status(application_staging_root))
                     return
                 if self.path == "/v1/logs/launch":
                     self._send_json(200, runtime.read_launch_log())
@@ -104,6 +117,9 @@ class MachineAgentServer:
                 if self.path == "/v1/files":
                     self._upload_file()
                     return
+                if self.path == "/v1/hal/values":
+                    self._read_hal_values()
+                    return
                 if self.path == "/v1/mesa/identify":
                     self._identify_mesa()
                     return
@@ -125,11 +141,20 @@ class MachineAgentServer:
                 if self.path == "/v1/machine/command":
                     self._machine_command()
                     return
+                if self.path == "/v1/spindle/command":
+                    self._spindle_command()
+                    return
+                if self.path == "/v1/tool/change":
+                    self._change_tool()
+                    return
                 if self.path == "/v1/machine/home-axis":
                     self._home_axis()
                     return
                 if self.path == "/v1/machine/probe-z":
                     self._probe_z()
+                    return
+                if self.path == "/v1/machine/touch-off-z":
+                    self._touch_off_z()
                     return
                 if self.path == "/v1/machine/tool-setter":
                     self._move_tool_setter()
@@ -188,6 +213,19 @@ class MachineAgentServer:
                     self._send_error(400, str(error))
                 except Exception:
                     self._send_error(500, "File upload failed.")
+
+            def _read_hal_values(self):
+                """Return one validated, bounded snapshot of HAL pin values."""
+                try:
+                    length = int(self.headers.get("Content-Length", "-1"))
+                    if length < 0 or length > MAX_REQUEST_BYTES:
+                        raise AgentPolicyError("Request is missing or too large.")
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    self._send_json(200, runtime.read_hal_values(validate_hal_value_request(payload)))
+                except AgentPolicyError as error:
+                    self._send_error(400, str(error))
+                except Exception:
+                    self._send_error(500, "HAL value read failed.")
 
             def _activate_configuration(self):
                 """Promote a validated pending INI through the runtime adapter."""
@@ -328,6 +366,10 @@ class MachineAgentServer:
                     self._send_json(202, result)
                 except (ArchiveError, ValueError, binascii.Error) as error:
                     self._send_error(409, str(error))
+                except Exception as error:
+                    self.log_error("Application update staging failed: %s", error)
+                    self.log_error(traceback.format_exc())
+                    self._send_error(500, "Application update staging failed.")
 
             def _machine_command(self):
                 """Execute one validated operator machine command."""
@@ -343,6 +385,40 @@ class MachineAgentServer:
                     self._send_error(400, str(error))
                 except Exception:
                     self._send_error(409, "Machine command was rejected.")
+
+            def _spindle_command(self):
+                """Apply one validated spindle direction and speed command."""
+                try:
+                    length = int(self.headers.get("Content-Length", "-1"))
+                    if length < 0 or length > MAX_REQUEST_BYTES:
+                        raise AgentPolicyError("Request is missing or too large.")
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    action, rpm = validate_spindle_command(payload)
+                    runtime.spindle_command(action, rpm)
+                    self._send_json(202, {"accepted": True, "action": action, "rpm": rpm})
+                except AgentPolicyError as error:
+                    self._send_error(400, str(error))
+                except MachineStateError as error:
+                    self._send_error(409, str(error))
+                except Exception:
+                    self._send_error(409, "Spindle command was rejected.")
+
+            def _change_tool(self):
+                """Run the fixed tool-change sequence for one validated tool number."""
+                try:
+                    length = int(self.headers.get("Content-Length", "-1"))
+                    if length < 0 or length > MAX_REQUEST_BYTES:
+                        raise AgentPolicyError("Request is missing or too large.")
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    tool = validate_tool_change(payload)
+                    runtime.change_tool(tool)
+                    self._send_json(202, {"accepted": True, "tool": tool})
+                except AgentPolicyError as error:
+                    self._send_error(400, str(error))
+                except MachineStateError as error:
+                    self._send_error(409, str(error))
+                except Exception:
+                    self._send_error(409, "Tool change was rejected.")
 
             def _home_axis(self):
                 """Home one validated axis through the local runtime."""
@@ -377,6 +453,23 @@ class MachineAgentServer:
                     self._send_error(409, str(error))
                 except Exception:
                     self._send_error(409, "Z probing was rejected.")
+
+            def _touch_off_z(self):
+                """Run one validated touch-plate Z work-offset operation."""
+                try:
+                    length = int(self.headers.get("Content-Length", "-1"))
+                    if length < 0 or length > MAX_REQUEST_BYTES:
+                        raise AgentPolicyError("Request is missing or too large.")
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    target, velocity, plate_thickness, retract = validate_touch_off_z(payload)
+                    result = runtime.touch_off_z(target, velocity, plate_thickness, retract)
+                    self._send_json(202, {"accepted": True, "operation": "touch_off_z", **result})
+                except AgentPolicyError as error:
+                    self._send_error(400, str(error))
+                except MachineStateError as error:
+                    self._send_error(409, str(error))
+                except Exception:
+                    self._send_error(409, "Touch-off was rejected.")
 
             def _move_tool_setter(self):
                 """Move to validated tool-setter coordinates through the runtime."""
@@ -493,13 +586,13 @@ class MachineAgentServer:
 
             def _required_role(self):
                 """Return the minimum role required by the requested endpoint."""
-                if self.path in {"/v1/lifecycle", "/v1/machine/state", "/v1/telemetry", "/v1/hal/pins", "/v1/logs/launch", "/v1/gcode"} or self.path.startswith("/v1/tool-table/") or self.path.startswith("/v1/gcode/"):
+                if self.path in {"/v1/lifecycle", "/v1/machine/state", "/v1/telemetry", "/v1/agent/status", "/v1/agent/preflight", "/v1/hal/pins", "/v1/hal/components", "/v1/hal/values", "/v1/logs/launch", "/v1/gcode"} or self.path.startswith("/v1/tool-table/") or self.path.startswith("/v1/gcode/"):
                     return "monitor"
-                if self.path in {"/v1/program/open", "/v1/tuning/override", "/v1/machine/command", "/v1/machine/home-axis", "/v1/tool-table/reload"}:
+                if self.path in {"/v1/program/open", "/v1/tuning/override", "/v1/machine/command", "/v1/spindle/command", "/v1/tool/change", "/v1/machine/home-axis", "/v1/tool-table/reload"}:
                     return "operator"
                 if self.path == "/v1/tuning/pid":
                     return "technician"
-                if self.path in {"/v1/machine/probe-z", "/v1/machine/tool-setter"}:
+                if self.path in {"/v1/machine/probe-z", "/v1/machine/touch-off-z", "/v1/machine/tool-setter"}:
                     return "technician"
                 return "administrator"
 

@@ -6,6 +6,8 @@ This application bridges the gap between machine configuration, logic wiring, UI
 
 For maintainers and contributors, see the [Architecture Guide](docs/ARCHITECTURE.md) for the service boundaries, security model, lifecycle rules, and future Mesa/EtherCAT extension path.
 
+For first-time LinuxCNC machine setup, follow the [Beginner LinuxCNC Setup Guide](docs/LINUXCNC_BEGINNER_SETUP.md). It explains where commands run, how to verify each step, and how to avoid mixing the management network with the Mesa/EtherCAT control network.
+
 ---
 
 ## Table of Contents
