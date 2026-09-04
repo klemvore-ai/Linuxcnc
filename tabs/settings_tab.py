@@ -318,7 +318,11 @@ class SettingsTab(QWidget):
         self.chk_enable_spindle_at_speed.setChecked(self.sm.get_setting('MACHINE_CONFIG', 'enable_spindle_at_speed', 'True') == 'True')
         self.chk_enable_spindle_fault = QCheckBox("Enable Spindle Alarm / Fault Input")
         self.chk_enable_spindle_fault.setChecked(self.sm.get_setting('MACHINE_CONFIG', 'enable_spindle_fault', 'True') == 'True')
-        self.chk_enable_tool_change = QCheckBox("Enable Manual Tool Change Loopback")
+        self.chk_enable_tool_change = QCheckBox("Auto-Acknowledge Tool Changes (No Manual Swap / No Height Probe)")
+        self.chk_enable_tool_change.setToolTip(
+            "Leave unchecked if you physically swap tools by hand. The Dashboard will then prompt you on M6, "
+            "auto-probe the new tool's length at the tool setter, and acknowledge the change for you."
+        )
         self.chk_enable_tool_change.setChecked(self.sm.get_setting('MACHINE_CONFIG', 'enable_tool_change', 'True') == 'True')
         self.chk_enable_coolant = QCheckBox("Enable Coolant (Mist & Flood) Outputs")
         self.chk_enable_coolant.setChecked(self.sm.get_setting('MACHINE_CONFIG', 'enable_coolant', 'True') == 'True')
@@ -1443,13 +1447,13 @@ class SettingsTab(QWidget):
         units = "mm" if "Metric" in self.mach_units_cb.currentText() else "inch"
         drive = self.mach_drive_cb.currentText()
         
-        board_model = self.sm.get_setting("MESA", "board_model", "7i76eu").lower()
+        board_model = self.sm.get_setting("MESA", "board_model", "7i76eu").lower().replace("eu", "e")
         
         if kinematics == "XYZ (3-Axis)":
             coords, joints, k_str = "X Y Z", 3, "trivkins coordinates=xyz"
             axes_list, joint_axes = ['X', 'Y', 'Z'], ['X', 'Y', 'Z']
         elif kinematics == "XYYZ (Gantry 3-Axis)":
-            coords, joints, k_str = "X Y Z", 4, "trivkins coordinates=xyyz kinstype=BOTH"
+            coords, joints, k_str = "X Y Y Z", 4, "trivkins coordinates=xyyz kinstype=BOTH"
             axes_list, joint_axes = ['X', 'Y', 'Z'], ['X', 'Y', 'Y', 'Z']
         elif kinematics == "XYZ A (4-Axis)":
             coords, joints, k_str = "X Y Z A", 4, "trivkins coordinates=xyza"
@@ -1516,9 +1520,20 @@ class SettingsTab(QWidget):
 
         # Set the startup code to match the selected units, ensuring G-code is interpreted correctly.
         startup_code = "G21" if units == "mm" else "G20"
+        tool_setter_x = self.tool_setter_x.value()
+        tool_setter_y = self.tool_setter_y.value()
+        setter_vel = self.setter_vel.value()
+        try:
+            setter_ref_z = float(self.sm.get_setting("PROBING", "setter_ref_z", "0.0") or 0.0)
+        except ValueError:
+            setter_ref_z = 0.0
+        max_probe_depth = 2.0 if units == "inch" else 50.0
         ini_content.extend([
             f"[HAL]", f"HALUI = halui", f"HALFILE = {name}.hal", f"HALFILE = {name}_blueprint.hal", f"POSTGUI_HALFILE = custom_postgui.hal", f"",
-            f"[RS274NGC]", f"PARAMETER_FILE = linuxcnc.var", f"RS274NGC_STARTUP_CODE = {startup_code} G40 G90 G94 G97 G64 P0.025", f"",
+            f"[RS274NGC]", f"PARAMETER_FILE = linuxcnc.var", f"RS274NGC_STARTUP_CODE = {startup_code} G40 G90 G94 G97 G64 P0.025",
+            f"SUBROUTINE_PATH = .", f"",
+            f"[TOOL_SETTER]", f"X = {tool_setter_x:.4f}", f"Y = {tool_setter_y:.4f}",
+            f"VEL = {setter_vel:.2f}", f"REF_Z = {setter_ref_z:.4f}", f"MAX_PROBE_DEPTH = {max_probe_depth:.4f}", f"",
             f"[TASK]", f"TASK = milltask", f"CYCLE_TIME = 0.010", f"",
             f"[EMCIO]", f"EMCIO = io", f"CYCLE_TIME = 0.100", f"TOOL_TABLE = tool.tbl", f"",
             f"[EMCMOT]", f"EMCMOT = motmod", f"COMM_TIMEOUT = 1.0", f"SERVO_PERIOD = 1000000", f"" # Base thread for stepper/servo
@@ -1752,12 +1767,20 @@ class SettingsTab(QWidget):
             if pin: net_hw_input("spindle-fault", pin, "spindle.0.amp-fault-in")
             
         blueprint_hal.append("")
-        
+
+        # Tool-prepare is a "get ready" handshake, not a physical swap confirmation.
+        # Always auto-loop it, even for manual tool changes, so the machine doesn't
+        # stall before it ever reaches the tool-change step the operator controls.
+        blueprint_hal.extend([
+            "# --- Tool Prepare (always auto-acknowledged) ---",
+            "net tool-prepare-loop iocontrol.0.tool-prepare => iocontrol.0.tool-prepared",
+            ""
+        ])
+
         if self.chk_enable_tool_change.isChecked():
             blueprint_hal.extend([
                 "# --- Tool Change (Manual Loopback) ---",
                 "net tool-change-loop iocontrol.0.tool-change => iocontrol.0.tool-changed",
-                "net tool-prepare-loop iocontrol.0.tool-prepare => iocontrol.0.tool-prepared",
                 ""
             ])
             
@@ -1924,25 +1947,64 @@ class SettingsTab(QWidget):
         
         cncfusion_gui_content = [
             "#!/usr/bin/env python3",
-            "import time",
+            "\"\"\"LinuxCNC DISPLAY entry point: launch the CNCFusion Qt dashboard.\"\"\"",
+            "import os",
+            "import subprocess",
             "import sys",
+            "",
             "try:",
             "    import hal",
             "    h = hal.component('cncfusion_gui')",
             "    h.ready()",
             "except ImportError:",
-            "    pass",
+            "    h = None",
+            "",
+            "APPLICATION_ROOT = '/opt/CNCFusion'",
+            "PYTHON_EXECUTABLE = os.path.join(APPLICATION_ROOT, '.venv', 'bin', 'python')",
+            "MAIN_SCRIPT = os.path.join(APPLICATION_ROOT, 'main.py')",
+            "if not os.path.isfile(PYTHON_EXECUTABLE):",
+            "    PYTHON_EXECUTABLE = sys.executable",
+            "",
             "try:",
-            "    while True:",
-            "        time.sleep(1)",
-            "except KeyboardInterrupt:",
-            "    pass"
+            "    subprocess.run([PYTHON_EXECUTABLE, MAIN_SCRIPT], cwd=APPLICATION_ROOT)",
+            "finally:",
+            "    if h is not None:",
+            "        del h"
         ]
         
         hal_content = self.align_hal_lines(hal_content)
         blueprint_hal = self.align_hal_lines(blueprint_hal)
         postgui_hal = self.align_hal_lines(postgui_hal)
-        
+
+        retract_distance = "0.08" if units == "inch" else "2.0"
+        retouch_depth = "-0.16" if units == "inch" else "-4.0"
+        tool_height_probe_content = [
+            "; Probe the current tool's length at the fixed tool setter and set its offset.",
+            "; Call as: o<tool_height_probe> call [tool_number]",
+            "; Reads position/speed/depth from the [TOOL_SETTER] section of the active INI.",
+            "o<tool_height_probe> sub",
+            "#<tool_num> = #1",
+            "#<setter_x> = #<_ini[TOOL_SETTER]X>",
+            "#<setter_y> = #<_ini[TOOL_SETTER]Y>",
+            "#<setter_vel> = #<_ini[TOOL_SETTER]VEL>",
+            "#<setter_ref_z> = #<_ini[TOOL_SETTER]REF_Z>",
+            "#<max_depth> = #<_ini[TOOL_SETTER]MAX_PROBE_DEPTH>",
+            "G90",
+            "G53 G0 Z0",
+            "G53 G0 X#<setter_x> Y#<setter_y>",
+            "G91",
+            "G38.2 Z[0 - #<max_depth>] F[#<setter_vel> * 4]",
+            f"G0 Z{retract_distance}",
+            f"G38.2 Z{retouch_depth} F#<setter_vel>",
+            "G90",
+            "#<tool_length> = [#5063 - #<setter_ref_z>]",
+            "G10 L1 P#<tool_num> Z#<tool_length>",
+            "G43 H#<tool_num>",
+            "G53 G0 Z0",
+            "o<tool_height_probe> endsub",
+            "M2",
+        ]
+
         export_dir = os.path.join(os.getcwd(), "exports", name)
         os.makedirs(export_dir, exist_ok=True)
         
@@ -1953,6 +2015,7 @@ class SettingsTab(QWidget):
         tool_tbl_path = os.path.join(export_dir, "tool.tbl")
         var_path = os.path.join(export_dir, "linuxcnc.var")
         gui_path = os.path.join(export_dir, "cncfusion_gui.py")
+        tool_probe_path = os.path.join(export_dir, "tool_height_probe.ngc")
         
         try:
             hal_composer = HALDocumentComposer(export_dir)
@@ -1979,6 +2042,8 @@ class SettingsTab(QWidget):
                 f.write("\n".join(var_content))
             with open(gui_path, 'w', newline='\n') as f:
                 f.write("\n".join(cncfusion_gui_content))
+            with open(tool_probe_path, 'w', newline='\n') as f:
+                f.write("\n".join(tool_height_probe_content))
             
             QDesktopServices.openUrl(QUrl.fromLocalFile(export_dir))
             
@@ -2014,7 +2079,7 @@ class SettingsTab(QWidget):
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
-            allowed_suffixes = {".ini", ".hal", ".tbl", ".var"}
+            allowed_suffixes = {".ini", ".hal", ".tbl", ".var", ".ngc"}
             try:
                 uploaded = []
                 for filename in sorted(os.listdir(local_dir)):
@@ -2024,9 +2089,11 @@ class SettingsTab(QWidget):
                         uploaded.append(filename)
                 QMessageBox.information(
                     self,
-                    "Deployment Staged",
-                    "Securely staged files:\n\n" + "\n".join(uploaded) +
-                    "\n\nThe operator must approve activation on the LinuxCNC machine.",
+                    "Deployment Complete",
+                    "Securely uploaded files:\n\n" + "\n".join(uploaded) +
+                    "\n\nThese files are already active at their live location on the CNC PC. "
+                    "There is no separate activation step for this deployment; restart LinuxCNC on the "
+                    "CNC PC to load the new configuration. (\"Activate Staged Settings\" is only for settings.ini.)",
                 )
             except Exception as error:
                 QMessageBox.critical(self, "Deployment Failed", f"Secure configuration deployment failed:\n{error}")

@@ -1,7 +1,11 @@
 import unittest
 import base64
 import hashlib
+import os
+import stat
+import tempfile
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
@@ -198,6 +202,18 @@ class RemoteLifecycleTests(unittest.TestCase):
                 runtime.probe_z(-10.0, 50.0)
 
         controller.mdi.assert_called_once_with("G91 G38.2 Z-10.0000 F50.0000")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file permission bits are not enforced on Windows.")
+    def test_upload_file_writes_group_and_world_readable_permissions(self):
+        runtime = LinuxCNCRuntime()
+        with tempfile.TemporaryDirectory() as root:
+            destination = os.path.join(root, "nc_files", "active_program.ngc")
+            content = b"G0 X0 Y0"
+            runtime.upload_file(destination, content, hashlib.sha256(content).hexdigest())
+
+            mode = stat.S_IMODE(os.stat(destination).st_mode)
+            self.assertEqual(mode, 0o664)
+            self.assertEqual(Path(destination).read_bytes(), content)
 
     def test_touch_off_requires_probe_contact_then_sets_z_offset_and_retracts(self):
         runtime = LinuxCNCRuntime()

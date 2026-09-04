@@ -559,6 +559,9 @@ while True:
         out['JOINTS'] = int(getattr(s, 'joints', getattr(s, 'axes', 3)))
         out['AXIS_MASK'] = int(getattr(s, 'axis_mask', 7))
         out['UNITS'] = "inch" if s.linear_units == 1.0 else "mm"
+        out['TOOL_IN_SPINDLE'] = int(getattr(s, 'tool_in_spindle', 0))
+        out['POCKET_PREPPED'] = int(getattr(s, 'pocket_prepped', -1))
+        out['TASK_BLOCKED'] = getattr(s, 'exec_state', 2) not in (1, 2)
         
         try:
             out['ABSOLUTE_X'] = s.actual_position[0]
@@ -750,6 +753,8 @@ class MachineDashboard(QWidget):
         self.is_estopped = True
         self.machine_state = "ESTOP"
         self.active_jogs = set()
+        self._tool_change_prompt_active = False
+        self._tool_change_last_pocket = -1
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
         self.ssh_connected = False
@@ -2804,7 +2809,9 @@ except Exception as e: pass"""
                     with open(local_dest, 'w', encoding='utf-8') as f:
                         f.write(content)
                     remote_path = local_dest
-                except: pass
+                except Exception as error:
+                    self.error_signal.emit(f"G-code upload failed: {error}")
+                    return
             elif HAS_PARAMIKO:
                 try:
                     ssh = paramiko.SSHClient()
@@ -2816,7 +2823,9 @@ except Exception as e: pass"""
                         f.write(content.encode('utf-8'))
                     sftp.close()
                     ssh.close()
-                except: pass
+                except Exception as error:
+                    self.error_signal.emit(f"G-code upload failed: {error}")
+                    return
             else:
                 try:
                     subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", f"mkdir -p {remote_dir}"], capture_output=True, timeout=5)
@@ -2825,12 +2834,62 @@ except Exception as e: pass"""
                         temp_path = f.name
                     subprocess.run(["scp", "-o", "BatchMode=yes", temp_path, f"{user}@{ip}:{remote_path}"], capture_output=True, timeout=10)
                     os.remove(temp_path)
-                except: pass
+                except Exception as error:
+                    self.error_signal.emit(f"G-code upload failed: {error}")
+                    return
                 
             py_code = f"import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.program_open('{remote_path}')\nexcept: pass"
             self._send_b64_py_cmd(py_code)
             
         threading.Thread(target=task, daemon=True).start()
+
+    def _check_tool_change_request(self):
+        """Detect a pending manual M6 and offer an automatic tool-length probe."""
+        if client_from_settings(self.settings) is not None:
+            return  # Secure mode does not yet support automatic manual tool-change probing.
+        blocked = self.mock_coords.get('TASK_BLOCKED', False)
+        if not blocked:
+            if self._tool_change_prompt_active:
+                self._tool_change_prompt_active = False
+                self._tool_change_last_pocket = -1
+            return
+        if self._tool_change_prompt_active:
+            return
+        pocket = self.mock_coords.get('POCKET_PREPPED', -1)
+        current_tool = self.mock_coords.get('TOOL_IN_SPINDLE', 0)
+        if pocket < 0 or pocket == current_tool or pocket == self._tool_change_last_pocket:
+            return
+        self._tool_change_last_pocket = pocket
+        self._tool_change_prompt_active = True
+        reply = QMessageBox.question(
+            self,
+            "Manual Tool Change",
+            f"LinuxCNC is requesting Tool T{pocket}.\n\n"
+            "Install the tool now, then click Yes to continue the program.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._run_manual_tool_change_sequence(pocket)
+        else:
+            self._tool_change_prompt_active = False
+
+    def _run_manual_tool_change_sequence(self, tool_num):
+        """Acknowledge a manual tool change so the paused AUTO cycle can resume.
+
+        LinuxCNC will not accept MDI/mode-switch commands while the AUTO
+        interpreter is paused mid-M6, so this only asserts the tool-changed
+        handshake. Automatic tool-length probing must be embedded as ordinary
+        G-code (e.g. a probing subroutine call) immediately after the T#/M6
+        line in the post-processed program, since that runs in normal AUTO
+        mode with no mode conflict.
+        """
+        py_code = """import os, time
+try:
+    os.system("halcmd setp iocontrol.0.tool-changed 1")
+    time.sleep(0.3)
+    os.system("halcmd setp iocontrol.0.tool-changed 0")
+except Exception: pass"""
+        self._send_b64_py_cmd(py_code, timeout=15)
 
     def load_gcode(self, text_widget):
         default_dir = os.path.expanduser("~")
@@ -3688,7 +3747,15 @@ except Exception as e:
         for key in ['FEED_OVR', 'SPINDLE_OVR', 'ABSOLUTE_X', 'ABSOLUTE_Y', 'ABSOLUTE_Z', 'DTG_X', 'DTG_Y', 'DTG_Z']:
             if key in coords:
                 self.mock_coords[key] = coords[key]
-                
+
+        if 'TOOL_IN_SPINDLE' in coords:
+            self.mock_coords['TOOL_IN_SPINDLE'] = coords['TOOL_IN_SPINDLE']
+        if 'POCKET_PREPPED' in coords:
+            self.mock_coords['POCKET_PREPPED'] = coords['POCKET_PREPPED']
+        if 'TASK_BLOCKED' in coords:
+            self.mock_coords['TASK_BLOCKED'] = coords['TASK_BLOCKED']
+        self._check_tool_change_request()
+
         if 'ERROR' in coords and coords['ERROR']:
             if getattr(self, '_last_lcnc_err', '') != coords['ERROR']:
                 QMessageBox.warning(self, "LinuxCNC Error", f"The machine aborted with the following error:\n\n{coords['ERROR']}")

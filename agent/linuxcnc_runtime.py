@@ -624,13 +624,14 @@ class LinuxCNCRuntime:
         os.makedirs(os.path.dirname(destination), exist_ok=True)
         if backup_root and os.path.exists(destination):
             os.makedirs(backup_root, exist_ok=True)
-            shutil.copy2(destination, os.path.join(backup_root, os.path.basename(destination)))
+            shutil.copyfile(destination, os.path.join(backup_root, os.path.basename(destination)))
         file_descriptor, temporary_path = tempfile.mkstemp(dir=os.path.dirname(destination))
         try:
             with os.fdopen(file_descriptor, "wb") as temporary_file:
                 temporary_file.write(content)
                 temporary_file.flush()
                 os.fsync(temporary_file.fileno())
+            os.chmod(temporary_path, 0o664)
             os.replace(temporary_path, destination)
         except Exception:
             if os.path.exists(temporary_path):

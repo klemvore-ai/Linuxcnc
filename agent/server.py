@@ -4,6 +4,7 @@ import json
 import ssl
 import base64
 import binascii
+import logging
 import traceback
 from urllib.parse import unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +21,8 @@ from agent.status import build_status
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_UPLOAD_BYTES = 16 * 1024 * 1024
 MAX_APPLICATION_BYTES = 32 * 1024 * 1024
+
+logger = logging.getLogger("cncfusion.agent")
 
 
 class MachineAgentServer:
@@ -211,7 +214,8 @@ class MachineAgentServer:
                     self._send_json(202, {"accepted": True, "kind": kind})
                 except (AgentPolicyError, ValueError, base64.binascii.Error) as error:
                     self._send_error(400, str(error))
-                except Exception:
+                except Exception as error:
+                    logger.error("File upload failed: %s\n%s", error, traceback.format_exc())
                     self._send_error(500, "File upload failed.")
 
             def _read_hal_values(self):
@@ -367,12 +371,12 @@ class MachineAgentServer:
                 except (ArchiveError, ValueError, binascii.Error) as error:
                     self._send_error(409, str(error))
                 except Exception as error:
-                    self.log_error("Application update staging failed: %s", error)
-                    self.log_error(traceback.format_exc())
+                    logger.error("Application update staging failed: %s\n%s", error, traceback.format_exc())
                     self._send_error(500, "Application update staging failed.")
 
             def _machine_command(self):
                 """Execute one validated operator machine command."""
+                payload = None
                 try:
                     length = int(self.headers.get("Content-Length", "-1"))
                     if length < 0 or length > MAX_REQUEST_BYTES:
@@ -383,7 +387,10 @@ class MachineAgentServer:
                     self._send_json(202, {"accepted": True, "command": command})
                 except AgentPolicyError as error:
                     self._send_error(400, str(error))
-                except Exception:
+                except MachineStateError as error:
+                    self._send_error(409, str(error))
+                except Exception as error:
+                    logger.error("Machine command %r was rejected: %s\n%s", payload.get("command") if isinstance(payload, dict) else None, error, traceback.format_exc())
                     self._send_error(409, "Machine command was rejected.")
 
             def _spindle_command(self):

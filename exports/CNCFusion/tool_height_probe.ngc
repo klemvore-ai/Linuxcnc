@@ -1,0 +1,24 @@
+; Probe the current tool's length at the fixed tool setter and set its offset.
+; Call as: o<tool_height_probe> call [tool_number]
+; Reads position/speed/depth from the [TOOL_SETTER] section of the active INI.
+o<tool_height_probe> sub
+#<tool_num> = #1
+#<setter_x> = #<_ini[TOOL_SETTER]X>
+#<setter_y> = #<_ini[TOOL_SETTER]Y>
+#<setter_vel> = #<_ini[TOOL_SETTER]VEL>
+#<setter_ref_z> = #<_ini[TOOL_SETTER]REF_Z>
+#<max_depth> = #<_ini[TOOL_SETTER]MAX_PROBE_DEPTH>
+G90
+G53 G0 Z0
+G53 G0 X#<setter_x> Y#<setter_y>
+G91
+G38.2 Z[0 - #<max_depth>] F[#<setter_vel> * 4]
+G0 Z2.0
+G38.2 Z-4.0 F#<setter_vel>
+G90
+#<tool_length> = [#5063 - #<setter_ref_z>]
+G10 L1 P#<tool_num> Z#<tool_length>
+G43 H#<tool_num>
+G53 G0 Z0
+o<tool_height_probe> endsub
+M2

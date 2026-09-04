@@ -15,7 +15,7 @@ class AgentDeploymentTests(unittest.TestCase):
         self.assertIn("User=cncfusion", service)
         self.assertIn("Requires=cncfusion-hal-helper.service", service)
         self.assertIn("--hal-helper-socket /run/cncfusion/hal-helper.sock", service)
-        self.assertIn("PrivateTmp=false", service)
+        self.assertIn("PrivateTmp=true", service)
         helper = Path("agent/cncfusion-hal-helper.service").read_text(encoding="utf-8")
         self.assertIn("User=darrell", helper)
         self.assertIn("Group=cncfusion", helper)

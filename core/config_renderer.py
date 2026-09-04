@@ -208,11 +208,12 @@ class LinuxCNCConfigRenderer:
                 lines.append(f"net plate-setter {config.probing.plate_signal} => lut5.0.in-0")
             else:
                 lines.append("setp lut5.0.in-0 False")
+        # Tool-prepare is a "get ready" handshake, not a physical swap confirmation;
+        # always auto-acknowledge it so manual tool changes don't stall before
+        # ever reaching the tool-change step the operator controls.
+        lines.append("net tool-prepare-loop iocontrol.0.tool-prepare => iocontrol.0.tool-prepared")
         if config.tool_change_loopback:
-            lines.extend([
-                "net tool-change-loop iocontrol.0.tool-change => iocontrol.0.tool-changed",
-                "net tool-prepare-loop iocontrol.0.tool-prepare => iocontrol.0.tool-prepared",
-            ])
+            lines.append("net tool-change-loop iocontrol.0.tool-change => iocontrol.0.tool-changed")
         for mapping in config.io_mappings:
             if mapping.role == "iocontrol.0.emc-enable-in":
                 continue

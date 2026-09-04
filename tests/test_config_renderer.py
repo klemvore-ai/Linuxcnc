@@ -224,6 +224,15 @@ class ConfigurationRendererTests(unittest.TestCase):
         self.assertIn("net tool-change-loop iocontrol.0.tool-change => iocontrol.0.tool-changed", output)
         self.assertIn("net tool-prepare-loop iocontrol.0.tool-prepare => iocontrol.0.tool-prepared", output)
 
+    def test_tool_prepare_is_always_auto_acknowledged_even_without_the_change_loopback(self):
+        config = sample_config()
+        config.tool_change_loopback = False
+
+        output = LinuxCNCConfigRenderer().render_hal(config)
+
+        self.assertIn("net tool-prepare-loop iocontrol.0.tool-prepare => iocontrol.0.tool-prepared", output)
+        self.assertNotIn("net tool-change-loop iocontrol.0.tool-change => iocontrol.0.tool-changed", output)
+
     def test_invalid_model_is_rejected_before_rendering(self):
         config = sample_config()
         config.axes[0].maximum = config.axes[0].minimum

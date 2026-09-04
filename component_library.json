@@ -2448,5 +2448,105 @@
             "lut5.0.in-1",
             "Default"
         ]
+    ],
+    "Auto_hm2_7i76eu_0_stepgen_00": [
+        [
+            "POSITION-CMD",
+            false,
+            "hm2_7i76eu.0.stepgen.00.position-cmd",
+            "Default"
+        ],
+        [
+            "POSITION-FB",
+            true,
+            "hm2_7i76eu.0.stepgen.00.position-fb",
+            "Default"
+        ],
+        [
+            "ENABLE",
+            false,
+            "hm2_7i76eu.0.stepgen.00.enable",
+            "Signal (Blue)"
+        ]
+    ],
+    "Auto_hm2_7i76eu_0_stepgen_01": [
+        [
+            "POSITION-CMD",
+            false,
+            "hm2_7i76eu.0.stepgen.01.position-cmd",
+            "Default"
+        ],
+        [
+            "POSITION-FB",
+            true,
+            "hm2_7i76eu.0.stepgen.01.position-fb",
+            "Default"
+        ],
+        [
+            "ENABLE",
+            false,
+            "hm2_7i76eu.0.stepgen.01.enable",
+            "Signal (Blue)"
+        ]
+    ],
+    "Auto_hm2_7i76eu_0_stepgen_02": [
+        [
+            "POSITION-CMD",
+            false,
+            "hm2_7i76eu.0.stepgen.02.position-cmd",
+            "Default"
+        ],
+        [
+            "POSITION-FB",
+            true,
+            "hm2_7i76eu.0.stepgen.02.position-fb",
+            "Default"
+        ],
+        [
+            "ENABLE",
+            false,
+            "hm2_7i76eu.0.stepgen.02.enable",
+            "Signal (Blue)"
+        ]
+    ],
+    "Auto_hm2_7i76eu_0_stepgen_03": [
+        [
+            "POSITION-CMD",
+            false,
+            "hm2_7i76eu.0.stepgen.03.position-cmd",
+            "Default"
+        ],
+        [
+            "POSITION-FB",
+            true,
+            "hm2_7i76eu.0.stepgen.03.position-fb",
+            "Default"
+        ],
+        [
+            "ENABLE",
+            false,
+            "hm2_7i76eu.0.stepgen.03.enable",
+            "Signal (Blue)"
+        ]
+    ],
+    "Auto_hm2_7i76eu_0_7i76_0_0": [
+        [
+            "SPINENA",
+            false,
+            "hm2_7i76eu.0.7i76.0.0.spinena",
+            "Signal (Blue)"
+        ],
+        [
+            "SPINDIR",
+            false,
+            "hm2_7i76eu.0.7i76.0.0.spindir",
+            "Clock (Yellow)"
+        ],
+        [
+            "SPINOUT",
+            false,
+            "hm2_7i76eu.0.7i76.0.0.spinout",
+            "Default"
+        ]
     ]
 }

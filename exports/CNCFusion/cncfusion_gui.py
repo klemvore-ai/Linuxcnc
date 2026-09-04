@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
-import time
+"""LinuxCNC DISPLAY entry point: launch the CNCFusion Qt dashboard."""
+import os
+import subprocess
 import sys
+
 try:
     import hal
     h = hal.component('cncfusion_gui')
     h.ready()
 except ImportError:
-    pass
+    h = None
+
+APPLICATION_ROOT = '/opt/CNCFusion'
+PYTHON_EXECUTABLE = os.path.join(APPLICATION_ROOT, '.venv', 'bin', 'python')
+MAIN_SCRIPT = os.path.join(APPLICATION_ROOT, 'main.py')
+if not os.path.isfile(PYTHON_EXECUTABLE):
+    PYTHON_EXECUTABLE = sys.executable
+
 try:
-    while True:
-        time.sleep(1)
-except KeyboardInterrupt:
-    pass
+    subprocess.run([PYTHON_EXECUTABLE, MAIN_SCRIPT], cwd=APPLICATION_ROOT)
+finally:
+    if h is not None:
+        del h
