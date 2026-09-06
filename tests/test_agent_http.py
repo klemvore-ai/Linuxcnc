@@ -65,6 +65,10 @@ class FakeRuntime:
         self.calls.append(("touch_off", target, velocity, plate_thickness, retract))
         return {"plate_thickness": plate_thickness, "retract": retract}
 
+    def calibrate_tool_setter(self, x, y, velocity, search_distance):
+        self.calls.append(("tool_setter_calibration", x, y, velocity, search_distance))
+        return {"setter_height": -49.952}
+
     def read_launch_log(self):
         return {"content": ""}
 
@@ -202,6 +206,16 @@ class AgentHTTPTests(unittest.TestCase):
 
         self.assertEqual(response.status, 202)
         self.assertEqual(self.runtime.calls, [("touch_off", -10.0, 50.0, 6.35, 2.0)])
+
+    def test_technician_can_run_tool_setter_calibration(self):
+        body = json.dumps({"x": 1208.09, "y": 26.2, "velocity": 50, "search_distance": 10})
+        self.connection.request("POST", "/v1/machine/tool-setter/calibrate", body, {"Content-Type": "application/json"})
+
+        response = self.connection.getresponse()
+
+        self.assertEqual(response.status, 202)
+        self.assertEqual(json.loads(response.read())["setter_height"], -49.952)
+        self.assertEqual(self.runtime.calls, [("tool_setter_calibration", 1208.09, 26.2, 50.0, 10.0)])
 
 
 if __name__ == "__main__":

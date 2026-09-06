@@ -327,3 +327,23 @@ def validate_tool_setter_move(payload):
     if any(not -10000.0 <= payload[field] <= 10000.0 for field in required):
         raise AgentPolicyError("Tool-setter coordinate is outside the allowed range.")
     return tuple(float(payload[field]) for field in ("x", "y", "z"))
+
+
+def validate_tool_setter_calibration(payload):
+    """Validate bounded parameters for the complete tool-setter probe cycle."""
+    required = {"x", "y", "velocity", "search_distance"}
+    if not isinstance(payload, dict) or set(payload) != required:
+        raise AgentPolicyError("Tool-setter calibration fields are invalid.")
+    if not all(isinstance(payload[field], (int, float)) and not isinstance(payload[field], bool) for field in required):
+        raise AgentPolicyError("Tool-setter calibration values must be numeric.")
+    x = float(payload["x"])
+    y = float(payload["y"])
+    velocity = float(payload["velocity"])
+    search_distance = float(payload["search_distance"])
+    if not -10000.0 <= x <= 10000.0 or not -10000.0 <= y <= 10000.0:
+        raise AgentPolicyError("Tool-setter coordinates are outside the allowed range.")
+    if not 1.0 <= velocity <= 10000.0:
+        raise AgentPolicyError("Tool-setter velocity is outside the allowed range.")
+    if 0.1 <= search_distance <= 1000.0:
+        return x, y, velocity, search_distance
+    raise AgentPolicyError("Tool-setter search distance is outside the allowed range.")

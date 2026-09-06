@@ -139,6 +139,15 @@ class MachineAgentClient:
         """Request a bounded move to the tool-setter location."""
         return self.post("/v1/machine/tool-setter", {"x": x, "y": y, "z": z})
 
+    def calibrate_tool_setter(self, x, y, velocity, search_distance):
+        """Run the bounded tool-setter calibration through the machine agent."""
+        return self._request(
+            "POST",
+            "/v1/machine/tool-setter/calibrate",
+            {"x": x, "y": y, "velocity": velocity, "search_distance": search_distance},
+            timeout=300.0,
+        )
+
     def set_pid(self, field, value):
         """Set one approved spindle PID parameter through the machine agent."""
         fields = {name: name == field for name in ("p", "i", "d", "ff0", "ff1")}
@@ -260,7 +269,7 @@ class MachineAgentClient:
             {"action": "approve"},
         )
 
-    def _request(self, method, path, payload=None):
+    def _request(self, method, path, payload=None, timeout=None):
         """Perform one HTTPS request and decode its bounded JSON response."""
         if not path.startswith("/"):
             raise ValueError("Agent paths must be absolute.")
@@ -278,7 +287,7 @@ class MachineAgentClient:
             method=method,
         )
         try:
-            with urlopen(request, context=self.context, timeout=self.timeout) as response:
+            with urlopen(request, context=self.context, timeout=self.timeout if timeout is None else timeout) as response:
                 response_body = response.read(1024 * 1024 + 1)
                 if len(response_body) > 1024 * 1024:
                     raise MachineAgentError("Machine agent response is too large.")

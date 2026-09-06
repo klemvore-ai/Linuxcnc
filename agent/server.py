@@ -9,7 +9,7 @@ import traceback
 from urllib.parse import unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from agent.policy import AgentPolicyError, validate_action, validate_upload, validate_activation, validate_restart_activation, validate_mesa_identification, validate_tool_table_path, validate_gcode_path, validate_override, validate_pid, validate_firmware, validate_machine_command, validate_spindle_command, validate_tool_change, validate_home_axis, validate_probe_operation, validate_touch_off_z, validate_tool_setter_move, validate_hal_value_request
+from agent.policy import AgentPolicyError, validate_action, validate_upload, validate_activation, validate_restart_activation, validate_mesa_identification, validate_tool_table_path, validate_gcode_path, validate_override, validate_pid, validate_firmware, validate_machine_command, validate_spindle_command, validate_tool_change, validate_home_axis, validate_probe_operation, validate_touch_off_z, validate_tool_setter_move, validate_tool_setter_calibration, validate_hal_value_request
 from agent.bundles import BundleError, approve_bundle, bundle_status
 from agent.backups import BackupError, backup_manifest
 from agent.archive_transfer import ArchiveError, create_archive, restore_archive
@@ -161,6 +161,9 @@ class MachineAgentServer:
                     return
                 if self.path == "/v1/machine/tool-setter":
                     self._move_tool_setter()
+                    return
+                if self.path == "/v1/machine/tool-setter/calibrate":
+                    self._calibrate_tool_setter()
                     return
                 if self.path == "/v1/tool-table/reload":
                     self._reload_tool_table()
@@ -495,6 +498,23 @@ class MachineAgentServer:
                 except Exception:
                     self._send_error(409, "Tool-setter move was rejected.")
 
+            def _calibrate_tool_setter(self):
+                """Run the fixed tool-setter calibration through the local helper."""
+                try:
+                    length = int(self.headers.get("Content-Length", "-1"))
+                    if length < 0 or length > MAX_REQUEST_BYTES:
+                        raise AgentPolicyError("Request is missing or too large.")
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    x, y, velocity, search_distance = validate_tool_setter_calibration(payload)
+                    result = runtime.calibrate_tool_setter(x, y, velocity, search_distance)
+                    self._send_json(202, {"accepted": True, "operation": "tool_setter_calibration", **result})
+                except AgentPolicyError as error:
+                    self._send_error(400, str(error))
+                except MachineStateError as error:
+                    self._send_error(409, str(error))
+                except Exception as error:
+                    self._send_error(409, str(error)[-512:] or "Tool-setter calibration was rejected.")
+
             def _reload_tool_table(self):
                 """Reload the tool table through the local LinuxCNC runtime."""
                 try:
@@ -599,7 +619,7 @@ class MachineAgentServer:
                     return "operator"
                 if self.path == "/v1/tuning/pid":
                     return "technician"
-                if self.path in {"/v1/machine/probe-z", "/v1/machine/touch-off-z", "/v1/machine/tool-setter"}:
+                if self.path in {"/v1/machine/probe-z", "/v1/machine/touch-off-z", "/v1/machine/tool-setter", "/v1/machine/tool-setter/calibrate"}:
                     return "technician"
                 return "administrator"
 

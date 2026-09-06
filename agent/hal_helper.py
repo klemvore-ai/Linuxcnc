@@ -153,6 +153,117 @@ print(json.dumps({{'accepted': True, 'command': {command!r}}}))"""
     return payload
 
 
+def linuxcnc_home_axis(axis):
+    """Home one validated joint as the LinuxCNC owner."""
+    joint_index = {"X": 0, "Y": 1, "Z": 2, "A": 3, "B": 4, "C": 5}[axis]
+    program = f"""import json, linuxcnc
+status = linuxcnc.stat()
+status.poll()
+if status.task_state != linuxcnc.STATE_ON:
+    raise RuntimeError("Axis homing requires powered LinuxCNC.")
+controller = linuxcnc.command()
+controller.mode(linuxcnc.MODE_MANUAL)
+controller.wait_complete()
+if getattr(status, "motion_teleop", False):
+    controller.teleop_enable(0)
+    controller.wait_complete()
+controller.home({joint_index})
+controller.wait_complete()
+print(json.dumps({{"accepted": True, "axis": {axis!r}}}, separators=(",", ":")))
+"""
+    result = subprocess.run(
+        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Axis homing failed.")
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    if payload.get("accepted") is not True:
+        raise RuntimeError("LinuxCNC did not accept axis homing.")
+    return payload
+
+
+def linuxcnc_tool_setter_calibration(x, y, velocity, search_distance):
+    """Run the fixed tool-setter probe cycle as the LinuxCNC owner."""
+    program = f"""import json, linuxcnc, time
+controller = linuxcnc.command()
+status = linuxcnc.stat()
+errors = linuxcnc.error_channel()
+status.poll()
+if status.task_state != linuxcnc.STATE_ON or status.interp_state != linuxcnc.INTERP_IDLE:
+    raise RuntimeError("Tool-setter calibration requires powered, idle LinuxCNC.")
+
+def wait_for_step(step):
+    controller.wait_complete()
+    error = errors.poll()
+    if error:
+        raise RuntimeError(f"Tool-setter {{step}} failed: {{error[1]}}")
+
+controller.mode(linuxcnc.MODE_MDI)
+wait_for_step("mode selection")
+controller.mdi("G90")
+wait_for_step("absolute mode")
+controller.mdi("G53 G0 Z0")
+wait_for_step("safe Z move")
+controller.mdi("G53 G0 X{x:.4f} Y{y:.4f}")
+wait_for_step("setter XY move")
+
+status.poll()
+if getattr(status, "probe_tripped", False):
+    controller.mdi("G91 G38.4 Z{search_distance:.4f} F{velocity:.4f}")
+    wait_for_step("probe retract")
+    controller.mdi("G90")
+    wait_for_step("absolute mode")
+
+try:
+    z_min = float(status.axis[2]["min_position_limit"])
+except (AttributeError, KeyError, TypeError, IndexError):
+    z_min = -1000.0
+status.poll()
+z_offset = status.g5x_offset[2] + status.g92_offset[2] + status.tool_offset[2]
+z_target = z_min - z_offset + 0.1
+current_z = status.position[2] - z_offset
+if z_target >= current_z:
+    z_target = current_z - 200.0
+
+controller.mdi(f"G38.2 Z{{z_target:.4f}} F{velocity * 4.0:.4f}")
+wait_for_step("fast probe")
+status.poll()
+if not status.probe_tripped:
+    raise RuntimeError("Fast probe did not trip the tool setter.")
+controller.mdi("G91 G0 Z2.0000")
+wait_for_step("probe retract")
+controller.mdi(f"G38.2 Z{{z_target:.4f}} F{velocity:.4f}")
+wait_for_step("slow probe")
+status.poll()
+if not status.probe_tripped:
+    raise RuntimeError("Slow probe did not trip the tool setter.")
+setter_height = float(status.probed_position[2])
+controller.mdi("G91 G0 Z5.0000")
+wait_for_step("final retract")
+print(json.dumps({{"setter_height": setter_height}}, separators=(",", ":")))
+"""
+    result = subprocess.run(
+        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Tool-setter calibration failed.")
+    try:
+        payload = json.loads(result.stdout.strip().splitlines()[-1])
+    except (json.JSONDecodeError, IndexError) as error:
+        raise RuntimeError("Tool-setter calibration returned invalid JSON.") from error
+    if not isinstance(payload, dict) or not isinstance(payload.get("setter_height"), (int, float)):
+        raise RuntimeError("Tool-setter calibration returned invalid data.")
+    return payload
+
+
 def _remove_stale_socket(socket_path):
     """Remove a previous helper socket without deleting another file type."""
     try:
@@ -185,6 +296,15 @@ def _handle_connection(connection):
                 response = linuxcnc_status()
             elif payload["operation"] == "linuxcnc_machine_command" and set(payload) == {"operation", "command"} and isinstance(payload["command"], str):
                 response = linuxcnc_machine_command(payload["command"])
+            elif payload["operation"] == "linuxcnc_home_axis" and set(payload) == {"operation", "axis"} and isinstance(payload["axis"], str) and payload["axis"] in {"X", "Y", "Z", "A", "B", "C"}:
+                response = linuxcnc_home_axis(payload["axis"])
+            elif payload["operation"] == "linuxcnc_tool_setter_calibration" and set(payload) == {"operation", "x", "y", "velocity", "search_distance"}:
+                response = linuxcnc_tool_setter_calibration(
+                    float(payload["x"]),
+                    float(payload["y"]),
+                    float(payload["velocity"]),
+                    float(payload["search_distance"]),
+                )
             else:
                 raise AgentPolicyError("Unsupported HAL helper request.")
         except (AgentPolicyError, UnicodeDecodeError, json.JSONDecodeError) as error:

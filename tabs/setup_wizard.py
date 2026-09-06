@@ -3,6 +3,7 @@
 from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QWizard,
@@ -12,11 +13,12 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QPushButton,
     QMessageBox,
+    QFileDialog,
+    QWidget,
 )
-
 from core.config_model import MachineConfig
 from core.config_renderer import ConfigurationRenderError, LinuxCNCConfigRenderer
-from core.machine_agent import client_from_settings
+from core.machine_agent import MachineAgentClient, client_from_settings
 
 class MachineBasicsPage(QWizardPage):
     """Collect machine identity, units, and kinematics choices."""
@@ -141,6 +143,133 @@ class HardwareNetworkPage(QWizardPage):
         if not self.isolation_warning.isChecked():
             self.setSubTitle("Acknowledge the control and management network boundary to continue.")
             return False
+        return True
+
+
+class SecureAgentPage(QWizardPage):
+    """Configure and verify the authenticated machine-agent connection."""
+
+    def __init__(self, settings, parent=None):
+        super().__init__(parent)
+        self.settings = settings
+        self.setTitle("Secure Machine Agent")
+        self.setSubTitle("Configure mTLS files and verify the Debian machine before continuing.")
+        form = QFormLayout(self)
+        self.base_url = QLineEdit(settings.get_setting("AGENT", "base_url", "https://"))
+        self.ca_file = self._path_field(form, "CA certificate:", "ca_file")
+        self.client_cert = self._path_field(form, "Client certificate:", "client_cert")
+        self.client_key = self._path_field(form, "Client private key:", "client_key")
+        form.insertRow(0, "Agent URL:", self.base_url)
+        self.status = QLabel("Connection not tested")
+        self.test_button = QPushButton("Test Secure Connection")
+        self.test_button.clicked.connect(self.test_connection)
+        form.addRow(self.test_button, self.status)
+        roles = QLabel("Required roles: monitor, operator, technician, administrator")
+        form.addRow("Agent roles:", roles)
+
+    def _path_field(self, form, label, key):
+        row = QLineEdit(self.settings.get_setting("AGENT", key, ""))
+        button = QPushButton("Browse")
+        button.clicked.connect(lambda: self._browse(row))
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(row)
+        layout.addWidget(button)
+        form.addRow(label, container)
+        setattr(self, key, row)
+        return row
+
+    @staticmethod
+    def _browse(field):
+        path, _ = QFileDialog.getOpenFileName()
+        if path:
+            field.setText(path)
+
+    def test_connection(self):
+        try:
+            client = MachineAgentClient(
+                self.base_url.text().strip(),
+                self.ca_file.text().strip(),
+                self.client_cert.text().strip(),
+                self.client_key.text().strip(),
+                timeout=5,
+            )
+            status = client.agent_status()
+            self.status.setText(
+                f"Connected: agent {status.get('agent_version', 'unknown')}, "
+                f"roles={status.get('role_mode', 'unknown')}"
+            )
+            self.status.setStyleSheet("color: green;")
+        except Exception as error:
+            self.status.setText(f"Connection failed: {error}")
+            self.status.setStyleSheet("color: red;")
+
+    def validatePage(self):
+        values = (self.base_url.text().strip(), self.ca_file.text().strip(), self.client_cert.text().strip(), self.client_key.text().strip())
+        if not all(values):
+            self.setSubTitle("Agent URL, CA, client certificate, and private key are required.")
+            return False
+        for key, value in zip(("base_url", "ca_file", "client_cert", "client_key"), values):
+            self.settings.save_setting("AGENT", key, value)
+        return True
+
+
+class DebianEnrollmentPage(QWizardPage):
+    """Verify the Debian machine through the authenticated machine agent."""
+
+    def __init__(self, settings, parent=None):
+        super().__init__(parent)
+        self.settings = settings
+        self.setTitle("Machine Agent Verification")
+        self.setSubTitle("Verify the Debian machine through HTTPS before changing services.")
+        form = QFormLayout(self)
+        self.agent_url = QLineEdit(settings.get_setting("AGENT", "base_url", ""))
+        self.agent_url.setReadOnly(True)
+        form.addRow("Agent URL:", self.agent_url)
+        self.status = QLabel("Agent check not run")
+        self.check_button = QPushButton("Check Machine Agent")
+        self.check_button.clicked.connect(self.check_agent)
+        form.addRow(self.check_button, self.status)
+        self.plan = QTextEdit()
+        self.plan.setReadOnly(True)
+        form.addRow("Enrollment plan:", self.plan)
+        self._refresh_plan()
+
+    def _refresh_plan(self):
+        agent_url = self.agent_url.text().strip() or "<agent URL>"
+        self.plan.setPlainText(
+            "Review before applying:\n\n"
+            f"1. Connect to {agent_url} using the configured mTLS identity.\n"
+            "2. Verify the agent version, role mode, and LinuxCNC state.\n"
+            "3. Verify the advertised helper-backed capabilities.\n"
+            "4. Review any certificate or systemd changes before applying them.\n\n"
+            "No service, certificate, or SSH changes are made by this check."
+        )
+
+    def check_agent(self):
+        try:
+            client = client_from_settings(self.settings)
+            if client is None:
+                raise ValueError("Complete [AGENT] settings are required.")
+            status = client.agent_status()
+            capabilities = len(status.get("capabilities", []))
+            machine = status.get("machine", {})
+            self.status.setText(
+                f"Connected: agent {status.get('agent_version', 'unknown')}, "
+                f"roles={status.get('role_mode', 'unknown')}, capabilities={capabilities}, "
+                f"LinuxCNC={'running' if machine.get('running') else 'offline'}"
+            )
+            self.status.setStyleSheet("color: green;")
+        except Exception as error:
+            self.status.setText(f"Agent check failed: {error}")
+            self.status.setStyleSheet("color: red;")
+
+    def validatePage(self):
+        if not self.agent_url.text().strip():
+            self.setSubTitle("Configure the secure machine agent before continuing.")
+            return False
+        self._refresh_plan()
         return True
 
 
@@ -331,12 +460,16 @@ class SetupWizard(QWizard):
         self.basics_page = MachineBasicsPage(settings)
         self.axis_page = AxisLimitsPage(settings)
         self.hardware_page = HardwareNetworkPage(settings)
+        self.agent_page = SecureAgentPage(settings)
+        self.enrollment_page = DebianEnrollmentPage(settings)
         self.io_page = IOSafetyPage(settings)
         self.feedback_page = FeedbackPage(settings)
         self.review_page = ReviewPage(settings)
         self.addPage(self.basics_page)
         self.addPage(self.axis_page)
         self.addPage(self.hardware_page)
+        self.addPage(self.agent_page)
+        self.addPage(self.enrollment_page)
         self.addPage(self.io_page)
         self.addPage(self.feedback_page)
         self.addPage(self.review_page)

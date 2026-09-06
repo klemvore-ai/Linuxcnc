@@ -28,6 +28,7 @@ CAPABILITIES = (
     "raw_z_probe",
     "touch_off_z",
     "tool_setter_move",
+    "tool_setter_calibration",
     "pid_tuning",
     "mesa_firmware",
 )

@@ -715,6 +715,29 @@ class CalibrationWorker(QThread):
         except Exception as e:
             self.calibration_failed.emit(str(e))
 
+
+class AgentCalibrationWorker(QThread):
+    """Run tool-setter calibration through the authenticated machine agent."""
+    calibration_complete = pyqtSignal(str)
+    calibration_failed = pyqtSignal(str)
+
+    def __init__(self, agent_client, x, y, velocity, search_distance):
+        super().__init__()
+        self.agent_client = agent_client
+        self.x = x
+        self.y = y
+        self.velocity = velocity
+        self.search_distance = search_distance
+
+    def run(self):
+        try:
+            result = self.agent_client.calibrate_tool_setter(
+                self.x, self.y, self.velocity, self.search_distance
+            )
+            self.calibration_complete.emit(str(result["setter_height"]))
+        except Exception as error:
+            self.calibration_failed.emit(str(error))
+
 # Define MockLinuxCNC before using it
 class MockLinuxCNC:
     def command(self): return self
@@ -856,6 +879,47 @@ class MachineDashboard(QWidget):
         setter_x = float(self.settings.get_setting("PROBING", "tool_setter_x", 0.0))
         setter_y = float(self.settings.get_setting("PROBING", "tool_setter_y", 0.0))
         setter_vel = float(self.settings.get_setting("PROBING", "setter_vel", 150.0))
+        search_dist = float(self.settings.get_setting("PROBING", "search_dist", 10.0))
+
+        self.settings.reload()
+        agent_client = client_from_settings(self.settings)
+        if agent_client is None:
+            configured_keys = {
+                key: bool(self.settings.get_setting("AGENT", key, "").strip())
+                for key in ("base_url", "ca_file", "client_cert", "client_key")
+            }
+            self.on_calibration_failed(
+                "Secure machine-agent configuration is required for tool-setter calibration. "
+                f"Configured fields: {configured_keys}"
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Set Workpiece Zero",
+            "Insert the reference tool and touch it off on the workpiece Z-zero surface.\n\n"
+            "Click Yes when the workpiece zero is set.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Probe Tool Setter",
+            "Confirm the spindle is clear and the tool setter is ready.\n\n"
+            "Click Yes to begin the bounded calibration cycle.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.cal_worker = AgentCalibrationWorker(
+            agent_client, setter_x, setter_y, setter_vel, search_dist
+        )
+        self.cal_worker.calibration_complete.connect(self.on_calibration_complete)
+        self.cal_worker.calibration_failed.connect(self.on_calibration_failed)
+        self.cal_worker.start()
+        return
 
         py_code = f"""
 import linuxcnc, time, sys, os
@@ -1333,7 +1397,7 @@ except Exception as e:
 
         if client_from_settings(self.settings) is not None:
             message = "This multi-step probing workflow is not available through the secure management connection."
-            for button in [btn_set_z, btn_fast_probe, btn_probe_z, btn_tool_probe, btn_calibrate_setter]:
+            for button in [btn_set_z, btn_fast_probe, btn_probe_z, btn_tool_probe]:
                 button.setEnabled(False)
                 button.setToolTip(message)
             for button in touch_tab.findChildren(QPushButton):

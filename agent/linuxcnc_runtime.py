@@ -521,6 +521,33 @@ class LinuxCNCRuntime:
 
     def home_axis(self, axis):
         """Home one validated axis through LinuxCNC's command API."""
+        if self.hal_helper_socket:
+            state = self.machine_state()
+            if not state.get("running") or not state.get("machine_on"):
+                raise MachineStateError("Axis homing requires powered LinuxCNC.")
+            request = json.dumps(
+                {"operation": "linuxcnc_home_axis", "axis": axis},
+                separators=(",", ":"),
+            ).encode("utf-8")
+            try:
+                with socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM) as connection:
+                    connection.settimeout(120)
+                    connection.connect(self.hal_helper_socket)
+                    connection.sendall(request)
+                    response = b""
+                    while not response.endswith(b"\n") and len(response) <= 1024 * 1024:
+                        chunk = connection.recv(65536)
+                        if not chunk:
+                            break
+                        response += chunk
+                payload = json.loads(response.decode("utf-8"))
+                if payload.get("error"):
+                    raise MachineStateError(payload["error"])
+                if payload.get("accepted") is not True:
+                    raise MachineStateError("LinuxCNC did not accept axis homing.")
+                return
+            except (AttributeError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+                raise RuntimeError(f"LinuxCNC helper unavailable: {error}") from error
         linuxcnc = importlib.import_module("linuxcnc")
         state = self.machine_state()
         if not state.get("running") or not state.get("machine_on"):
@@ -586,6 +613,43 @@ class LinuxCNCRuntime:
         controller.mode(linuxcnc.MODE_MDI)
         controller.mdi(f"G53 G0 Z{z:.4f}")
         controller.mdi(f"G53 G0 X{x:.4f} Y{y:.4f}")
+
+    def calibrate_tool_setter(self, x, y, velocity, search_distance):
+        """Run the complete bounded tool-setter calibration through the helper."""
+        state = self.machine_state()
+        if not state.get("running") or not state.get("machine_on") or not state.get("idle"):
+            raise MachineStateError("Tool-setter calibration requires powered and idle LinuxCNC.")
+        if not self.hal_helper_socket:
+            raise RuntimeError("Tool-setter calibration requires the LinuxCNC helper.")
+        request = json.dumps(
+            {
+                "operation": "linuxcnc_tool_setter_calibration",
+                "x": x,
+                "y": y,
+                "velocity": velocity,
+                "search_distance": search_distance,
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        try:
+            with socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM) as connection:
+                connection.settimeout(300)
+                connection.connect(self.hal_helper_socket)
+                connection.sendall(request)
+                response = b""
+                while not response.endswith(b"\n") and len(response) <= 1024 * 1024:
+                    chunk = connection.recv(65536)
+                    if not chunk:
+                        break
+                    response += chunk
+            payload = json.loads(response.decode("utf-8"))
+            if payload.get("error"):
+                raise RuntimeError(payload["error"])
+            if not isinstance(payload.get("setter_height"), (int, float)):
+                raise RuntimeError("Tool-setter helper returned invalid calibration data.")
+            return {"setter_height": float(payload["setter_height"])}
+        except (AttributeError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"Tool-setter helper unavailable: {error}") from error
 
     def graceful_shutdown(self):
         """Request LinuxCNC's own graceful cleanup through its Python API."""
