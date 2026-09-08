@@ -1,0 +1,47 @@
+(O101 - Tool Measure)
+(Measures current tool length using the tool setter)
+(Requires: [TOOL_SETTER] X, Y, VEL, REF_Z, MAX_PROBE_DEPTH in LinuxCNC INI)
+(Stores result in LinuxCNC tool table via G10 L1)
+
+O101 sub
+
+    (Read machine settings from LinuxCNC INI)
+    #<setter_x> = #<_ini[TOOL_SETTER]X>
+    #<setter_y> = #<_ini[TOOL_SETTER]Y>
+    #<setter_vel> = #<_ini[TOOL_SETTER]VEL>
+    #<setter_ref_z> = #<_ini[TOOL_SETTER]REF_Z>
+    #<max_depth> = #<_ini[TOOL_SETTER]MAX_PROBE_DEPTH>
+    #<tool_num> = #<_current_tool>
+
+    (Safety: ensure spindle is off and machine is in a known state)
+    M5
+    M9
+    G90
+    G40
+    G49
+
+    (Retract Z to safe height, then move to tool setter XY)
+    G53 G0 Z0
+    G53 G0 X#<setter_x> Y#<setter_y>
+
+    (Fast probe down to find approximate setter surface)
+    G91
+    G38.2 Z[0 - #<max_depth>] F[#<setter_vel> * 4]
+    G0 Z2.0
+    G38.2 Z-4.0 F#<setter_vel>
+    G90
+
+    (Calculate tool length relative to setter reference)
+    #<tool_length> = [#5063 - #<setter_ref_z>]
+
+    (Store in tool table and activate offset)
+    G10 L1 P#<tool_num> Z#<tool_length>
+    G43 H#<tool_num>
+
+    (Retract to safe height)
+    G53 G0 Z0
+
+    (MSG, Tool measure complete. Tool #<tool_num> length: #<tool_length>)
+
+O101 endsub
+M2

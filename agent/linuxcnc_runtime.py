@@ -3,10 +3,12 @@
 import hashlib
 import importlib
 import json
+import re
 import socket
 import subprocess
 import time
 from agent.state_policy import MachineStateError
+from agent.policy import ALLOWED_O_CODE_SUBROUTINES
 import os
 import shutil
 import tempfile
@@ -254,6 +256,7 @@ class LinuxCNCRuntime:
                 raise RuntimeError(payload["error"])
             if payload.get("accepted") is not True:
                 raise ValueError("HAL helper rejected LinuxCNC command.")
+            return payload
         except (AttributeError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
             raise RuntimeError(f"HAL helper unavailable: {error}") from error
 
@@ -304,6 +307,46 @@ class LinuxCNCRuntime:
                         return files
         return files
 
+    def list_macros(self, root):
+        """List the approved O-code macro files available to LinuxCNC."""
+        root_path = Path(root).expanduser().resolve(strict=False)
+        macros = []
+        if not root_path.is_dir():
+            return macros
+        for path in sorted(root_path.glob("O*"), key=lambda item: item.name.upper()):
+            ocode = path.stem.upper()
+            # LinuxCNC expects O-code files without extension
+            if ocode not in ALLOWED_O_CODE_SUBROUTINES or path.suffix:
+                continue
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if not re.search(rf"(?im)^\s*{re.escape(ocode)}\s+sub\b", content):
+                continue
+            macros.append({"ocode": ocode, "filename": path.name, "size": path.stat().st_size})
+        return macros
+
+    def upload_macro(self, root, filename, content, expected_sha256):
+        """Upload one validated O-code macro into the approved G-code root."""
+        actual_sha256 = hashlib.sha256(content).hexdigest()
+        if actual_sha256 != expected_sha256.lower():
+            raise ValueError("Macro checksum does not match content.")
+        root_path = Path(root).expanduser().resolve(strict=False)
+        destination = (root_path / filename).resolve(strict=False)
+        if destination.parent != root_path:
+            raise ValueError("Macro path must stay inside the approved G-code root.")
+        root_path.mkdir(parents=True, exist_ok=True)
+        temporary_path = destination.with_name(destination.name + ".tmp")
+        try:
+            with open(temporary_path, "wb") as macro_file:
+                macro_file.write(content)
+            os.replace(temporary_path, destination)
+        finally:
+            if temporary_path.exists():
+                temporary_path.unlink()
+        return {"filename": filename, "sha256": actual_sha256}
+
     def reload_tool_table(self):
         """Reload tool offsets through LinuxCNC while the interpreter is idle."""
         linuxcnc = importlib.import_module("linuxcnc")
@@ -314,6 +357,33 @@ class LinuxCNCRuntime:
 
     def open_program(self, path):
         """Open one validated G-code file through LinuxCNC's command API."""
+        if self.hal_helper_socket:
+            state = self.machine_state()
+            if not state.get("running") or not state.get("idle"):
+                raise MachineStateError("Program loading requires running and idle LinuxCNC.")
+            request = json.dumps(
+                {"operation": "linuxcnc_open_program", "path": str(path)},
+                separators=(",", ":"),
+            ).encode("utf-8")
+            try:
+                with socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM) as connection:
+                    connection.settimeout(15)
+                    connection.connect(self.hal_helper_socket)
+                    connection.sendall(request)
+                    response = b""
+                    while not response.endswith(b"\n") and len(response) <= 1024 * 1024:
+                        chunk = connection.recv(65536)
+                        if not chunk:
+                            break
+                        response += chunk
+                payload = json.loads(response.decode("utf-8"))
+                if payload.get("error"):
+                    raise MachineStateError(payload["error"])
+                if payload.get("accepted") is not True:
+                    raise MachineStateError("LinuxCNC did not accept program open.")
+                return
+            except (AttributeError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+                raise RuntimeError(f"LinuxCNC helper unavailable: {error}") from error
         linuxcnc = importlib.import_module("linuxcnc")
         state = self.machine_state()
         if not state["running"] or not state["idle"]:
@@ -428,9 +498,8 @@ class LinuxCNCRuntime:
 
     def machine_command(self, command):
         """Execute one allowlisted LinuxCNC command through its command API."""
-        if self.hal_helper_socket and command in {"abort", "power_on", "power_off", "estop", "estop_reset", "override_limits"}:
-            self._linuxcnc_machine_command_with_helper(command)
-            return
+        if self.hal_helper_socket and command in {"abort", "power_on", "power_off", "estop", "estop_reset", "override_limits", "mode_manual", "mode_auto", "coolant_mist_on", "coolant_flood_on", "coolant_off", "program_start", "program_pause_resume", "tool_change_ack", "home_all", "unhome_all"}:
+            return self._linuxcnc_machine_command_with_helper(command)
         linuxcnc = importlib.import_module("linuxcnc")
         controller = linuxcnc.command()
         state = self.machine_state()
@@ -497,6 +566,30 @@ class LinuxCNCRuntime:
 
     def spindle_command(self, action, rpm):
         """Apply one bounded spindle direction command through LinuxCNC's API."""
+        if self.hal_helper_socket:
+            request = json.dumps(
+                {"operation": "linuxcnc_spindle_command", "action": action, "rpm": rpm},
+                separators=(",", ":"),
+            ).encode("utf-8")
+            try:
+                with socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM) as connection:
+                    connection.settimeout(5)
+                    connection.connect(self.hal_helper_socket)
+                    connection.sendall(request)
+                    response = b""
+                    while not response.endswith(b"\n") and len(response) <= 1024 * 1024:
+                        chunk = connection.recv(65536)
+                        if not chunk:
+                            break
+                        response += chunk
+                payload = json.loads(response.decode("utf-8"))
+                if payload.get("error"):
+                    raise MachineStateError(payload["error"])
+                if payload.get("accepted") is not True:
+                    raise MachineStateError("LinuxCNC did not accept spindle command.")
+                return
+            except (AttributeError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+                raise RuntimeError(f"LinuxCNC helper unavailable: {error}") from error
         linuxcnc = importlib.import_module("linuxcnc")
         state = self.machine_state()
         if not state.get("running") or not state.get("machine_on"):
@@ -522,9 +615,6 @@ class LinuxCNCRuntime:
     def home_axis(self, axis):
         """Home one validated axis through LinuxCNC's command API."""
         if self.hal_helper_socket:
-            state = self.machine_state()
-            if not state.get("running") or not state.get("machine_on"):
-                raise MachineStateError("Axis homing requires powered LinuxCNC.")
             request = json.dumps(
                 {"operation": "linuxcnc_home_axis", "axis": axis},
                 separators=(",", ":"),
@@ -552,8 +642,89 @@ class LinuxCNCRuntime:
         state = self.machine_state()
         if not state.get("running") or not state.get("machine_on"):
             raise MachineStateError("Axis homing requires powered LinuxCNC.")
-        joint_index = {"X": 0, "Y": 1, "Z": 2, "A": 3, "B": 4, "C": 5}[axis]
+        joint_index = {"X": 0, "Y": 1, "Z": 3, "A": 4, "B": 5, "C": 6}[axis]
         linuxcnc.command().home(joint_index)
+
+    def jog(self, action, axis, velocity):
+        """Start or stop one bounded jog operation through the LinuxCNC helper."""
+        if not self.hal_helper_socket:
+            raise RuntimeError("Secure jogging requires the LinuxCNC helper.")
+        request = json.dumps(
+            {"operation": "linuxcnc_jog", "action": action, "axis": axis, "velocity": velocity},
+            separators=(",", ":"),
+        ).encode("utf-8")
+        try:
+            with socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM) as connection:
+                connection.settimeout(5)
+                connection.connect(self.hal_helper_socket)
+                connection.sendall(request)
+                response = b""
+                while not response.endswith(b"\n") and len(response) <= 1024 * 1024:
+                    chunk = connection.recv(65536)
+                    if not chunk:
+                        break
+                    response += chunk
+            payload = json.loads(response.decode("utf-8"))
+            if payload.get("error"):
+                raise MachineStateError(payload["error"])
+            if payload.get("accepted") is not True:
+                raise MachineStateError("LinuxCNC did not accept jog operation.")
+        except (AttributeError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"LinuxCNC helper unavailable: {error}") from error
+
+    def touch_off_axis(self, axis, value):
+        """Set one work-coordinate axis value through the LinuxCNC helper."""
+        if not self.hal_helper_socket:
+            raise RuntimeError("Axis touch-off requires the LinuxCNC helper.")
+        request = json.dumps(
+            {"operation": "linuxcnc_touch_off_axis", "axis": axis, "value": value},
+            separators=(",", ":"),
+        ).encode("utf-8")
+        try:
+            with socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM) as connection:
+                connection.settimeout(10)
+                connection.connect(self.hal_helper_socket)
+                connection.sendall(request)
+                response = b""
+                while not response.endswith(b"\n") and len(response) <= 1024 * 1024:
+                    chunk = connection.recv(65536)
+                    if not chunk:
+                        break
+                    response += chunk
+            payload = json.loads(response.decode("utf-8"))
+            if payload.get("error"):
+                raise MachineStateError(payload["error"])
+            if payload.get("accepted") is not True:
+                raise MachineStateError("LinuxCNC did not accept axis touch-off.")
+        except (AttributeError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"LinuxCNC helper unavailable: {error}") from error
+
+    def run_subroutine(self, ocode):
+        """Run one allowlisted O-code subroutine through the LinuxCNC helper."""
+        if not self.hal_helper_socket:
+            raise RuntimeError("Subroutine execution requires the LinuxCNC helper.")
+        request = json.dumps(
+            {"operation": "linuxcnc_run_subroutine", "ocode": ocode},
+            separators=(",", ":"),
+        ).encode("utf-8")
+        try:
+            with socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM) as connection:
+                connection.settimeout(20)
+                connection.connect(self.hal_helper_socket)
+                connection.sendall(request)
+                response = b""
+                while not response.endswith(b"\n") and len(response) <= 1024 * 1024:
+                    chunk = connection.recv(65536)
+                    if not chunk:
+                        break
+                    response += chunk
+            payload = json.loads(response.decode("utf-8"))
+            if payload.get("error"):
+                raise MachineStateError(payload["error"])
+            if payload.get("accepted") is not True:
+                raise MachineStateError("LinuxCNC did not accept subroutine.")
+        except (AttributeError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"LinuxCNC helper unavailable: {error}") from error
 
     def probe_z(self, target, velocity):
         """Run one downward probe and retract a fixed distance while powered and idle."""

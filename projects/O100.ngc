@@ -1,0 +1,39 @@
+(O100 - Spindle Warmup)
+(Steps spindle 3000 -> 20000 RPM, 10 seconds per step)
+(Total run time: ~70 seconds)
+
+O100 sub
+
+    M3 S3000
+    (MSG, Warmup: 3000 RPM)
+    G4 P10
+
+    S6000
+    (MSG, Warmup: 6000 RPM)
+    G4 P10
+
+    S9000
+    (MSG, Warmup: 9000 RPM)
+    G4 P10
+
+    S12000
+    (MSG, Warmup: 12000 RPM)
+    G4 P10
+
+    S15000
+    (MSG, Warmup: 15000 RPM)
+    G4 P10
+
+    S18000
+    (MSG, Warmup: 18000 RPM)
+    G4 P10
+
+    S20000
+    (MSG, Warmup: 20000 RPM)
+    G4 P10
+
+    M5
+    (MSG, Warmup complete)
+
+O100 endsub
+M2

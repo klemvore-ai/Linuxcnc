@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 import math
 import re
+from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QListWidget, QPlainTextEdit, QMessageBox, 
                              QInputDialog, QGraphicsView, QGraphicsScene, QSplitter, QLineEdit)
@@ -218,6 +219,9 @@ class MacroEditorTab(QWidget):
         
         default_macro_dir = self.settings.get_setting("PATHS", "last_macro_dir", "~/linuxcnc/nc_files")
         self.path_input = QLineEdit(default_macro_dir)
+        if client_from_settings(self.settings) is not None:
+            self.path_input.setText("Secure managed G-code directory")
+            self.path_input.setEnabled(False)
         toolbar.addWidget(self.path_input)
         
         btn_refresh = QPushButton("🔄 Refresh List")
@@ -299,10 +303,15 @@ class MacroEditorTab(QWidget):
         if agent_client is not None:
             try:
                 self.file_list.clear()
-                for filename in agent_client.list_gcode().get("files", []):
-                    self.file_list.addItem(filename)
+                macros = agent_client.list_macros().get("macros", [])
+                for macro in macros:
+                    filename = macro.get("filename")
+                    if filename:
+                        self.file_list.addItem(filename)
+                if not macros:
+                    self.file_list.addItem("No managed macros installed")
             except Exception as error:
-                QMessageBox.critical(self, "Error", f"Failed to list secure G-code files:\n{error}")
+                QMessageBox.critical(self, "Error", f"Failed to list secure macros:\n{error}")
             return
         if not ip or not user:
             QMessageBox.warning(self, "No SSH", "Please configure SSH credentials in Settings.")
@@ -347,6 +356,25 @@ class MacroEditorTab(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to list directory:\n{e}")
 
     def new_macro(self):
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            ocode, ok = QInputDialog.getItem(self, "New Managed Macro", "Select macro:", [
+                "O100 (Warmup)", "O101 (Tool Measure)", "O102 (Park)",
+                "O103 (Touch Plate Z)", "O104 (Outside Corner)", "O105 (Inside Corner)",
+                "O106 (Boss Center)", "O107 (Hole Center)",
+                "O108 (Probe X Edge)", "O109 (Probe Y Edge)",
+                "O110 (Auto Tool Change)", "O111 (Calibrate Setter)",
+                "O112 (Calibrate Spindle Nose)", "O113 (Quick Tool Change)",
+            ], 0, False)
+            if not ok:
+                return
+            code = ocode.split(" ")[0]
+            filename = f"{code}.ngc"
+            self.current_file = filename
+            self.lbl_current_file.setText(f"Editing: {filename}")
+            self.editor.setPlainText(f"{code} sub\n\n( {ocode} logic here )\n\n{code} endsub\nM2\n")
+            self.mark_unsaved()
+            return
         filename, ok = QInputDialog.getText(self, "New Macro", "Enter filename (e.g. subfolder/tool_probe.ngc):")
         if ok and filename:
             if not filename.endswith(".ngc"): filename += ".ngc"
@@ -363,6 +391,8 @@ class MacroEditorTab(QWidget):
             if reply != QMessageBox.StandardButton.Yes: return
             
         filename = item.text()
+        if filename == "No managed macros installed":
+            return
         remote_dir = self.path_input.text().strip().rstrip('/')
         remote_path = f"{remote_dir}/{filename}"
         
@@ -422,12 +452,12 @@ class MacroEditorTab(QWidget):
         agent_client = client_from_settings(self.settings)
         if agent_client is not None:
             try:
-                agent_client.upload_content("gcode", self.current_file, content.encode("utf-8"))
+                agent_client.upload_macro(self.current_file, content)
                 self.clear_unsaved()
-                QMessageBox.information(self, "Success", f"Saved securely to {self.current_file}")
+                QMessageBox.information(self, "Success", f"Saved managed macro {self.current_file}")
                 self.refresh_file_list()
             except Exception as error:
-                QMessageBox.critical(self, "Error", f"Failed to save secure G-code file:\n{error}")
+                QMessageBox.critical(self, "Error", f"Failed to save secure macro:\n{error}")
             return
         
         remote_parent = remote_path.rsplit('/', 1)[0]

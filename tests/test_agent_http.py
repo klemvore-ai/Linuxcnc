@@ -61,6 +61,15 @@ class FakeRuntime:
     def change_tool(self, tool):
         self.calls.append(("tool", tool))
 
+    def jog(self, action, axis, velocity):
+        self.calls.append(("jog", action, axis, velocity))
+
+    def touch_off_axis(self, axis, value):
+        self.calls.append(("touch_off_axis", axis, value))
+
+    def run_subroutine(self, ocode):
+        self.calls.append(("subroutine", ocode))
+
     def touch_off_z(self, target, velocity, plate_thickness, retract):
         self.calls.append(("touch_off", target, velocity, plate_thickness, retract))
         return {"plate_thickness": plate_thickness, "retract": retract}
@@ -74,6 +83,14 @@ class FakeRuntime:
 
     def list_gcode(self, root):
         return []
+
+    def list_macros(self, root):
+        self.calls.append(("list_macros", str(root)))
+        return [{"ocode": "O100", "filename": "O100.ngc", "size": 24}]
+
+    def upload_macro(self, root, filename, content, sha256):
+        self.calls.append(("upload_macro", filename, content.decode("utf-8"), sha256))
+        return {"filename": filename, "sha256": sha256}
 
     def read_gcode(self, path):
         return {"content": "G0 X1"}
@@ -216,6 +233,64 @@ class AgentHTTPTests(unittest.TestCase):
         self.assertEqual(response.status, 202)
         self.assertEqual(json.loads(response.read())["setter_height"], -49.952)
         self.assertEqual(self.runtime.calls, [("tool_setter_calibration", 1208.09, 26.2, 50.0, 10.0)])
+
+    def test_operator_can_start_and_stop_bounded_jog(self):
+        body = json.dumps({"action": "start", "axis": "X", "velocity": 12.5})
+        self.connection.request("POST", "/v1/machine/jog", body, {"Content-Type": "application/json"})
+        response = self.connection.getresponse()
+        self.assertEqual(response.status, 202)
+
+        body = json.dumps({"action": "stop", "axis": "X"})
+        self.connection.request("POST", "/v1/machine/jog", body, {"Content-Type": "application/json"})
+        response = self.connection.getresponse()
+
+        self.assertEqual(response.status, 202)
+        self.assertEqual(self.runtime.calls, [("jog", "start", "X", 12.5), ("jog", "stop", "X", 0.0)])
+
+    def test_technician_can_touch_off_one_axis(self):
+        body = json.dumps({"axis": "X", "value": 0})
+        self.connection.request("POST", "/v1/machine/touch-off-axis", body, {"Content-Type": "application/json"})
+
+        response = self.connection.getresponse()
+
+        self.assertEqual(response.status, 202)
+        self.assertEqual(self.runtime.calls, [("touch_off_axis", "X", 0.0)])
+
+    def test_operator_can_run_allowlisted_subroutine(self):
+        body = json.dumps({"ocode": "O100"})
+        self.connection.request("POST", "/v1/machine/subroutine", body, {"Content-Type": "application/json"})
+
+        response = self.connection.getresponse()
+
+        self.assertEqual(response.status, 202)
+        self.assertEqual(self.runtime.calls, [("subroutine", "O100")])
+
+    def test_rejects_unapproved_subroutine(self):
+        body = json.dumps({"ocode": "O999"})
+        self.connection.request("POST", "/v1/machine/subroutine", body, {"Content-Type": "application/json"})
+
+        response = self.connection.getresponse()
+
+        self.assertEqual(response.status, 400)
+
+    def test_monitor_can_list_managed_macros(self):
+        self.connection.request("GET", "/v1/macros")
+
+        response = self.connection.getresponse()
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(json.loads(response.read())["macros"][0]["filename"], "O100.ngc")
+        self.assertEqual(self.runtime.calls[-1], ("list_macros", str(self.gcode_root)))
+
+    def test_administrator_can_upload_managed_macro(self):
+        content = "O100 sub\nG90\nO100 endsub\nM2\n"
+        body = json.dumps({"filename": "O100", "sha256": hashlib.sha256(content.encode()).hexdigest(), "content": content})
+        self.connection.request("POST", "/v1/macros", body, {"Content-Type": "application/json"})
+
+        response = self.connection.getresponse()
+
+        self.assertEqual(response.status, 202)
+        self.assertEqual(self.runtime.calls[-1][0:2], ("upload_macro", "O100"))
 
 
 if __name__ == "__main__":

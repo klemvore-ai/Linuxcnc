@@ -1,0 +1,41 @@
+(O108 - Probe Single Axis X)
+(Probes X in one direction, sets work offset)
+(Requires: [PROBE] VEL, SEARCH_DIST, XY_CLEARANCE, Z_DROP, DIAMETER in LinuxCNC INI)
+(Usage: Position near X edge, then call)
+
+O108 sub
+
+    #<probe_vel> = #<_ini[PROBE]VEL>
+    #<search_dist> = #<_ini[PROBE]SEARCH_DIST>
+    #<xy_clear> = #<_ini[PROBE]XY_CLEARANCE>
+    #<z_drop> = #<_ini[PROBE]Z_DROP>
+    #<probe_diam> = #<_ini[PROBE]DIAMETER>
+
+    M5
+    M9
+    G90
+    G40
+    G49
+
+    (Drop to probe height)
+    G91
+    G0 Z-#<z_drop>
+
+    (Probe X- direction)
+    G38.2 X-#<search_dist> F#<probe_vel>
+    #<x1> = #5061
+
+    (Retract)
+    G0 X#<xy_clear>
+    G0 Z#<z_drop>
+
+    (Set work offset, accounting for probe radius)
+    #<radius> = [#<probe_diam> / 2.0]
+    G10 L20 P0 X[#<x1> + #<radius>]
+
+    G90
+
+    (MSG, X edge set: X#<x1>)
+
+O108 endsub
+M2

@@ -11,18 +11,130 @@ For first-time LinuxCNC machine setup, follow the [Beginner LinuxCNC Setup Guide
 ---
 
 ## Table of Contents
-1. Initial Machine Setup (The Wizard)
-2. Mesa Utilities & Diagnostics
-3. Logic Designer (Visual HAL)
-4. UI Designer (Operator Panels)
-5. Live Dashboard & Control
-6. Tool Table Management
-7. HAL Monitor & Oscilloscope
+1. [Quick Start Installation](#quick-start-installation)
+2. [Initial Machine Setup (The Wizard)](#1-initial-machine-setup-the-wizard)
+3. [Secure Agent Architecture](#2-secure-agent-architecture)
+4. [Mesa Utilities & Diagnostics](#3-mesa-utilities--diagnostics)
+5. [Logic Designer (Visual HAL)](#4-logic-designer-visual-hal)
+6. [UI Designer (Operator Panels)](#5-ui-designer-operator-panels)
+7. [Live Dashboard & Control](#6-live-dashboard--control)
+8. [Tool Table Management](#7-tool-table-management)
+9. [HAL Monitor & Oscilloscope](#8-hal-monitor--oscilloscope)
+10. [Macro & Subroutine System](#9-macro--subroutine-system)
+11. [Application Updates](#10-application-updates)
+12. [Path Configuration](#11-path-configuration)
+
+---
+
+## Quick Start Installation
+
+### Machine-Side (Debian/LinuxCNC)
+
+Run the complete installer as root:
+
+```bash
+sudo python3 installer/install.py --source /path/to/CNCFusion
+```
+
+The installer sets up:
+- **Users & Groups**: `cncfusion` service account with proper permissions
+- **Directories**: `/opt/CNCFusion`, `/etc/cncfusion`, `/var/lib/cncfusion/updates`
+- **TLS Certificates**: CA, server, and client certificates with auto-generated fingerprint
+- **Systemd Services**: `cncfusion-agent`, `cncfusion-hal-helper`, `cncfusion-apply-update`
+- **Configuration**: Environment files with configurable paths
+- **LinuxCNC Integration**: Updates INI with correct `SUBROUTINE_PATH`
+
+**Output includes the client certificate fingerprint** — save this for the dev machine.
+
+### Dev Workstation (Windows)
+
+1. Copy certificates from the machine:
+   ```powershell
+   scp user@machine:/etc/cncfusion/ca.crt $HOME\.cncfusion\
+   scp user@machine:/etc/cncfusion/client.crt $HOME\.cncfusion\
+   scp user@machine:/etc/cncfusion/client.key $HOME\.cncfusion\
+   ```
+
+2. Configure `settings.ini`:
+   ```ini
+   [AGENT]
+   base_url = https://192.168.0.160:9443
+   ca_file = C:\Users\<user>\.cncfusion\ca.crt
+   client_cert = C:\Users\<user>\.cncfusion\client.crt
+   client_key = C:\Users\<user>\.cncfusion\client.key
+   ```
+
+3. Launch CNCFusion — the title bar shows **"DEVELOPER WORKSTATION"**
+
+### Custom Paths
+
+For non-standard installations, create `/etc/cncfusion/paths.conf`:
+
+```ini
+CNCFUSION_CONFIG_ROOT=/home/operator/linuxcnc/configs
+CNCFUSION_GCODE_ROOT=/home/operator/linuxcnc/nc_files
+CNCFUSION_AGENT_ROOT=/opt/CNCFusion
+CNCFUSION_LINUXCNC_USER=operator
+```
+
+Then run: `sudo python3 installer/setup_paths.py`
 
 ---
 
 ## 1. Initial Machine Setup (The Wizard)
 The **⚙️ Settings Tab** is the brains of the operation. It houses the Setup Wizard which automatically generates complete `INI` and `HAL` files.
+
+### Mode Indicators
+The window title shows which mode you're running:
+- **"CNC Fusion Pro - DEVELOPER WORKSTATION"** — Windows dev machine
+- **"CNC Fusion Pro - MACHINE CONTROL"** — LinuxCNC machine
+
+### Recommended Workflow:
+1. **Establish Comms:** Go to the *Mesa Utilities* tab, enter your Linux Machine IP, Username, and Password, and click **Save Credentials**. Click **Test SSH Connection** to ensure it works.
+2. **Configure Limits:** In the Settings tab, set your Machine Name, Kinematics (e.g., 3-Axis vs Gantry), Max Velocities, and X/Y/Z physical limits.
+3. **Map Hardware I/O:** In the *Hardware I/O Pin Mapping* section, assign your physical Mesa pins to the machine logic (e.g., Home Switches, Limits, E-Stop). 
+   - *Tip: Use the "Invert" checkbox for normally-closed safety switches.*
+4. **Generate:** Click **✨ Generate Base INI & HAL Files**. The app will compile your settings into standard LinuxCNC config files and generate a visual logic `blueprint.hal`.
+5. **Deploy & Launch:** Click "Yes" when prompted to deploy the files to the remote machine via SSH. Then click **🚀 Launch LinuxCNC Remotely** to spin up the actual machine!
+
+---
+
+## 2. Secure Agent Architecture
+
+CNCFusion uses a **mutual TLS (mTLS) secure agent** for machine control instead of SSH. This provides:
+- **Encrypted communication** between dev workstation and machine
+- **Certificate-based authentication** (no passwords over the network)
+- **Role-based access control** (monitor, operator, technician, administrator)
+- **Audit logging** of all machine operations
+
+### Architecture
+
+```
+Dev Workstation (Windows)          CNC Machine (Debian/LinuxCNC)
+┌─────────────────────┐           ┌─────────────────────────────┐
+│  CNCFusion GUI      │◄─────────►│  cncfusion-agent (HTTPS)    │
+│  - Dashboard        │  mTLS     │  - Port 9443                │
+│  - Settings         │  9443     │  - Policy validation        │
+│  - Macro Editor     │           │  - Role enforcement         │
+└─────────────────────┘           └─────────────┬───────────────┘
+                                                │
+                                                │ Unix Socket
+                                                ▼
+                                      ┌─────────────────────────┐
+                                      │  cncfusion-hal-helper   │
+                                      │  - Runs as operator     │
+                                      │  - LinuxCNC API access  │
+                                      │  - HAL pin control      │
+                                      └─────────────────────────┘
+```
+
+### Security Features
+- **No arbitrary shell commands** — all operations are typed and validated
+- **No MDI injection** — G-code execution uses allowlisted O-code subroutines only
+- **State validation** — Machine must be in correct state (idle, powered) before operations
+- **Certificate rotation** — Client certs can be rotated without machine access
+
+---
 
 ### Recommended Workflow:
 1. **Establish Comms:** Go to the *Mesa Utilities* tab, enter your Linux Machine IP, Username, and Password, and click **Save Credentials**. Click **Test SSH Connection** to ensure it works.
@@ -113,6 +225,195 @@ When configuring PID loops or diagnosing faulty limit switches, these tabs are i
 - Provides a high-speed, auto-scaling visual graph of pin values over time.
 - **How to use:** Select a pin from the dropdown (e.g., `pid.s.feedback`), choose a trace color, and click "Add Channel". Click **▶ Run Scope** to watch the data plot in real-time.
 - Essential for tuning Spindle RPM overshoots or StepGen following errors!
+
+---
+
+## 9. Macro & Subroutine System
+
+CNCFusion includes a complete **O-code subroutine system** for automated machine operations. All macros run through the secure agent — no arbitrary MDI allowed.
+
+### Available Macros
+
+| O-Code | Function | Description |
+|--------|----------|-------------|
+| **O100** | Spindle Warmup | Steps spindle 3000→20000 RPM, 10s per step |
+| **O101** | Tool Measure | Probes tool setter, writes offset to tool table |
+| **O102** | Park Machine | Retracts Z, moves to park position |
+| **O103** | Touch Plate Z | Probes Z down to plate, sets work offset |
+| **O104** | Outside Corner | Probes X- and Y-, sets corner as origin |
+| **O105** | Inside Corner | Probes X+ and Y+, sets corner as origin |
+| **O106** | Boss Center | Probes 4 sides of boss, sets center as origin |
+| **O107** | Hole Center | Probes 4 sides of hole, sets center as origin |
+| **O108** | Probe X Edge | Single-axis X probe, sets X origin |
+| **O109** | Probe Y Edge | Single-axis Y probe, sets Y origin |
+| **O110** | Auto Tool Change | Full cycle: probe → store offset → return → resume |
+| **O111** | Calibrate Setter | Establish tool setter surface with known reference |
+| **O112** | Calibrate Spindle Nose | Probe bare spindle nose as absolute reference |
+| **O113** | Quick Tool Change | Simplified probe for in-program use after `T# M6` |
+
+### Using Macros
+
+**Dashboard Picker:**
+- The **Run Subroutine** dropdown shows only macros installed on the machine
+- Select a macro, click **Run Subroutine**, confirm the operation
+- Macro runs in MDI mode with full state validation
+
+**In G-Code Programs:**
+```gcode
+(Program with automatic tool change)
+T1 M6                    (Load tool 1)
+O113 call [1]            (Probe tool 1, store offset)
+G43 H1                   (Activate offset)
+M3 S12000                (Start spindle)
+... cutting moves ...
+T2 M6                    (Load tool 2)
+O113 call [2]            (Probe tool 2, store offset)
+G43 H2                   (Activate new offset)
+```
+
+### Creating Custom Macros
+
+Use the **Macros** tab:
+1. Click **➕ New Macro**
+2. Select from allowlisted O-codes (O100-O113)
+3. Edit the template with your logic
+4. Click **💾 Save to LinuxCNC** — uploads securely via agent
+
+**Requirements:**
+- File must be named `O###.ngc` matching the O-code number
+- Must contain `O### sub` and `O### endsub` markers
+- Content is validated before upload
+
+### Macro Configuration
+
+Macros read settings from the LinuxCNC INI:
+
+```ini
+[TOOL_SETTER]
+X = 1208.0900          ; Tool setter X position
+Y = 26.2000            ; Tool setter Y position
+VEL = 50.00            ; Probe velocity (mm/min)
+REF_Z = -85.5250       ; Calibrated setter reference Z
+MAX_PROBE_DEPTH = 50.0 ; Max probe travel
+
+[PROBE]
+PLATE_THICKNESS = 5.0  ; Touch plate thickness
+VEL = 50.00            ; Probe velocity
+SEARCH_DIST = 10.0     ; Max probe search distance
+XY_CLEARANCE = 5.0     ; XY clearance after probe
+Z_DROP = 5.0           ; Z drop before probing
+DIAMETER = 6.0         ; Probe tip diameter
+Z_SAFE = 0.0           ; Safe retract height
+
+[LOCATIONS]
+PARK_X = 0.0           ; Park position X
+PARK_Y = 0.0           ; Park position Y
+PARK_Z = 0.0           ; Park position Z
+```
+
+**Sync Settings to Machine:**
+- Set values in **Settings → Probing & Locations**
+- Click **🔄 Sync Probing to Machine INI**
+- Approve and activate the configuration on the machine
+
+---
+
+## 10. Application Updates
+
+CNCFusion supports **secure staged updates** with operator approval.
+
+### Update Flow
+
+```
+Dev Workstation                    CNC Machine
+---------------                    -----------
+Click "Deploy" ──────────────────► Update staged to
+                                   /var/lib/cncfusion/updates/
+                                          │
+                                          ▼
+                              ┌─────────────────────┐
+                              │ "⚡ Apply Staged    │
+                              │  Update" button     │
+                              │  appears (green)    │
+                              └─────────────────────┘
+                                          │
+                              Operator clicks button
+                                          │
+                              LinuxCNC stopped? ──No──► Warn
+                                          │ Yes
+                                          ▼
+                              Confirm dialog
+                                          │
+                                          ▼
+                              sudo systemctl start
+                                cncfusion-apply-update
+                                          │
+                                          ▼
+                              Services restarted
+                              Update complete!
+```
+
+### Safety Features
+- **Two-stage process**: Dev stages, operator approves on machine
+- **LinuxCNC check**: Warns if LinuxCNC is running (optional override)
+- **Transactional**: Old version preserved until new version verified
+- **Automatic rollback**: If startup fails, previous version restored
+- **Service restart**: Agent and helper automatically restarted
+
+### Update Status
+
+Click **🔎 View Update Status** to see:
+- Whether an update is staged
+- Staged file size and SHA-256
+- Last apply result (success/failed/rolled back)
+- Applied vs live agent version comparison
+
+---
+
+## 11. Path Configuration
+
+CNCFusion supports **configurable paths** for flexible installation.
+
+### Configuration Files
+
+| File | Purpose |
+|------|---------|
+| `/etc/cncfusion/paths.conf` | Master path configuration (installer) |
+| `/etc/cncfusion/agent.env` | Agent environment variables |
+| `core/paths.py` | Runtime path resolution |
+
+### Configurable Paths
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `CNCFUSION_CONFIG_ROOT` | `/home/operator/linuxcnc/configs` | LinuxCNC config directory |
+| `CNCFUSION_GCODE_ROOT` | `/home/operator/linuxcnc/nc_files` | G-code/O-code directory |
+| `CNCFUSION_AGENT_ROOT` | `/opt/CNCFusion` | Agent installation directory |
+| `CNCFUSION_LINUXCNC_USER` | `operator` | LinuxCNC user account |
+| `CNCFUSION_AGENT_USER` | `cncfusion` | Agent service account |
+
+### Changing Paths
+
+**Option 1: Re-run installer with config**
+```bash
+sudo python3 installer/install.py --config /path/to/paths.conf
+```
+
+**Option 2: Update paths only**
+```bash
+sudo python3 installer/setup_paths.py
+sudo systemctl daemon-reload
+sudo systemctl restart cncfusion-hal-helper
+sudo systemctl restart cncfusion-agent
+```
+
+### LinuxCNC INI Integration
+
+The installer automatically updates:
+- `PROGRAM_PREFIX` → Points to G-code directory
+- `SUBROUTINE_PATH` → Points to O-code directory (same as G-code)
+
+This ensures O-code subroutines are found regardless of where LinuxCNC is launched from.
 
 ---
 

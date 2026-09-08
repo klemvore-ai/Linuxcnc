@@ -9,7 +9,7 @@ import traceback
 from urllib.parse import unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from agent.policy import AgentPolicyError, validate_action, validate_upload, validate_activation, validate_restart_activation, validate_mesa_identification, validate_tool_table_path, validate_gcode_path, validate_override, validate_pid, validate_firmware, validate_machine_command, validate_spindle_command, validate_tool_change, validate_home_axis, validate_probe_operation, validate_touch_off_z, validate_tool_setter_move, validate_tool_setter_calibration, validate_hal_value_request
+from agent.policy import AgentPolicyError, validate_action, validate_upload, validate_activation, validate_restart_activation, validate_mesa_identification, validate_tool_table_path, validate_gcode_path, validate_override, validate_pid, validate_firmware, validate_machine_command, validate_spindle_command, validate_tool_change, validate_home_axis, validate_jog_operation, validate_touch_off_axis, validate_o_code_subroutine, validate_macro_upload, validate_probe_operation, validate_touch_off_z, validate_tool_setter_move, validate_tool_setter_calibration, validate_hal_value_request
 from agent.bundles import BundleError, approve_bundle, bundle_status
 from agent.backups import BackupError, backup_manifest
 from agent.archive_transfer import ArchiveError, create_archive, restore_archive
@@ -90,6 +90,9 @@ class MachineAgentServer:
                 if self.path == "/v1/gcode":
                     self._send_json(200, {"files": runtime.list_gcode(gcode_root)})
                     return
+                if self.path == "/v1/macros":
+                    self._send_json(200, {"macros": runtime.list_macros(gcode_root)})
+                    return
                 if self.path.startswith("/v1/gcode/"):
                     self._read_gcode()
                     return
@@ -153,11 +156,23 @@ class MachineAgentServer:
                 if self.path == "/v1/machine/home-axis":
                     self._home_axis()
                     return
+                if self.path == "/v1/machine/jog":
+                    self._jog()
+                    return
+                if self.path == "/v1/machine/subroutine":
+                    self._run_subroutine()
+                    return
+                if self.path == "/v1/macros":
+                    self._upload_macro()
+                    return
                 if self.path == "/v1/machine/probe-z":
                     self._probe_z()
                     return
                 if self.path == "/v1/machine/touch-off-z":
                     self._touch_off_z()
+                    return
+                if self.path == "/v1/machine/touch-off-axis":
+                    self._touch_off_axis()
                     return
                 if self.path == "/v1/machine/tool-setter":
                     self._move_tool_setter()
@@ -308,8 +323,8 @@ class MachineAgentServer:
                     self._send_error(400, str(error))
                 except MachineStateError as error:
                     self._send_error(409, str(error))
-                except Exception:
-                    self._send_error(409, "Program open was rejected.")
+                except Exception as error:
+                    self._send_error(409, str(error)[-512:] or "Program open was rejected.")
 
             def _set_override(self):
                 """Apply one validated runtime-safe override."""
@@ -386,15 +401,18 @@ class MachineAgentServer:
                         raise AgentPolicyError("Request is missing or too large.")
                     payload = json.loads(self.rfile.read(length).decode("utf-8"))
                     command = validate_machine_command(payload)
-                    runtime.machine_command(command)
-                    self._send_json(202, {"accepted": True, "command": command})
+                    result = runtime.machine_command(command)
+                    response = {"accepted": True, "command": command}
+                    if isinstance(result, dict):
+                        response.update(result)
+                    self._send_json(202, response)
                 except AgentPolicyError as error:
                     self._send_error(400, str(error))
                 except MachineStateError as error:
                     self._send_error(409, str(error))
                 except Exception as error:
                     logger.error("Machine command %r was rejected: %s\n%s", payload.get("command") if isinstance(payload, dict) else None, error, traceback.format_exc())
-                    self._send_error(409, "Machine command was rejected.")
+                    self._send_error(409, str(error)[-512:] or "Machine command was rejected.")
 
             def _spindle_command(self):
                 """Apply one validated spindle direction and speed command."""
@@ -410,8 +428,8 @@ class MachineAgentServer:
                     self._send_error(400, str(error))
                 except MachineStateError as error:
                     self._send_error(409, str(error))
-                except Exception:
-                    self._send_error(409, "Spindle command was rejected.")
+                except Exception as error:
+                    self._send_error(409, str(error)[-512:] or "Spindle command was rejected.")
 
             def _change_tool(self):
                 """Run the fixed tool-change sequence for one validated tool number."""
@@ -444,8 +462,57 @@ class MachineAgentServer:
                     self._send_error(400, str(error))
                 except MachineStateError as error:
                     self._send_error(409, str(error))
-                except Exception:
-                    self._send_error(409, "Axis homing was rejected.")
+                except Exception as error:
+                    self._send_error(409, str(error)[-512:] or "Axis homing was rejected.")
+
+            def _jog(self):
+                """Start or stop a bounded jog operation through the runtime."""
+                try:
+                    length = int(self.headers.get("Content-Length", "-1"))
+                    if length < 0 or length > MAX_REQUEST_BYTES:
+                        raise AgentPolicyError("Request is missing or too large.")
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    action, axis, velocity = validate_jog_operation(payload)
+                    runtime.jog(action, axis, velocity)
+                    self._send_json(202, {"accepted": True, "action": action, "axis": axis})
+                except AgentPolicyError as error:
+                    self._send_error(400, str(error))
+                except MachineStateError as error:
+                    self._send_error(409, str(error))
+                except Exception as error:
+                    self._send_error(409, str(error)[-512:] or "Jog operation was rejected.")
+
+            def _run_subroutine(self):
+                """Run one allowlisted O-code subroutine through the runtime."""
+                try:
+                    length = int(self.headers.get("Content-Length", "-1"))
+                    if length < 0 or length > MAX_REQUEST_BYTES:
+                        raise AgentPolicyError("Request is missing or too large.")
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    ocode = validate_o_code_subroutine(payload)
+                    runtime.run_subroutine(ocode)
+                    self._send_json(202, {"accepted": True, "operation": "subroutine", "ocode": ocode})
+                except AgentPolicyError as error:
+                    self._send_error(400, str(error))
+                except MachineStateError as error:
+                    self._send_error(409, str(error))
+                except Exception as error:
+                    self._send_error(409, str(error)[-512:] or "Subroutine was rejected.")
+
+            def _upload_macro(self):
+                """Validate and install one allowlisted O-code macro file."""
+                try:
+                    length = int(self.headers.get("Content-Length", "-1"))
+                    if length < 0 or length > MAX_REQUEST_BYTES:
+                        raise AgentPolicyError("Macro upload is missing or too large.")
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    filename = validate_macro_upload(payload)
+                    result = runtime.upload_macro(gcode_root, filename, payload["content"].encode("utf-8"), payload["sha256"])
+                    self._send_json(202, {"accepted": True, **result})
+                except AgentPolicyError as error:
+                    self._send_error(400, str(error))
+                except Exception as error:
+                    self._send_error(409, str(error)[-512:] or "Macro upload was rejected.")
 
             def _probe_z(self):
                 """Run one validated Z probe operation through the local runtime."""
@@ -480,6 +547,23 @@ class MachineAgentServer:
                     self._send_error(409, str(error))
                 except Exception:
                     self._send_error(409, "Touch-off was rejected.")
+
+            def _touch_off_axis(self):
+                """Set one validated work-coordinate axis value."""
+                try:
+                    length = int(self.headers.get("Content-Length", "-1"))
+                    if length < 0 or length > MAX_REQUEST_BYTES:
+                        raise AgentPolicyError("Request is missing or too large.")
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    axis, value = validate_touch_off_axis(payload)
+                    runtime.touch_off_axis(axis, value)
+                    self._send_json(202, {"accepted": True, "operation": "touch_off_axis", "axis": axis, "value": value})
+                except AgentPolicyError as error:
+                    self._send_error(400, str(error))
+                except MachineStateError as error:
+                    self._send_error(409, str(error))
+                except Exception as error:
+                    self._send_error(409, str(error)[-512:] or "Axis touch-off was rejected.")
 
             def _move_tool_setter(self):
                 """Move to validated tool-setter coordinates through the runtime."""
@@ -613,13 +697,15 @@ class MachineAgentServer:
 
             def _required_role(self):
                 """Return the minimum role required by the requested endpoint."""
-                if self.path in {"/v1/lifecycle", "/v1/machine/state", "/v1/telemetry", "/v1/agent/status", "/v1/agent/preflight", "/v1/hal/pins", "/v1/hal/components", "/v1/hal/values", "/v1/logs/launch", "/v1/gcode"} or self.path.startswith("/v1/tool-table/") or self.path.startswith("/v1/gcode/"):
+                if self.path in {"/v1/lifecycle", "/v1/machine/state", "/v1/telemetry", "/v1/agent/status", "/v1/agent/preflight", "/v1/hal/pins", "/v1/hal/components", "/v1/hal/values", "/v1/logs/launch", "/v1/gcode", "/v1/macros"} or self.path.startswith("/v1/tool-table/") or self.path.startswith("/v1/gcode/"):
                     return "monitor"
-                if self.path in {"/v1/program/open", "/v1/tuning/override", "/v1/machine/command", "/v1/spindle/command", "/v1/tool/change", "/v1/machine/home-axis", "/v1/tool-table/reload"}:
+                if self.path in {"/v1/program/open", "/v1/tuning/override", "/v1/machine/command", "/v1/spindle/command", "/v1/tool/change", "/v1/machine/home-axis", "/v1/machine/jog", "/v1/machine/subroutine", "/v1/tool-table/reload"}:
                     return "operator"
+                if self.path == "/v1/macros" and self.command == "POST":
+                    return "technician"
                 if self.path == "/v1/tuning/pid":
                     return "technician"
-                if self.path in {"/v1/machine/probe-z", "/v1/machine/touch-off-z", "/v1/machine/tool-setter", "/v1/machine/tool-setter/calibrate"}:
+                if self.path in {"/v1/machine/probe-z", "/v1/machine/touch-off-z", "/v1/machine/touch-off-axis", "/v1/machine/tool-setter", "/v1/machine/tool-setter/calibrate"}:
                     return "technician"
                 return "administrator"
 

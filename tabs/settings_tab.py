@@ -15,6 +15,7 @@ from core.machine_agent import client_from_settings
 from core.remote_lifecycle import RemoteLinuxCNCBackend
 from core.config_model import MachineConfig
 from core.hal_documents import HALDocumentComposer
+from core.paths import get_paths
 from tabs.setup_wizard import SetupWizard
 
 LOCAL_IPS = ['localhost', '127.0.0.1']
@@ -636,6 +637,13 @@ class SettingsTab(QWidget):
         vel_form.addRow("3D Probe Velocity (F):", self.probe_vel)
         vel_form.addRow("Tool Setter Velocity (F):", self.setter_vel)
         
+        # Sync button for pushing probing values to machine INI
+        self.btn_sync_probing = QPushButton("🔄 Sync Probing to Machine INI")
+        self.btn_sync_probing.setStyleSheet("background-color: #8e44ad; color: white; font-weight: bold; padding: 8px; border-radius: 4px;")
+        self.btn_sync_probing.setToolTip("Update the machine's LinuxCNC INI with current probing/location values")
+        self.btn_sync_probing.clicked.connect(self.sync_probing_to_machine)
+        vel_form.addRow(self.btn_sync_probing)
+        
         probe_main_layout.addWidget(ts_group)
         probe_main_layout.addWidget(park_group)
         probe_main_layout.addWidget(vel_group)
@@ -723,6 +731,19 @@ class SettingsTab(QWidget):
         self.btn_update_status.setStyleSheet("background-color: #34495e; color: white; font-weight: bold; padding: 10px; border-radius: 4px;")
         self.btn_update_status.clicked.connect(self.show_application_update_status)
         
+        # Local apply button - only visible when running ON the machine and update is staged
+        self.btn_apply_update = QPushButton("⚡ Apply Staged Update")
+        self.btn_apply_update.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold; padding: 10px; border-radius: 4px;")
+        self.btn_apply_update.setToolTip("Apply the staged application update. LinuxCNC must be stopped.")
+        self.btn_apply_update.clicked.connect(self.apply_staged_update)
+        self.btn_apply_update.setVisible(False)  # Hidden until we detect staged update
+        
+        # Check for staged update on startup (only if running locally on machine)
+        QTimer.singleShot(1000, self.check_for_staged_update)
+        
+        # Add machine/dev mode indicator to title
+        self._update_mode_indicator()
+        
         # Global Action Bar / Sidebar
         action_sidebar = QVBoxLayout()
         action_sidebar.setContentsMargins(10, 10, 5, 5)
@@ -748,6 +769,7 @@ class SettingsTab(QWidget):
         sync_layout.addWidget(self.btn_secure_deploy)
         sync_layout.addWidget(self.btn_install_remote)
         sync_layout.addWidget(self.btn_update_status)
+        sync_layout.addWidget(self.btn_apply_update)
 
         sync_layout_widget = QGroupBox("Global Actions")
         sync_layout_widget.setStyleSheet("QGroupBox { border: 1px solid #444; border-top: 2px solid #3498db; border-radius: 4px; padding-top: 20px; padding-bottom: 10px; color: #ecf0f1; font-weight: bold; background-color: #1e1e1e; } QGroupBox::title { left: 10px; }")
@@ -1013,6 +1035,57 @@ class SettingsTab(QWidget):
         QTimer.singleShot(1500, lambda: self.save_btn.setText("Apply & Save Settings"))
         QTimer.singleShot(1500, lambda: self.save_btn.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold; padding: 10px;"))
 
+    def sync_probing_to_machine(self):
+        """Push current probing/location values to the machine's LinuxCNC INI."""
+        agent_client = client_from_settings(self.sm)
+        if agent_client is None:
+            QMessageBox.warning(self, "Sync Unavailable", "Secure machine-agent is not configured.")
+            return
+        
+        try:
+            # Read current values from UI
+            ts_x = self.tool_setter_x.value()
+            ts_y = self.tool_setter_y.value()
+            ts_z = self.tool_setter_z.value()
+            setter_vel = self.setter_vel.value()
+            park_x = self.park_x.value()
+            park_y = self.park_y.value()
+            park_z = self.park_z.value()
+            probe_vel = self.probe_vel.value()
+            
+            # Build INI section updates
+            ini_updates = f"""[TOOL_SETTER]
+X = {ts_x:.4f}
+Y = {ts_y:.4f}
+Z = {ts_z:.4f}
+VEL = {setter_vel:.2f}
+
+[LOCATIONS]
+PARK_X = {park_x:.4f}
+PARK_Y = {park_y:.4f}
+PARK_Z = {park_z:.4f}
+
+[PROBE]
+PLATE_THICKNESS = 5.0000
+VEL = {probe_vel:.2f}
+SEARCH_DIST = 10.0000
+XY_CLEARANCE = 5.0000
+Z_DROP = 5.0000
+DIAMETER = 6.0000
+Z_SAFE = 0.0000
+"""
+            
+            # Upload as a config update
+            agent_client.upload_content("config", "probing_sync.ini", ini_updates.encode("utf-8"))
+            QMessageBox.information(
+                self,
+                "Sync Complete",
+                "Probing and location values have been staged on the machine.\n\n"
+                "The operator must approve and activate the configuration for changes to take effect.",
+            )
+        except Exception as error:
+            QMessageBox.critical(self, "Sync Failed", f"Failed to sync probing values:\n{error}")
+
     def apply_secure_mode_restrictions(self):
         """Disable Settings actions that only have a legacy SSH/VNC implementation."""
         if client_from_settings(self.sm) is None:
@@ -1218,6 +1291,115 @@ class SettingsTab(QWidget):
             QMessageBox.information(self, "Application Update Status", "\n".join(lines))
         except Exception as error:
             QMessageBox.critical(self, "Update Status Failed", f"Failed to read secure update status:\n{error}")
+
+    def _update_mode_indicator(self):
+        """Update the window title to show Dev vs Machine mode."""
+        import platform
+        if hasattr(self.window(), 'setWindowTitle'):
+            if platform.system() == "Linux" and os.path.exists("/var/lib/cncfusion"):
+                self.window().setWindowTitle("CNC Fusion Pro - MACHINE CONTROL")
+            else:
+                self.window().setWindowTitle("CNC Fusion Pro - DEVELOPER WORKSTATION")
+
+    def check_for_staged_update(self):
+        """Check if a staged update exists locally and show the apply button."""
+        # Only show on Linux machine (where /var/lib/cncfusion exists)
+        import platform
+        if platform.system() != "Linux":
+            self.btn_apply_update.setVisible(False)
+            return
+            
+        staging_dir = "/var/lib/cncfusion/updates"
+        staged_archive = os.path.join(staging_dir, "cncfusion-update.tar.gz")
+        if os.path.exists(staged_archive):
+            self.btn_apply_update.setVisible(True)
+            self.btn_apply_update.setText("⚡ Apply Staged Update (Ready)")
+            self.btn_apply_update.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 10px; border-radius: 4px;")
+        else:
+            self.btn_apply_update.setVisible(False)
+
+    def apply_staged_update(self):
+        """Apply the staged application update locally on the machine."""
+        # Safety check: Look for actual LinuxCNC UI processes, not just any linuxcnc process
+        linuxcnc_running = False
+        try:
+            # Check for common LinuxCNC UI process names
+            for proc_name in ["linuxcnc", "axis", "gmoccapy", "qtdragon", "cncfusion_gui"]:
+                result = subprocess.run(["pgrep", "-f", proc_name], capture_output=True, timeout=5)
+                if result.returncode == 0:
+                    linuxcnc_running = True
+                    break
+        except Exception:
+            pass  # If pgrep fails, assume it's safe to proceed
+        
+        if linuxcnc_running:
+            reply = QMessageBox.warning(
+                self,
+                "LinuxCNC May Be Running",
+                "LinuxCNC appears to be running. Applying updates while LinuxCNC is active\n"
+                "may cause instability or require a restart anyway.\n\n"
+                "Do you want to continue anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        
+        reply = QMessageBox.question(
+            self,
+            "Confirm Update",
+            "Apply the staged application update now?\n\n"
+            "This will:\n"
+            "• Replace /opt/CNCFusion with the new version\n"
+            "• Restart the agent and helper services\n"
+            "• Preserve the existing .venv\n\n"
+            "LinuxCNC should be stopped during this process.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        try:
+            # Run the apply-update service
+            result = subprocess.run(
+                ["sudo", "systemctl", "start", "cncfusion-apply-update"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr or "systemctl start failed")
+            
+            # Wait for completion and check status
+            import time
+            time.sleep(2)
+            status_result = subprocess.run(
+                ["systemctl", "status", "cncfusion-apply-update", "--no-pager"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            
+            # Check if it succeeded
+            if "Result: success" in status_result.stdout or "active (exited)" in status_result.stdout:
+                QMessageBox.information(
+                    self,
+                    "Update Applied",
+                    "Application update applied successfully!\n\n"
+                    "The agent and helper services have been restarted.\n"
+                    "You can now restart LinuxCNC.",
+                )
+                self.btn_apply_update.setVisible(False)
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Update Status Unknown",
+                    f"The update service ran but status is unclear:\n\n{status_result.stdout[-500:]}",
+                )
+        except subprocess.TimeoutExpired:
+            QMessageBox.critical(self, "Update Timeout", "The update service did not complete within 60 seconds.")
+        except Exception as error:
+            QMessageBox.critical(self, "Update Failed", f"Failed to apply update:\n{error}")
 
     def install_app_remote(self):
         ip = self.sm.get_setting("SSH", "ip_address", "")
@@ -1502,6 +1684,7 @@ class SettingsTab(QWidget):
         display_sel = self.mach_display_cb.currentText()
         display_val = "./cncfusion_gui.py" if display_sel == "CNCFusion" else display_sel
 
+        paths = get_paths(self.sm)
         ini_content = [
             f"[EMC]", f"MACHINE = {name}", f"DEBUG = 0", f"VERSION = 1.1", f"",
             f"[DISPLAY]", f"DISPLAY = {display_val}", f"POSITION_OFFSET = RELATIVE",
@@ -1510,7 +1693,7 @@ class SettingsTab(QWidget):
             f"DEFAULT_SPINDLE_0_SPEED = {self.glob_spindle_max.value() * 0.5:.0f}",
             f"MIN_SPINDLE_0_SPEED = {self.glob_spindle_min.value():.0f}", f"MAX_SPINDLE_0_SPEED = {self.glob_spindle_max.value():.0f}",
             f"INTRO_GRAPHIC = linuxcnc.gif", f"INTRO_TIME = 5",
-            f"PROGRAM_PREFIX = ~/linuxcnc/nc_files",
+            f"PROGRAM_PREFIX = {paths.ini_program_prefix}",
             f"INCREMENTS = 5mm 1mm .5mm .1mm .05mm .01mm .005mm", f"",
             f"[KINS]", f"JOINTS = {joints}", f"KINEMATICS = {k_str}", f"",
             f"[TRAJ]", f"COORDINATES = {coords}", f"LINEAR_UNITS = {units}",
@@ -1528,12 +1711,20 @@ class SettingsTab(QWidget):
         except ValueError:
             setter_ref_z = 0.0
         max_probe_depth = 2.0 if units == "inch" else 50.0
+        park_x = self.park_x.value()
+        park_y = self.park_y.value()
+        park_z = self.park_z.value()
+        plate_thickness = self.get_probe_plate_thickness()
+        probe_vel = self.probe_vel.value()
         ini_content.extend([
             f"[HAL]", f"HALUI = halui", f"HALFILE = {name}.hal", f"HALFILE = {name}_blueprint.hal", f"POSTGUI_HALFILE = custom_postgui.hal", f"",
-            f"[RS274NGC]", f"PARAMETER_FILE = linuxcnc.var", f"RS274NGC_STARTUP_CODE = {startup_code} G40 G90 G94 G97 G64 P0.025",
-            f"SUBROUTINE_PATH = .", f"",
+            f"[RS274NGC]", f"PARAMETER_FILE = {paths.ini_parameter_file}", f"RS274NGC_STARTUP_CODE = {startup_code} G40 G90 G94 G97 G64 P0.025",
+            f"SUBROUTINE_PATH = {paths.ini_subroutine_path}", f"",
             f"[TOOL_SETTER]", f"X = {tool_setter_x:.4f}", f"Y = {tool_setter_y:.4f}",
             f"VEL = {setter_vel:.2f}", f"REF_Z = {setter_ref_z:.4f}", f"MAX_PROBE_DEPTH = {max_probe_depth:.4f}", f"",
+            f"[LOCATIONS]", f"PARK_X = {park_x:.4f}", f"PARK_Y = {park_y:.4f}", f"PARK_Z = {park_z:.4f}", f"",
+            f"[PROBE]", f"PLATE_THICKNESS = {plate_thickness:.4f}", f"VEL = {probe_vel:.2f}",
+            f"SEARCH_DIST = 10.0000", f"XY_CLEARANCE = 5.0000", f"Z_DROP = 5.0000", f"DIAMETER = 6.0000", f"Z_SAFE = 0.0000", f"",
             f"[TASK]", f"TASK = milltask", f"CYCLE_TIME = 0.010", f"",
             f"[EMCIO]", f"EMCIO = io", f"CYCLE_TIME = 0.100", f"TOOL_TABLE = tool.tbl", f"",
             f"[EMCMOT]", f"EMCMOT = motmod", f"COMM_TIMEOUT = 1.0", f"SERVO_PERIOD = 1000000", f"" # Base thread for stepper/servo
@@ -2079,14 +2270,23 @@ class SettingsTab(QWidget):
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
-            allowed_suffixes = {".ini", ".hal", ".tbl", ".var", ".ngc"}
+            config_suffixes = {".ini", ".hal", ".tbl", ".var"}
+            gcode_suffixes = {".ngc", ".gcode"}
             try:
                 uploaded = []
                 for filename in sorted(os.listdir(local_dir)):
                     local_path = os.path.join(local_dir, filename)
-                    if os.path.isfile(local_path) and os.path.splitext(filename)[1].lower() in allowed_suffixes:
-                        agent_client.upload_file("config", f"{mach_name}/{filename}", local_path)
-                        uploaded.append(filename)
+                    suffix = os.path.splitext(filename)[1].lower()
+                    if not os.path.isfile(local_path):
+                        continue
+                    if suffix in config_suffixes:
+                        upload_kind = "config"
+                    elif suffix in gcode_suffixes:
+                        upload_kind = "gcode"
+                    else:
+                        continue
+                    agent_client.upload_file(upload_kind, f"{mach_name}/{filename}", local_path)
+                    uploaded.append(f"{upload_kind}: {filename}")
                 QMessageBox.information(
                     self,
                     "Deployment Complete",

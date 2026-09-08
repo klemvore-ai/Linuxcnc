@@ -1,0 +1,48 @@
+(O104 - Probe Outside Corner)
+(Probes X and Y to find an outside corner, sets work offset)
+(Requires: [PROBE] VEL, SEARCH_DIST, XY_CLEARANCE, Z_DROP in LinuxCNC INI)
+(Usage: Position near corner, then call)
+
+O104 sub
+
+    #<probe_vel> = #<_ini[PROBE]VEL>
+    #<search_dist> = #<_ini[PROBE]SEARCH_DIST>
+    #<xy_clear> = #<_ini[PROBE]XY_CLEARANCE>
+    #<z_drop> = #<_ini[PROBE]Z_DROP>
+    #<probe_diam> = #<_ini[PROBE]DIAMETER>
+
+    M5
+    M9
+    G90
+    G40
+    G49
+
+    (Drop to probe height)
+    G91
+    G0 Z-#<z_drop>
+
+    (Probe X- direction)
+    G38.2 X-#<search_dist> F#<probe_vel>
+    #<x1> = #5061
+    G0 X#<xy_clear>
+
+    (Probe Y- direction)
+    G38.2 Y-#<search_dist> F#<probe_vel>
+    #<y1> = #5062
+    G0 Y#<xy_clear>
+
+    (Retract Z)
+    G0 Z#<z_drop>
+
+    (Set work offsets, accounting for probe radius)
+    (For outside corner: X = x1 + radius, Y = y1 + radius)
+    #<radius> = [#<probe_diam> / 2.0]
+    G10 L20 P0 X[#<x1> + #<radius>]
+    G10 L20 P0 Y[#<y1> + #<radius>]
+
+    G90
+
+    (MSG, Outside corner set: X#<x1> Y#<y1>)
+
+O104 endsub
+M2

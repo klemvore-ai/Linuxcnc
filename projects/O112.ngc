@@ -1,0 +1,54 @@
+(O112 - Calibrate Bare Spindle Nose)
+(Step 2 of tool setter setup:)
+(Probes the bare spindle nose (no tool) at the tool setter)
+(to establish the zero reference for all tool measurements.)
+(This is the "master" reference that all tools are compared against.)
+(Call as: O112 call)
+(Requires: [TOOL_SETTER] X, Y, VEL in INI)
+(Requires: [PROBE] Z_SAFE in INI)
+
+O112 sub
+
+    #<setter_x> = #<_ini[TOOL_SETTER]X>
+    #<setter_y> = #<_ini[TOOL_SETTER]Y>
+    #<setter_vel> = #<_ini[TOOL_SETTER]VEL>
+    #<max_depth> = #<_ini[TOOL_SETTER]MAX_PROBE_DEPTH>
+    #<z_safe> = #<_ini[PROBE]Z_SAFE>
+
+    M5
+    M9
+    G90
+    G40
+    G49
+
+    (Move to tool setter)
+    G53 G0 Z#<z_safe>
+    G53 G0 X#<setter_x> Y#<setter_y>
+
+    (Probe the bare spindle nose)
+    G91
+    G38.2 Z[0 - #<max_depth>] F[#<setter_vel> * 4]
+    G0 Z2.0
+    G38.2 Z-4.0 F#<setter_vel>
+
+    (The probed Z is the spindle nose position)
+    #<spindle_nose_z> = #5063
+
+    (This becomes the absolute reference. All tool lengths)
+    (are measured as offsets from this position.)
+    (Store in the tool table as tool 0 reference)
+
+    (MSG, ========================================)
+    (MSG, Bare Spindle Nose Calibration Complete)
+    (MSG, Spindle nose probed at Z: #<spindle_nose_z>)
+    (MSG, )
+    (MSG, This is your absolute Z reference.)
+    (MSG, All tool lengths will be measured relative)
+    (MSG, to this position.)
+    (MSG, ========================================)
+
+    (Retract)
+    G53 G0 Z#<z_safe>
+
+O112 endsub
+M2

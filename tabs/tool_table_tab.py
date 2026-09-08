@@ -3,7 +3,7 @@ import os
 import subprocess
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QInputDialog)
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from core.machine_agent import client_from_settings
 
 LOCAL_IPS = ['localhost', '127.0.0.1']
@@ -23,11 +23,32 @@ try:
 except ImportError:
     pass
 
+TOOL_COLUMNS = [
+    ("T", "Tool #"),
+    ("P", "Pocket #"),
+    ("X", "X Offset"),
+    ("Y", "Y Offset"),
+    ("Z", "Z Offset"),
+    ("A", "A Offset"),
+    ("B", "B Offset"),
+    ("C", "C Offset"),
+    ("U", "U Offset"),
+    ("V", "V Offset"),
+    ("W", "W Offset"),
+    ("D", "Diameter"),
+    ("I", "Front Angle"),
+    ("J", "Back Angle"),
+    ("Q", "Orientation"),
+]
+COMMENT_COLUMN = len(TOOL_COLUMNS)
+FIELD_TO_COLUMN = {field: index for index, (field, _) in enumerate(TOOL_COLUMNS)}
+
 class ToolTableTab(QWidget):
     def __init__(self, settings):
         super().__init__()
         self.settings = settings
         self.init_ui()
+        QTimer.singleShot(0, self.auto_load_table)
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -80,11 +101,24 @@ class ToolTableTab(QWidget):
         layout.addLayout(top_bar)
 
         # Table
-        self.table = QTableWidget(0, 5)
+        self.table = QTableWidget(0, len(TOOL_COLUMNS) + 1)
         
         u_str = "mm" if "mm" in self.settings.get_setting('MACHINE_CONFIG', 'units', 'Metric (mm)') else "in"
-        self.table.setHorizontalHeaderLabels(["Tool (T)", "Pocket (P)", f"Z Offset ({u_str})", f"Diameter (D) ({u_str})", "Description / Comment"])
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        headers = []
+        for field, label in TOOL_COLUMNS:
+            if field in {"X", "Y", "Z", "A", "B", "C", "U", "V", "W", "D"}:
+                headers.append(f"{label} ({field}) [{u_str}]")
+            else:
+                headers.append(f"{label} ({field})")
+        headers.append("Description / Comment")
+        self.table.setHorizontalHeaderLabels(headers)
+        self.table.horizontalHeader().setMinimumSectionSize(90)
+        for column, header in enumerate(headers):
+            width = max(96, min(180, len(header) * 9 + 24))
+            self.table.setColumnWidth(column, width)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(COMMENT_COLUMN, QHeaderView.ResizeMode.Stretch)
+        self.table.verticalHeader().setDefaultSectionSize(28)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -106,11 +140,10 @@ class ToolTableTab(QWidget):
     def add_tool(self):
         row = self.table.rowCount()
         self.table.insertRow(row)
-        self.table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
-        self.table.setItem(row, 1, QTableWidgetItem(str(row + 1)))
-        self.table.setItem(row, 2, QTableWidgetItem("0.0"))
-        self.table.setItem(row, 3, QTableWidgetItem("0.0"))
-        self.table.setItem(row, 4, QTableWidgetItem("New Tool"))
+        for col, (field, _) in enumerate(TOOL_COLUMNS):
+            default_value = str(row + 1) if field in {"T", "P"} else "0"
+            self.table.setItem(row, col, QTableWidgetItem(default_value))
+        self.table.setItem(row, COMMENT_COLUMN, QTableWidgetItem("New Tool"))
 
     def remove_tool(self):
         curr = self.table.currentRow()
@@ -140,7 +173,7 @@ class ToolTableTab(QWidget):
         else:
             return
 
-        for col in [2, 3]: # Z Offset, Diameter
+        for col in [FIELD_TO_COLUMN[field] for field in ("X", "Y", "Z", "A", "B", "C", "U", "V", "W", "D")]:
             item = self.table.item(curr, col)
             if item:
                 try:
@@ -207,6 +240,20 @@ class ToolTableTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load tool table:\n{e}")
 
+    def auto_load_table(self):
+        """Load the tool table at startup when the secure agent is configured."""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is None:
+            return
+        mach_name = self.settings.get_setting('MACHINE_CONFIG', 'name', 'CNCFusion')
+        try:
+            result = agent_client.read_tool_table(f"{mach_name}/tool.tbl")
+            out = result.get("content", "")
+            if out and not result.get("error"):
+                self._populate_table(out)
+        except Exception:
+            return
+
     def _populate_table(self, content):
         """Populate the tool table grid from standard LinuxCNC tool-table text."""
         if not content:
@@ -220,18 +267,16 @@ class ToolTableTab(QWidget):
             parts = line.split(';', 1)
             data_part = parts[0].strip()
             comment_part = parts[1].strip() if len(parts) > 1 else ""
-            values = {"T": "0", "P": "0", "Z": "0", "D": "0"}
+            values = {field: "0" for field, _ in TOOL_COLUMNS}
             for token in data_part.split():
                 token = token.upper()
                 if token and token[0] in values:
                     values[token[0]] = token[1:]
             row = self.table.rowCount()
             self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(values["T"]))
-            self.table.setItem(row, 1, QTableWidgetItem(values["P"]))
-            self.table.setItem(row, 2, QTableWidgetItem(values["Z"]))
-            self.table.setItem(row, 3, QTableWidgetItem(values["D"]))
-            self.table.setItem(row, 4, QTableWidgetItem(comment_part))
+            for col, (field, _) in enumerate(TOOL_COLUMNS):
+                self.table.setItem(row, col, QTableWidgetItem(values[field]))
+            self.table.setItem(row, COMMENT_COLUMN, QTableWidgetItem(comment_part))
         self._loading = False
         self.clear_unsaved()
 
@@ -262,15 +307,16 @@ class ToolTableTab(QWidget):
         
         lines = ["; Auto-generated Tool Table from CNC Fusion Pro"]
         for r in range(self.table.rowCount()):
-            t = self.table.item(r, 0).text() if self.table.item(r, 0) else str(r+1)
-            p = self.table.item(r, 1).text() if self.table.item(r, 1) else str(r+1)
-            z = self.table.item(r, 2).text() if self.table.item(r, 2) else "0.0"
-            d = self.table.item(r, 3).text() if self.table.item(r, 3) else "0.0"
-            c = self.table.item(r, 4).text() if self.table.item(r, 4) else ""
-            
-            line = f"T{t} P{p} X0 Y0 Z{z} A0 B0 C0 U0 V0 W0 D{d} I0 J0 Q0"
-            if c:
-                line += f" ; {c}"
+            parts = []
+            for col, (field, _) in enumerate(TOOL_COLUMNS):
+                default_value = str(r + 1) if field in {"T", "P"} else "0"
+                item = self.table.item(r, col)
+                value = item.text().strip() if item and item.text().strip() else default_value
+                parts.append(f"{field}{value}")
+            c = self.table.item(r, COMMENT_COLUMN).text() if self.table.item(r, COMMENT_COLUMN) else ""
+            line = " ".join(parts)
+            if c.strip():
+                line += f" ; {c.strip()}"
             lines.append(line)
             
         content = "\\n".join(lines) + "\\n"

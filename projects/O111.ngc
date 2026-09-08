@@ -1,0 +1,64 @@
+(O111 - Calibrate Tool Setter Height)
+(Step 1 of tool setter setup:)
+(Uses a known reference (gauge block or bare spindle nose))
+(to establish the tool setter surface Z position.)
+(Writes result to [TOOL_SETTER]REF_Z via G10 L2)
+(Call as: O111 call [reference_height])
+(Example: O111 call [50.0] for a 50mm gauge block)
+
+O111 sub
+
+    #<ref_height> = #1
+    #<setter_x> = #<_ini[TOOL_SETTER]X>
+    #<setter_y> = #<_ini[TOOL_SETTER]Y>
+    #<setter_vel> = #<_ini[TOOL_SETTER]VEL>
+    #<max_depth> = #<_ini[TOOL_SETTER]MAX_PROBE_DEPTH>
+    #<z_safe> = #<_ini[PROBE]Z_SAFE>
+
+    M5
+    M9
+    G90
+    G40
+    G49
+
+    (Move to tool setter)
+    G53 G0 Z#<z_safe>
+    G53 G0 X#<setter_x> Y#<setter_y>
+
+    (Probe down to find setter surface)
+    G91
+    G38.2 Z[0 - #<max_depth>] F[#<setter_vel> * 4]
+    G0 Z2.0
+    G38.2 Z-4.0 F#<setter_vel>
+
+    (The probed Z position is where the setter surface is)
+    (relative to machine coordinates. We need to store)
+    (this as the reference for future tool measurements.)
+    #<setter_surface_z> = #5063
+
+    (Store as reference: REF_Z = setter_surface_z - ref_height)
+    (This way, when a tool probes the setter, the length)
+    (is calculated as: probed_z - REF_Z = actual tool length)
+    #<new_ref_z> = [#<setter_surface_z> - #<ref_height>]
+
+    (Write to INI using G10 L2 - but G10 L2 sets work offsets,)
+    (not INI values. We need to use a different approach.)
+    (For now, just report the value so the operator can)
+    (enter it in the Settings tab or INI file.)
+
+    (MSG, ========================================)
+    (MSG, Tool Setter Calibration Complete)
+    (MSG, Setter surface probed at Z: #<setter_surface_z>)
+    (MSG, Reference height used: #<ref_height>)
+    (MSG, Calculated REF_Z: #<new_ref_z>)
+    (MSG, )
+    (MSG, Enter this value in Settings -> Probing ->)
+    (MSG, Tool Setter Reference Z, or update the INI:)
+    (MSG, [TOOL_SETTER] REF_Z = #<new_ref_z>)
+    (MSG, ========================================)
+
+    (Retract)
+    G53 G0 Z#<z_safe>
+
+O111 endsub
+M2

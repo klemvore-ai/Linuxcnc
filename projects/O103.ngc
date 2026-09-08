@@ -1,0 +1,36 @@
+(O103 - Touch Plate Z Offset)
+(Probes Z down to touch plate, sets work offset)
+(Requires: [PROBE] PLATE_THICKNESS, VEL, SEARCH_DIST in LinuxCNC INI)
+(Usage: Position over touch plate, then call)
+
+O103 sub
+
+    #<plate_thickness> = #<_ini[PROBE]PLATE_THICKNESS>
+    #<probe_vel> = #<_ini[PROBE]VEL>
+    #<search_dist> = #<_ini[PROBE]SEARCH_DIST>
+
+    M5
+    M9
+    G90
+    G40
+    G49
+
+    (Fast probe down)
+    G91
+    G38.2 Z-#<search_dist> F[#<probe_vel> * 4]
+    G0 Z2.0
+
+    (Slow probe for accuracy)
+    G38.2 Z-4.0 F#<probe_vel>
+
+    (Set Z work offset to plate thickness)
+    G10 L20 P0 Z#<plate_thickness>
+
+    (Retract)
+    G0 Z5.0
+    G90
+
+    (MSG, Z offset set to #<plate_thickness>)
+
+O103 endsub
+M2

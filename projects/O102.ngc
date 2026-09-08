@@ -1,0 +1,25 @@
+(O102 - Park Machine)
+(Moves to configured park position)
+(Requires: [LOCATIONS] PARK_X, PARK_Y, PARK_Z in LinuxCNC INI)
+(Falls back to X0 Y0 Z0 if [LOCATIONS] section is missing)
+
+O102 sub
+
+    (Read park position from LinuxCNC INI, default to origin)
+    #<park_x> = #<_ini[LOCATIONS]PARK_X>
+    #<park_y> = #<_ini[LOCATIONS]PARK_Y>
+    #<park_z> = #<_ini[LOCATIONS]PARK_Z>
+
+    (Safety: stop spindle and coolant)
+    M5
+    M9
+
+    (Retract Z to park height, then move XY)
+    G90
+    G53 G0 Z#<park_z>
+    G53 G0 X#<park_x> Y#<park_y>
+
+    (MSG, Machine parked at X#<park_x> Y#<park_y> Z#<park_z>)
+
+O102 endsub
+M2

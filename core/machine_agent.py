@@ -88,6 +88,23 @@ class MachineAgentClient:
         """Return the machine's approved G-code file list."""
         return self.get("/v1/gcode")
 
+    def list_macros(self):
+        """Return approved O-code macro files available on the machine."""
+        return self.get("/v1/macros")
+
+    def upload_macro(self, filename, content):
+        """Upload one allowlisted O-code macro with a generated checksum."""
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        if len(content) > 64 * 1024:
+            raise MachineAgentError("Macro is too large.")
+        payload = {
+            "filename": filename,
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "content": content.decode("utf-8"),
+        }
+        return self.post("/v1/macros", payload)
+
     def reload_tool_table(self):
         """Request LinuxCNC to reload the active tool table while idle."""
         return self.post("/v1/tool-table/reload", {})
@@ -100,9 +117,11 @@ class MachineAgentClient:
         """Apply a bounded feed or spindle override through the machine agent."""
         return self.post("/v1/tuning/override", {"kind": kind, "value": value})
 
-    def machine_command(self, command):
+    def machine_command(self, command, timeout=None):
         """Execute one allowlisted operator machine command."""
-        return self.post("/v1/machine/command", {"command": command})
+        if timeout is None:
+            return self.post("/v1/machine/command", {"command": command})
+        return self._request("POST", "/v1/machine/command", {"command": command}, timeout=timeout)
 
     def spindle_command(self, action, rpm=0.0):
         """Apply one allowlisted spindle direction command at a bounded RPM."""
@@ -112,9 +131,19 @@ class MachineAgentClient:
         """Run the fixed tool-change sequence for one validated tool number."""
         return self.post("/v1/tool/change", {"tool": tool})
 
-    def home_axis(self, axis):
+    def home_axis(self, axis, timeout=None):
         """Request homing for one named axis."""
+        if timeout is not None:
+            return self._request("POST", "/v1/machine/home-axis", {"axis": axis}, timeout=timeout)
         return self.post("/v1/machine/home-axis", {"axis": axis})
+
+    def jog_start(self, axis, velocity):
+        """Start one bounded continuous jog through the machine agent."""
+        return self._request("POST", "/v1/machine/jog", {"action": "start", "axis": axis, "velocity": velocity}, timeout=2.0)
+
+    def jog_stop(self, axis):
+        """Stop one continuous jog through the machine agent."""
+        return self._request("POST", "/v1/machine/jog", {"action": "stop", "axis": axis}, timeout=2.0)
 
     def probe_z(self, target, velocity):
         """Request a bounded Z probe cycle through the machine agent."""
@@ -134,6 +163,14 @@ class MachineAgentClient:
                 "retract": retract,
             },
         )
+
+    def touch_off_axis(self, axis, value=0.0):
+        """Set one work-coordinate axis to a bounded value."""
+        return self.post("/v1/machine/touch-off-axis", {"axis": axis, "value": value})
+
+    def run_subroutine(self, ocode):
+        """Run one allowlisted O-code subroutine."""
+        return self.post("/v1/machine/subroutine", {"ocode": ocode})
 
     def move_tool_setter(self, x, y, z):
         """Request a bounded move to the tool-setter location."""

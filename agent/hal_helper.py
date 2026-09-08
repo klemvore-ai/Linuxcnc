@@ -7,6 +7,8 @@ import os
 import socket
 import stat
 import subprocess
+import threading
+import time
 
 from agent.policy import AgentPolicyError, validate_hal_value_request
 
@@ -17,6 +19,32 @@ REQUESTS = {
     b"show_hal_pins\n": ("halcmd", "show", "pin"),
     b"show_hal_components\n": ("halcmd", "show", "comp"),
 }
+
+
+def _safe_poll(stat_obj, retries=5, delay=0.1):
+    """Poll a linuxcnc.stat object with retry on transient NML/SHM failures.
+    
+    The SystemError: <method 'poll' of 'linuxcnc.stat' objects> returned NULL
+    without setting an exception can occur when the NML/SHM connection is
+    momentarily unstable (e.g., during tool_mmap warnings). Retry briefly.
+    """
+    for attempt in range(retries):
+        try:
+            stat_obj.poll()
+            return True
+        except (SystemError, OSError, AttributeError):
+            if attempt == retries - 1:
+                raise
+            time.sleep(delay)
+    return False
+
+
+def _get_status():
+    """Get a fresh linuxcnc.stat object with safe polling."""
+    import linuxcnc
+    s = linuxcnc.stat()
+    _safe_poll(s)
+    return s
 
 
 def _show_hal(argv):
@@ -66,13 +94,70 @@ def read_hal_values(pins):
 
 def linuxcnc_status():
     """Read one bounded LinuxCNC status snapshot as the LinuxCNC owner."""
-    status_program = """import json, linuxcnc
+    status_program = """import json, linuxcnc, time
+import sys
+
+# Inline safe_poll to avoid import issues in subprocess
+def safe_poll(stat_obj, retries=5, delay=0.1):
+    for attempt in range(retries):
+        try:
+            stat_obj.poll()
+            return True
+        except (SystemError, OSError, AttributeError):
+            if attempt == retries - 1:
+                raise
+            time.sleep(delay)
+    return False
+
 status = linuxcnc.stat()
-status.poll()
+safe_poll(status)
+errors = linuxcnc.error_channel()
+error_messages = []
+while True:
+    error = errors.poll()
+    if not error:
+        break
+    error_messages.append(str(error[1]))
 position = getattr(status, 'actual_position', (0.0, 0.0, 0.0))
 dtg = getattr(status, 'dtg', (0.0, 0.0, 0.0))
 interpreter = getattr(status, 'interp_state', None)
 mode = getattr(status, 'task_mode', None)
+joints = int(getattr(status, 'joints', getattr(status, 'axes', 3)))
+
+def joint_input(index, fallback):
+    try:
+        return float(status.joint[index]['input'])
+    except Exception:
+        return fallback
+
+def joint_homed(index):
+    try:
+        return bool(status.joint[index]['homed'])
+    except Exception:
+        try:
+            return bool(status.homed[index])
+        except Exception:
+            return False
+
+homed_count = sum(1 for index in range(joints) if joint_homed(index))
+
+if joints >= 4:
+    x_machine_position = joint_input(0, position[0] if len(position) > 0 else 0.0)
+    y1_position = joint_input(1, position[1] if len(position) > 1 else 0.0)
+    y2_position = joint_input(2, y1_position)
+    y_machine_position = (y1_position + y2_position) / 2.0
+    z_machine_position = joint_input(3, position[2] if len(position) > 2 else 0.0)
+else:
+    x_machine_position = position[0] if len(position) > 0 else 0.0
+    y_machine_position = position[1] if len(position) > 1 else 0.0
+    z_machine_position = position[2] if len(position) > 2 else 0.0
+
+g5x = getattr(status, 'g5x_offset', (0.0,) * 9)
+g92 = getattr(status, 'g92_offset', (0.0,) * 9)
+tool = getattr(status, 'tool_offset', (0.0,) * 9)
+x_position = x_machine_position - (g5x[0] + g92[0] + tool[0])
+y_position = y_machine_position - (g5x[1] + g92[1] + tool[1])
+z_position = z_machine_position - (g5x[2] + g92[2] + tool[2])
 result = {
     'machine_state': {
         'running': True,
@@ -81,30 +166,42 @@ result = {
         'state_available': True,
     },
     'telemetry': {
-        'X': position[0] if len(position) > 0 else 0.0,
-        'Y': position[1] if len(position) > 1 else 0.0,
-        'Z': position[2] if len(position) > 2 else 0.0,
+        'X': x_position,
+        'Y': y_position,
+        'Z': z_position,
         'FEED': getattr(status, 'current_vel', 0.0) * 60.0,
         'RPM': abs(getattr(status, 'spindle_speed', 0.0)),
         'FEED_OVR': getattr(status, 'feedrate', 1.0),
         'SPINDLE_OVR': getattr(status, 'spindle_scale', 1.0),
-        'HOMED_COUNT': sum(1 for value in getattr(status, 'homed', []) if value),
+        'HOMED_COUNT': homed_count,
         'MACHINE_ON': getattr(status, 'task_state', None) == linuxcnc.STATE_ON,
         'ESTOP_ACTIVATED': getattr(status, 'task_state', None) == linuxcnc.STATE_ESTOP,
-        'JOINTS': int(getattr(status, 'joints', getattr(status, 'axes', 3))),
+        'JOINTS': joints,
         'LINE': getattr(status, 'motion_line', 0),
+        'CURRENT_LINE': getattr(status, 'current_line', 0),
+        'READ_LINE': getattr(status, 'read_line', 0),
+        'EXEC_STATE': getattr(status, 'exec_state', None),
+        'INTERP_STATE': interpreter,
+        'TASK_STATE': getattr(status, 'task_state', None),
+        'COMMAND': getattr(status, 'command', ''),
         'STATUS': 'IDLE' if interpreter == linuxcnc.INTERP_IDLE else 'PAUSED' if interpreter == linuxcnc.INTERP_PAUSED else 'RUNNING',
         'MODE': 'MANUAL' if mode == linuxcnc.MODE_MANUAL else 'AUTO' if mode == linuxcnc.MODE_AUTO else 'MDI' if mode == linuxcnc.MODE_MDI else 'UNKNOWN',
         'PROGRAM_LOADED': bool(getattr(status, 'file', None)),
-        'ABSOLUTE_X': position[0] if len(position) > 0 else 0.0,
-        'ABSOLUTE_Y': position[1] if len(position) > 1 else 0.0,
-        'ABSOLUTE_Z': position[2] if len(position) > 2 else 0.0,
+        'PROGRAM_FILE': getattr(status, 'file', ''),
+        'TASK_BLOCKED': getattr(status, 'exec_state', 2) not in (1, 2),
+        'TOOL_IN_SPINDLE': int(getattr(status, 'tool_in_spindle', 0)),
+        'POCKET_PREPPED': int(getattr(status, 'pocket_prepped', -1)),
+        'ABSOLUTE_X': x_machine_position,
+        'ABSOLUTE_Y': y_machine_position,
+        'ABSOLUTE_Z': z_machine_position,
         'DTG_X': dtg[0] if len(dtg) > 0 else 0.0,
         'DTG_Y': dtg[1] if len(dtg) > 1 else 0.0,
         'DTG_Z': dtg[2] if len(dtg) > 2 else 0.0,
     },
     'error': '',
 }
+if error_messages:
+    result['telemetry']['ERROR'] = '\\n'.join(error_messages)[-4096:]
 print(json.dumps(result, separators=(',', ':')))"""
     result = subprocess.run(
         ["/opt/CNCFusion/.venv/bin/python", "-c", status_program],
@@ -123,17 +220,184 @@ print(json.dumps(result, separators=(',', ':')))"""
 
 def linuxcnc_machine_command(command):
     """Run one fixed allowlisted LinuxCNC machine command as the LinuxCNC owner."""
+    if command == "home_all":
+        program = """import json, linuxcnc, time
+controller = linuxcnc.command()
+controller.mode(linuxcnc.MODE_MANUAL)
+controller.wait_complete()
+controller.teleop_enable(0)
+controller.wait_complete()
+controller.home(3)
+controller.wait_complete()
+time.sleep(30)
+controller.home(0)
+controller.wait_complete()
+time.sleep(30)
+print(json.dumps({"accepted": True, "command": "home_all"}, separators=(",", ":")))
+"""
+        result = subprocess.run(
+            ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "HOME ALL failed.")
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
+    if command == "unhome_all":
+        program = """import json, linuxcnc, time
+controller = linuxcnc.command()
+controller.mode(linuxcnc.MODE_MANUAL)
+result = controller.wait_complete(10)
+if result == -1 or result == linuxcnc.RCS_ERROR:
+    raise RuntimeError("Mode switch did not complete before unhoming.")
+controller.teleop_enable(0)
+result = controller.wait_complete(10)
+if result == -1 or result == linuxcnc.RCS_ERROR:
+    raise RuntimeError("Teleop disable did not complete before unhoming.")
+for joint in range(4):
+    controller.unhome(joint)
+    result = controller.wait_complete(10)
+    if result == -1 or result == linuxcnc.RCS_ERROR:
+        raise RuntimeError(f"Joint {joint} unhome did not complete.")
+print(json.dumps({"accepted": True, "command": "unhome_all"}, separators=(",", ":")))
+"""
+        result = subprocess.run(
+            ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "UNHOME ALL failed.")
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
+    if command == "program_start":
+        program = """import json, linuxcnc, time
+controller = linuxcnc.command()
+
+# Inline safe_poll for subprocess stability
+def safe_poll(stat_obj, retries=5, delay=0.1):
+    for attempt in range(retries):
+        try:
+            stat_obj.poll()
+            return True
+        except (SystemError, OSError, AttributeError):
+            if attempt == retries - 1:
+                raise
+            time.sleep(delay)
+    return False
+
+status = linuxcnc.stat()
+safe_poll(status)
+if not getattr(status, 'file', None):
+    raise RuntimeError('Cycle start requires a loaded program.')
+controller.mode(linuxcnc.MODE_AUTO)
+controller.wait_complete(5)
+controller.auto(linuxcnc.AUTO_RUN, 0)
+print(json.dumps({"accepted": True, "command": "program_start"}, separators=(",", ":")))
+"""
+        result = subprocess.run(
+            ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Cycle start failed.")
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
+    if command == "program_pause_resume":
+        program = """import json, linuxcnc, time
+controller = linuxcnc.command()
+
+# Inline safe_poll for subprocess stability
+def safe_poll(stat_obj, retries=5, delay=0.1):
+    for attempt in range(retries):
+        try:
+            stat_obj.poll()
+            return True
+        except (SystemError, OSError, AttributeError):
+            if attempt == retries - 1:
+                raise
+            time.sleep(delay)
+    return False
+
+status = linuxcnc.stat()
+safe_poll(status)
+if status.interp_state == linuxcnc.INTERP_PAUSED:
+    controller.auto(linuxcnc.AUTO_RESUME)
+elif status.interp_state == linuxcnc.INTERP_IDLE:
+    raise RuntimeError('Pause/resume requires an active or paused program.')
+else:
+    controller.auto(linuxcnc.AUTO_PAUSE)
+print(json.dumps({"accepted": True, "command": "program_pause_resume"}, separators=(",", ":")))
+"""
+        result = subprocess.run(
+            ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Pause/resume failed.")
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
+    if command == "tool_change_ack":
+        for value in ("1", "0"):
+            result = subprocess.run(
+                ["halcmd", "setp", "iocontrol.0.tool-changed", value],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Tool-change acknowledge failed.")
+            if value == "1":
+                time.sleep(0.3)
+        return {"accepted": True, "command": "tool_change_ack"}
+
+    if command in {"estop_reset", "power_on", "power_off", "estop"}:
+        state_commands = {
+            "estop_reset": "controller.state(linuxcnc.STATE_ESTOP_RESET)",
+            "power_on": "controller.state(linuxcnc.STATE_ON)",
+            "power_off": "controller.state(linuxcnc.STATE_OFF)",
+            "estop": "controller.state(linuxcnc.STATE_OFF)\ncontroller.state(linuxcnc.STATE_ESTOP)",
+        }
+        program = f"""import json, linuxcnc
+controller = linuxcnc.command()
+{state_commands[command]}
+print(json.dumps({{"accepted": True, "command": {command!r}}}, separators=(",", ":")))
+"""
+        result = subprocess.run(
+            ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Machine state command failed.")
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
     commands = {
         "abort": "controller.abort()",
-        "power_on": "controller.state(linuxcnc.STATE_ON)",
-        "power_off": "controller.state(linuxcnc.STATE_OFF)",
-        "estop": "controller.state(linuxcnc.STATE_OFF)\ncontroller.state(linuxcnc.STATE_ESTOP)",
-        "estop_reset": "controller.state(linuxcnc.STATE_ESTOP_RESET)",
         "override_limits": "controller.override_limits()",
+        "mode_manual": "controller.mode(linuxcnc.MODE_MANUAL)",
+        "mode_auto": "controller.mode(linuxcnc.MODE_AUTO)",
+        "coolant_mist_on": "controller.mist(1)",
+        "coolant_flood_on": "controller.flood(1)",
+        "coolant_off": "controller.mist(0)\ncontroller.flood(0)",
     }
     if command not in commands:
         raise AgentPolicyError("Unsupported LinuxCNC helper command.")
-    program = f"""import json, linuxcnc
+    program = f"""import json, linuxcnc, time
 controller = linuxcnc.command()
 {commands[command]}
 controller.wait_complete()
@@ -142,7 +406,7 @@ print(json.dumps({{'accepted': True, 'command': {command!r}}}))"""
         ["/opt/CNCFusion/.venv/bin/python", "-c", program],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=120 if command in {"home_all", "unhome_all"} else 10,
         check=False,
     )
     if result.returncode != 0:
@@ -155,18 +419,13 @@ print(json.dumps({{'accepted': True, 'command': {command!r}}}))"""
 
 def linuxcnc_home_axis(axis):
     """Home one validated joint as the LinuxCNC owner."""
-    joint_index = {"X": 0, "Y": 1, "Z": 2, "A": 3, "B": 4, "C": 5}[axis]
-    program = f"""import json, linuxcnc
-status = linuxcnc.stat()
-status.poll()
-if status.task_state != linuxcnc.STATE_ON:
-    raise RuntimeError("Axis homing requires powered LinuxCNC.")
+    joint_index = {"X": 0, "Y": 1, "Z": 3, "A": 4, "B": 5, "C": 6}[axis]
+    program = f"""import json, linuxcnc, time
 controller = linuxcnc.command()
 controller.mode(linuxcnc.MODE_MANUAL)
 controller.wait_complete()
-if getattr(status, "motion_teleop", False):
-    controller.teleop_enable(0)
-    controller.wait_complete()
+controller.teleop_enable(0)
+controller.wait_complete()
 controller.home({joint_index})
 controller.wait_complete()
 print(json.dumps({{"accepted": True, "axis": {axis!r}}}, separators=(",", ":")))
@@ -186,13 +445,258 @@ print(json.dumps({{"accepted": True, "axis": {axis!r}}}, separators=(",", ":")))
     return payload
 
 
+def linuxcnc_jog(action, axis, velocity):
+    """Start or stop one bounded Cartesian jog as the LinuxCNC owner."""
+    axis_index = {"X": 0, "Y": 1, "Z": 2, "A": 3, "B": 4, "C": 5}[axis]
+    program = f"""import json, linuxcnc, time
+controller = linuxcnc.command()
+
+# Inline safe_poll for subprocess stability
+def safe_poll(stat_obj, retries=5, delay=0.1):
+    for attempt in range(retries):
+        try:
+            stat_obj.poll()
+            return True
+        except (SystemError, OSError, AttributeError):
+            if attempt == retries - 1:
+                raise
+            time.sleep(delay)
+    return False
+
+status = linuxcnc.stat()
+safe_poll(status)
+if status.task_state != linuxcnc.STATE_ON:
+    raise RuntimeError("Jogging requires powered LinuxCNC.")
+controller.mode(linuxcnc.MODE_MANUAL)
+controller.wait_complete(2)
+if {action!r} == "start":
+    joints = int(getattr(status, "joints", getattr(status, "axes", 3)))
+    if sum(1 for index in range(joints) if bool(status.joint[index]["homed"])) < joints:
+        raise RuntimeError("Secure jogging requires all joints homed.")
+    controller.teleop_enable(1)
+    controller.wait_complete(2)
+    controller.jog(linuxcnc.JOG_CONTINUOUS, False, {axis_index}, {velocity:.6f})
+else:
+    controller.jog(linuxcnc.JOG_STOP, False, {axis_index})
+controller.wait_complete(2)
+print(json.dumps({{"accepted": True, "action": {action!r}, "axis": {axis!r}}}, separators=(",", ":")))
+"""
+    result = subprocess.run(
+        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Jog operation failed.")
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    if payload.get("accepted") is not True:
+        raise RuntimeError("LinuxCNC did not accept jog operation.")
+    return payload
+
+
+def linuxcnc_spindle_command(action, rpm):
+    """Apply one fixed spindle command as the LinuxCNC owner."""
+    program = f"""import json, linuxcnc
+controller = linuxcnc.command()
+if {action!r} == "forward":
+    controller.spindle(linuxcnc.SPINDLE_FORWARD, {rpm:.4f})
+elif {action!r} == "reverse":
+    controller.spindle(linuxcnc.SPINDLE_REVERSE, {rpm:.4f})
+else:
+    controller.spindle(linuxcnc.SPINDLE_OFF)
+print(json.dumps({{"accepted": True, "action": {action!r}, "rpm": {rpm:.4f}}}, separators=(",", ":")))
+"""
+    result = subprocess.run(
+        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Spindle command failed.")
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    if payload.get("accepted") is not True:
+        raise RuntimeError("LinuxCNC did not accept spindle command.")
+    return payload
+
+
+def linuxcnc_touch_off_axis(axis, value):
+    """Set one work-coordinate axis value through a fixed MDI command."""
+    program = f"""import json, linuxcnc, time
+controller = linuxcnc.command()
+
+# Inline safe_poll for subprocess stability
+def safe_poll(stat_obj, retries=5, delay=0.1):
+    for attempt in range(retries):
+        try:
+            stat_obj.poll()
+            return True
+        except (SystemError, OSError, AttributeError):
+            if attempt == retries - 1:
+                raise
+            time.sleep(delay)
+    return False
+
+status = linuxcnc.stat()
+safe_poll(status)
+if status.task_state != linuxcnc.STATE_ON or status.interp_state != linuxcnc.INTERP_IDLE:
+    raise RuntimeError("Axis touch-off requires powered, idle LinuxCNC.")
+fixture = int(getattr(status, "g5x_index", 1) or 1)
+controller.mode(linuxcnc.MODE_MDI)
+controller.wait_complete(5)
+controller.mdi(f"G10 L20 P{{fixture}} {axis}{value:.4f}")
+result = controller.wait_complete(5)
+if result == -1 or result == linuxcnc.RCS_ERROR:
+    raise RuntimeError("Axis touch-off command did not complete.")
+controller.mode(linuxcnc.MODE_MANUAL)
+controller.wait_complete(5)
+print(json.dumps({{"accepted": True, "axis": {axis!r}, "value": {value:.4f}}}, separators=(",", ":")))
+"""
+    result = subprocess.run(
+        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Axis touch-off failed.")
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    if payload.get("accepted") is not True:
+        raise RuntimeError("LinuxCNC did not accept axis touch-off.")
+    return payload
+
+
+def linuxcnc_open_program(path):
+    """Open one validated G-code path as the LinuxCNC owner."""
+    program = f"""import json, linuxcnc
+controller = linuxcnc.command()
+controller.program_open({str(path)!r})
+result = controller.wait_complete(10)
+if result == -1 or result == linuxcnc.RCS_ERROR:
+    raise RuntimeError("Program open command did not complete.")
+print(json.dumps({{"accepted": True, "path": {str(path)!r}}}, separators=(",", ":")))
+"""
+    result = subprocess.run(
+        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Program open failed.")
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    if payload.get("accepted") is not True:
+        raise RuntimeError("LinuxCNC did not accept program open.")
+    return payload
+
+
+def linuxcnc_run_subroutine(ocode):
+    """Run one allowlisted O-code subroutine as a fixed MDI call."""
+    # Run from the LinuxCNC config directory so SUBROUTINE_PATH resolves correctly
+    linuxcnc_config_dir = "/home/darrell/linuxcnc/configs/CNCFusion"
+    program = f"""import json, linuxcnc, time, subprocess, sys, os
+
+# Change to LinuxCNC config directory so relative paths work
+os.chdir({linuxcnc_config_dir!r})
+
+# Use halcmd for reliable state checking instead of linuxcnc.stat()
+def check_hal_pin(pin_name):
+    try:
+        result = subprocess.run(
+            ["halcmd", "getp", pin_name],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return result.returncode == 0 and result.stdout.strip() == "TRUE"
+    except Exception:
+        return False
+
+def get_interp_state():
+    if check_hal_pin("halui.program.is-idle"):
+        return "IDLE"
+    if check_hal_pin("halui.program.is-running"):
+        return "RUNNING"
+    if check_hal_pin("halui.program.is-paused"):
+        return "PAUSED"
+    return "UNKNOWN"
+
+def get_task_state():
+    if check_hal_pin("halui.machine.is-on"):
+        return "ON"
+    if check_hal_pin("halui.estop.is-activated"):
+        return "ESTOP"
+    return "OFF"
+
+interp = get_interp_state()
+task = get_task_state()
+if task != "ON" or interp != "IDLE":
+    raise RuntimeError(f"Subroutine requires powered, idle LinuxCNC. Current: task={{task}}, interp={{interp}}")
+
+controller = linuxcnc.command()
+errors = linuxcnc.error_channel()
+
+controller.mode(linuxcnc.MODE_MDI)
+controller.wait_complete(5)
+
+time.sleep(0.5)
+for _ in range(50):
+    if check_hal_pin("halui.mode.is-mdi"):
+        break
+    time.sleep(0.1)
+else:
+    raise RuntimeError("MDI mode switch did not take effect.")
+
+controller.mdi({(ocode + ' call')!r})
+time.sleep(0.5)
+error = errors.poll()
+if error:
+    raise RuntimeError(error[1])
+
+print(json.dumps({{"accepted": True, "ocode": {ocode!r}}}, separators=(",", ":")))
+"""
+    result = subprocess.run(
+        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+        cwd=linuxcnc_config_dir,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Subroutine failed.")
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    if payload.get("accepted") is not True:
+        raise RuntimeError("LinuxCNC did not accept subroutine.")
+    return payload
+
+
 def linuxcnc_tool_setter_calibration(x, y, velocity, search_distance):
     """Run the fixed tool-setter probe cycle as the LinuxCNC owner."""
     program = f"""import json, linuxcnc, time
 controller = linuxcnc.command()
-status = linuxcnc.stat()
 errors = linuxcnc.error_channel()
-status.poll()
+
+# Inline safe_poll for subprocess stability
+def safe_poll(stat_obj, retries=5, delay=0.1):
+    for attempt in range(retries):
+        try:
+            stat_obj.poll()
+            return True
+        except (SystemError, OSError, AttributeError):
+            if attempt == retries - 1:
+                raise
+            time.sleep(delay)
+    return False
+
+status = linuxcnc.stat()
+safe_poll(status)
 if status.task_state != linuxcnc.STATE_ON or status.interp_state != linuxcnc.INTERP_IDLE:
     raise RuntimeError("Tool-setter calibration requires powered, idle LinuxCNC.")
 
@@ -211,7 +715,7 @@ wait_for_step("safe Z move")
 controller.mdi("G53 G0 X{x:.4f} Y{y:.4f}")
 wait_for_step("setter XY move")
 
-status.poll()
+safe_poll(status)
 if getattr(status, "probe_tripped", False):
     controller.mdi("G91 G38.4 Z{search_distance:.4f} F{velocity:.4f}")
     wait_for_step("probe retract")
@@ -222,7 +726,7 @@ try:
     z_min = float(status.axis[2]["min_position_limit"])
 except (AttributeError, KeyError, TypeError, IndexError):
     z_min = -1000.0
-status.poll()
+safe_poll(status)
 z_offset = status.g5x_offset[2] + status.g92_offset[2] + status.tool_offset[2]
 z_target = z_min - z_offset + 0.1
 current_z = status.position[2] - z_offset
@@ -231,14 +735,14 @@ if z_target >= current_z:
 
 controller.mdi(f"G38.2 Z{{z_target:.4f}} F{velocity * 4.0:.4f}")
 wait_for_step("fast probe")
-status.poll()
+safe_poll(status)
 if not status.probe_tripped:
     raise RuntimeError("Fast probe did not trip the tool setter.")
 controller.mdi("G91 G0 Z2.0000")
 wait_for_step("probe retract")
 controller.mdi(f"G38.2 Z{{z_target:.4f}} F{velocity:.4f}")
 wait_for_step("slow probe")
-status.poll()
+safe_poll(status)
 if not status.probe_tripped:
     raise RuntimeError("Slow probe did not trip the tool setter.")
 setter_height = float(status.probed_position[2])
@@ -298,6 +802,16 @@ def _handle_connection(connection):
                 response = linuxcnc_machine_command(payload["command"])
             elif payload["operation"] == "linuxcnc_home_axis" and set(payload) == {"operation", "axis"} and isinstance(payload["axis"], str) and payload["axis"] in {"X", "Y", "Z", "A", "B", "C"}:
                 response = linuxcnc_home_axis(payload["axis"])
+            elif payload["operation"] == "linuxcnc_jog" and set(payload) == {"operation", "action", "axis", "velocity"} and isinstance(payload["action"], str) and isinstance(payload["axis"], str):
+                response = linuxcnc_jog(payload["action"], payload["axis"], float(payload["velocity"]))
+            elif payload["operation"] == "linuxcnc_spindle_command" and set(payload) == {"operation", "action", "rpm"} and isinstance(payload["action"], str):
+                response = linuxcnc_spindle_command(payload["action"], float(payload["rpm"]))
+            elif payload["operation"] == "linuxcnc_touch_off_axis" and set(payload) == {"operation", "axis", "value"} and isinstance(payload["axis"], str):
+                response = linuxcnc_touch_off_axis(payload["axis"], float(payload["value"]))
+            elif payload["operation"] == "linuxcnc_open_program" and set(payload) == {"operation", "path"} and isinstance(payload["path"], str):
+                response = linuxcnc_open_program(payload["path"])
+            elif payload["operation"] == "linuxcnc_run_subroutine" and set(payload) == {"operation", "ocode"} and isinstance(payload["ocode"], str):
+                response = linuxcnc_run_subroutine(payload["ocode"])
             elif payload["operation"] == "linuxcnc_tool_setter_calibration" and set(payload) == {"operation", "x", "y", "velocity", "search_distance"}:
                 response = linuxcnc_tool_setter_calibration(
                     float(payload["x"]),
@@ -327,14 +841,26 @@ def serve(socket_path):
         listener.listen(8)
         while True:
             connection, _ = listener.accept()
-            with connection:
-                _handle_connection(connection)
+            threading.Thread(
+                target=_serve_connection,
+                args=(connection,),
+                daemon=True,
+            ).start()
     finally:
         listener.close()
         try:
             os.unlink(socket_path)
         except FileNotFoundError:
             pass
+
+
+def _serve_connection(connection):
+    """Handle one helper request without blocking other socket clients."""
+    with connection:
+        try:
+            _handle_connection(connection)
+        except OSError:
+            return
 
 
 def main():

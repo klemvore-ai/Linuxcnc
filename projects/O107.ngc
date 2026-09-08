@@ -1,0 +1,60 @@
+(O107 - Probe Hole Center)
+(Probes inside diameter of a hole to find center, sets work offset)
+(Requires: [PROBE] VEL, SEARCH_DIST, XY_CLEARANCE, Z_DROP, DIAMETER in LinuxCNC INI)
+(Usage: Position over hole, then call)
+
+O107 sub
+
+    #<probe_vel> = #<_ini[PROBE]VEL>
+    #<search_dist> = #<_ini[PROBE]SEARCH_DIST>
+    #<xy_clear> = #<_ini[PROBE]XY_CLEARANCE>
+    #<z_drop> = #<_ini[PROBE]Z_DROP>
+    #<probe_diam> = #<_ini[PROBE]DIAMETER>
+
+    M5
+    M9
+    G90
+    G40
+    G49
+
+    (Drop to probe height)
+    G91
+    G0 Z-#<z_drop>
+
+    (Probe X- side)
+    G38.2 X-#<search_dist> F#<probe_vel>
+    #<x1> = #5061
+    G0 X#<xy_clear>
+
+    (Probe X+ side)
+    G38.2 X#<search_dist> F#<probe_vel>
+    #<x2> = #5061
+    G0 X-#<xy_clear>
+
+    (Probe Y- side)
+    G38.2 Y-#<search_dist> F#<probe_vel>
+    #<y1> = #5062
+    G0 Y#<xy_clear>
+
+    (Probe Y+ side)
+    G38.2 Y#<search_dist> F#<probe_vel>
+    #<y2> = #5062
+    G0 Y-#<xy_clear>
+
+    (Retract Z)
+    G0 Z#<z_drop>
+
+    (Calculate center)
+    #<center_x> = [[#<x1> + #<x2>] / 2.0]
+    #<center_y> = [[#<y1> + #<y2>] / 2.0]
+
+    (Set work offset to center)
+    G10 L20 P0 X#<center_x>
+    G10 L20 P0 Y#<center_y>
+
+    G90
+
+    (MSG, Hole center: X#<center_x> Y#<center_y>)
+
+O107 endsub
+M2

@@ -13,6 +13,46 @@ class AgentPolicyError(ValueError):
 
 HAL_PIN_NAME_PATTERN = re.compile(r"[A-Za-z0-9_.:-]{1,160}")
 MAX_HAL_VALUE_PINS = 16
+ALLOWED_O_CODE_SUBROUTINES = {
+    "O100", "O101", "O102", "O103", "O104", "O105",
+    "O106", "O107", "O108", "O109", "O110", "O111",
+    "O112", "O113",
+}
+# LinuxCNC expects O-code files WITHOUT .ngc extension (e.g., "O100", not "O100.ngc")
+O_CODE_FILENAME_PATTERN = re.compile(r"(?i)^o(100|101|102|103|104|105|106|107|108|109|110|111|112|113)$")
+O_CODE_DEFINITION_PATTERN = re.compile(r"(?im)^\s*o\s*(100|101|102|103|104|105|106|107|108|109|110|111|112|113)\s+sub\b")
+
+
+def validate_o_code_subroutine(payload):
+    """Validate one allowlisted O-code subroutine call."""
+    if not isinstance(payload, dict) or set(payload) != {"ocode"}:
+        raise AgentPolicyError("Subroutine fields are invalid.")
+    ocode = payload["ocode"]
+    if not isinstance(ocode, str):
+        raise AgentPolicyError("Subroutine name must be a string.")
+    normalized = ocode.strip().upper()
+    if normalized not in ALLOWED_O_CODE_SUBROUTINES:
+        raise AgentPolicyError("Subroutine is not approved for secure execution.")
+    return normalized
+
+
+def validate_macro_upload(payload):
+    """Validate one allowlisted O-code macro upload."""
+    required = {"filename", "sha256", "content"}
+    if not isinstance(payload, dict) or set(payload) != required:
+        raise AgentPolicyError("Macro upload fields are invalid.")
+    filename = payload["filename"]
+    if not isinstance(filename, str) or not O_CODE_FILENAME_PATTERN.fullmatch(Path(filename).name):
+        raise AgentPolicyError("Macro filename must be an approved O-code (O100-O113, no extension).")
+    if not isinstance(payload["sha256"], str) or len(payload["sha256"]) != 64 or any(character not in "0123456789abcdef" for character in payload["sha256"].lower()):
+        raise AgentPolicyError("Macro checksum is invalid.")
+    if not isinstance(payload["content"], str):
+        raise AgentPolicyError("Macro content must be text.")
+    match = O_CODE_DEFINITION_PATTERN.search(payload["content"])
+    expected = Path(filename).stem.upper()
+    if match is None or f"O{match.group(1)}" != expected:
+        raise AgentPolicyError("Macro content must define the matching O-code subroutine.")
+    return expected
 
 
 def validate_hal_value_request(payload):
@@ -235,6 +275,7 @@ def validate_machine_command(payload):
         "coolant_off",
         "program_start",
         "program_pause_resume",
+        "tool_change_ack",
         "mode_manual",
         "mode_auto",
         "home_all",
@@ -278,6 +319,42 @@ def validate_home_axis(payload):
     if not isinstance(axis, str) or axis.upper() not in {"X", "Y", "Z", "A", "B", "C"}:
         raise AgentPolicyError("Axis name is not supported.")
     return axis.upper()
+
+
+def validate_jog_operation(payload):
+    """Validate a bounded jog start or stop request without accepting MDI text."""
+    if not isinstance(payload, dict) or set(payload) not in ({"action", "axis"}, {"action", "axis", "velocity"}):
+        raise AgentPolicyError("Jog fields are invalid.")
+    action = payload["action"]
+    axis = payload["axis"]
+    if action not in {"start", "stop"}:
+        raise AgentPolicyError("Jog action is not supported.")
+    if not isinstance(axis, str) or axis.upper() not in {"X", "Y", "Z", "A", "B", "C"}:
+        raise AgentPolicyError("Jog axis is not supported.")
+    if action == "stop":
+        return action, axis.upper(), 0.0
+    if set(payload) != {"action", "axis", "velocity"}:
+        raise AgentPolicyError("Jog start requires a velocity.")
+    velocity = payload["velocity"]
+    if not isinstance(velocity, (int, float)) or isinstance(velocity, bool):
+        raise AgentPolicyError("Jog velocity must be numeric.")
+    velocity = float(velocity)
+    if not -10000.0 <= velocity <= 10000.0 or abs(velocity) < 0.001:
+        raise AgentPolicyError("Jog velocity is outside the allowed range.")
+    return action, axis.upper(), velocity
+
+
+def validate_touch_off_axis(payload):
+    """Validate a named axis work-offset zero operation."""
+    if not isinstance(payload, dict) or set(payload) != {"axis", "value"}:
+        raise AgentPolicyError("Axis touch-off fields are invalid.")
+    axis = payload["axis"]
+    value = payload["value"]
+    if not isinstance(axis, str) or axis.upper() not in {"X", "Y", "Z"}:
+        raise AgentPolicyError("Axis touch-off supports only X, Y, and Z.")
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not -10000.0 <= float(value) <= 10000.0:
+        raise AgentPolicyError("Axis touch-off value is outside the allowed range.")
+    return axis.upper(), float(value)
 
 
 def validate_probe_operation(payload):

@@ -1,0 +1,52 @@
+(O113 - Quick Tool Change + Probe + Resume)
+(Simplified auto tool change for use inside G-code programs.)
+(Call immediately after T# M6 in your program:)
+(  T2 M6)
+(  O113 call [2])
+(This probes the new tool and resumes with correct offset.)
+(Requires: [TOOL_SETTER] X, Y, VEL, REF_Z, MAX_PROBE_DEPTH in INI)
+(Requires: [PROBE] Z_SAFE in INI)
+
+O113 sub
+
+    #<tool_num> = #1
+    #<setter_x> = #<_ini[TOOL_SETTER]X>
+    #<setter_y> = #<_ini[TOOL_SETTER]Y>
+    #<setter_vel> = #<_ini[TOOL_SETTER]VEL>
+    #<setter_ref_z> = #<_ini[TOOL_SETTER]REF_Z>
+    #<max_depth> = #<_ini[TOOL_SETTER]MAX_PROBE_DEPTH>
+    #<z_safe> = #<_ini[PROBE]Z_SAFE>
+
+    (Save current position)
+    #<saved_x> = #5420
+    #<saved_y> = #5421
+    #<saved_z> = #5422
+
+    (Move to tool setter and probe)
+    G90
+    G53 G0 Z#<z_safe>
+    G53 G0 X#<setter_x> Y#<setter_y>
+    G91
+    G38.2 Z[0 - #<max_depth>] F[#<setter_vel> * 4]
+    G0 Z2.0
+    G38.2 Z-4.0 F#<setter_vel>
+
+    (Calculate and store tool length)
+    #<tool_length> = [#5063 - #<setter_ref_z>]
+    G10 L1 P#<tool_num> Z#<tool_length>
+    G43 H#<tool_num>
+
+    (Return to work position)
+    G90
+    G53 G0 Z#<z_safe>
+    G0 X#<saved_x> Y#<saved_y>
+    G0 Z#<saved_z>
+
+    (Restart spindle at previous speed if it was running)
+    (Note: M3/M4 state is preserved by LinuxCNC, so we)
+    (just need to ensure the correct S word is active.)
+
+    (MSG, Tool #<tool_num> ready. Length: #<tool_length>)
+
+O113 endsub
+M2

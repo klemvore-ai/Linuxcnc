@@ -738,6 +738,82 @@ class AgentCalibrationWorker(QThread):
         except Exception as error:
             self.calibration_failed.emit(str(error))
 
+
+class AgentHomeAllWorker(QThread):
+    """Home the configured XYYZ joints through the named agent API."""
+    completed = pyqtSignal()
+    failed = pyqtSignal(str)
+    progress = pyqtSignal(str)
+
+    def __init__(self, agent_client):
+        super().__init__()
+        self.agent_client = agent_client
+
+    @staticmethod
+    def _required_joint_pins(axis):
+        return {
+            "X": ["joint.0.homed"],
+            "Y": ["joint.1.homed", "joint.2.homed"],
+            "Z": ["joint.3.homed"],
+        }[axis]
+
+    @staticmethod
+    def _truthy_hal(value):
+        return str(value).strip().upper() in {"1", "TRUE"}
+
+    def _wait_for_axis_homed(self, axis, timeout=120.0):
+        deadline = time.monotonic() + timeout
+        pins = self._required_joint_pins(axis)
+        while time.monotonic() < deadline:
+            hal_values = self.agent_client.read_hal_values(pins).get("values", {})
+            joints_homed = all(self._truthy_hal(hal_values.get(pin, "FALSE")) for pin in pins)
+            if joints_homed:
+                return
+            self.msleep(500)
+        raise RuntimeError(f"{axis} did not report homed before timeout.")
+
+    def run(self):
+        try:
+            for axis in ("Z", "X", "Y"):
+                self.progress.emit(f"Homing {axis}...")
+                self.agent_client.home_axis(axis, timeout=130.0)
+                self._wait_for_axis_homed(axis)
+                self.progress.emit(f"Homing {axis} complete")
+            self.completed.emit()
+        except Exception as error:
+            self.failed.emit(str(error))
+
+
+class AgentUnhomeAllWorker(QThread):
+    """Clear all homed joints through the authenticated machine agent."""
+    completed = pyqtSignal()
+    failed = pyqtSignal(str)
+
+    def __init__(self, agent_client):
+        super().__init__()
+        self.agent_client = agent_client
+
+    @staticmethod
+    def _truthy_hal(value):
+        return str(value).strip().upper() in {"1", "TRUE"}
+
+    def _wait_for_all_unhomed(self, timeout=10.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            telemetry = self.agent_client.telemetry()
+            if int(telemetry.get("HOMED_COUNT", 0)) == 0:
+                return
+            self.msleep(500)
+        raise RuntimeError("LinuxCNC did not report all joints unhomed before timeout.")
+
+    def run(self):
+        try:
+            self.agent_client.machine_command("unhome_all", timeout=10.0)
+            self._wait_for_all_unhomed()
+            self.completed.emit()
+        except Exception as error:
+            self.failed.emit(str(error))
+
 # Define MockLinuxCNC before using it
 class MockLinuxCNC:
     def command(self): return self
@@ -767,6 +843,9 @@ class MachineDashboard(QWidget):
         self.settings = settings
         self.home_buttons = {}
         self.dro_labels = {}
+        self.custom_dro_labels = {}
+        self.custom_status_labels = {}
+        self.custom_home_all_buttons = []
         self.jog_buttons = {}
         self.status_leds = {}
         self.display_units = "mm"
@@ -800,7 +879,9 @@ class MachineDashboard(QWidget):
 
         self.init_ui()
         QTimer.singleShot(0, self.refresh_agent_capabilities)
+        QTimer.singleShot(0, self.refresh_macro_list)
         self.init_heartbeat()
+        self.settings.reload()
         if client_from_settings(self.settings) is not None:
             self.start_position_fetcher()
         else:
@@ -809,7 +890,7 @@ class MachineDashboard(QWidget):
         self.setFocus()  # Ensure focus on startup
 
     def show_error_message(self, message):
-        QMessageBox.warning(self, "LinuxCNC MDI Error", f"The MDI command failed with the following error:\n\n{message}")
+        QMessageBox.warning(self, "LinuxCNC Command Error", f"The machine command failed with the following error:\n\n{message}")
 
     def refresh_agent_capabilities(self):
         """Discover optional secure controls after the Dashboard has rendered."""
@@ -819,6 +900,53 @@ class MachineDashboard(QWidget):
         self.capability_fetcher = AgentCapabilityFetcherThread(agent_client)
         self.capability_fetcher.capabilities_fetched.connect(self.apply_agent_capabilities)
         self.capability_fetcher.start()
+
+    def refresh_macro_list(self):
+        """Populate the secure subroutine picker from files installed on the machine."""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is None:
+            return
+        try:
+            macros = agent_client.list_macros().get("macros", [])
+        except Exception as error:
+            self.combo_ocodes.clear()
+            self.combo_ocodes.addItem("No managed macros found")
+            self.btn_run_ocode.setEnabled(False)
+            self.btn_run_ocode.setToolTip(f"Unable to list secure macros: {error}")
+            return
+        current = self.combo_ocodes.currentData()
+        self.combo_ocodes.clear()
+        labels = {
+            "O100": "Warmup",
+            "O101": "Tool Measure",
+            "O102": "Park",
+            "O103": "Touch Plate Z",
+            "O104": "Outside Corner",
+            "O105": "Inside Corner",
+            "O106": "Boss Center",
+            "O107": "Hole Center",
+            "O108": "Probe X Edge",
+            "O109": "Probe Y Edge",
+            "O110": "Auto Tool Change",
+            "O111": "Calibrate Setter",
+            "O112": "Calibrate Spindle Nose",
+            "O113": "Quick Tool Change",
+        }
+        for macro in macros:
+            ocode = macro.get("ocode")
+            filename = macro.get("filename")
+            if ocode and filename:
+                self.combo_ocodes.addItem(f"{ocode} ({labels.get(ocode, filename)})", ocode)
+        if self.combo_ocodes.count() == 0:
+            self.combo_ocodes.addItem("No managed macros found")
+            self.btn_run_ocode.setEnabled(False)
+            self.btn_run_ocode.setToolTip("Install O100.ngc, O101.ngc, or O102.ngc from the Macros page.")
+            return
+        index = self.combo_ocodes.findData(current)
+        if index >= 0:
+            self.combo_ocodes.setCurrentIndex(index)
+        self.btn_run_ocode.setEnabled(True)
+        self.btn_run_ocode.setToolTip("Run the selected managed O-code subroutine.")
 
     def apply_agent_capabilities(self, capabilities):
         """Disable typed controls unavailable on an older enrolled machine agent."""
@@ -1216,7 +1344,7 @@ except Exception as e:
 
             btn_zero = QPushButton(f"Zero {axis}")
             btn_zero.setStyleSheet("QPushButton { background-color: #34495e; color: white; padding: 10px; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #2c3e50; }")
-            btn_zero.clicked.connect(lambda _, a=axis: self.execute_mdi(f"G10 L20 P0 {a}0"))
+            btn_zero.clicked.connect(lambda _, a=axis: self.zero_axis(a))
             row_layout.addWidget(btn_zero)
             dro_v_layout.addLayout(row_layout)
 
@@ -1462,15 +1590,20 @@ except Exception as e:
         
         # Add Subroutine Options
         self.combo_ocodes = QComboBox()
-        self.combo_ocodes.addItems(["O100 (Warmup)", "O101 (Tool Measure)", "O102 (Park)"])
         self.combo_ocodes.setStyleSheet("background-color: #2d2d30; color: white; border: 1px solid #555; padding: 4px; border-radius: 4px; font-weight: bold;")
+        if client_from_settings(self.settings) is None:
+            self.combo_ocodes.addItems(["O100 (Warmup)", "O101 (Tool Measure)", "O102 (Park)"])
+        else:
+            self.combo_ocodes.addItem("Loading managed macros...")
         
-        btn_run_ocode = QPushButton("Run Subroutine")
-        btn_run_ocode.setStyleSheet("QPushButton { background-color: #8e44ad; color: white; font-weight: bold; padding: 6px; border-radius: 4px; } QPushButton:pressed { background-color: #732d91; }")
-        btn_run_ocode.clicked.connect(self.run_ocode)
+        self.btn_run_ocode = QPushButton("Run Subroutine")
+        self.btn_run_ocode.setStyleSheet("QPushButton { background-color: #8e44ad; color: white; font-weight: bold; padding: 6px; border-radius: 4px; } QPushButton:pressed { background-color: #732d91; }")
+        self.btn_run_ocode.clicked.connect(self.run_ocode)
+        if client_from_settings(self.settings) is not None:
+            self.btn_run_ocode.setEnabled(False)
         
         macro_layout.addWidget(self.combo_ocodes, 3, 0, 1, 2)
-        macro_layout.addWidget(btn_run_ocode, 3, 2)
+        macro_layout.addWidget(self.btn_run_ocode, 3, 2)
         
         macro_group.setLayout(macro_layout)
         dro_probe_layout.addWidget(macro_group)
@@ -1576,14 +1709,6 @@ except Exception as e:
         
         btn_grid.setColumnStretch(3, 1)
 
-        if client_from_settings(self.settings) is not None:
-            message = "Jogging is CNC-PC-local only and unavailable through the secure management connection."
-            self.jog_speed_slider.setEnabled(False)
-            self.jog_speed_slider.setToolTip(message)
-            for btn in self.jog_buttons.values():
-                btn.setEnabled(False)
-                btn.setToolTip(message)
-        
         jog_layout.addLayout(btn_grid)
         jog_group.setLayout(jog_layout)
         run_jog_home_layout.addWidget(jog_group)
@@ -1798,12 +1923,17 @@ except Exception as e:
                 btn = QPushButton(display_title, self.custom_ui_widget)
                 btn.setGeometry(int(x), int(y), int(w), int(h))
                 btn.setStyleSheet(f"QPushButton {{ {common_style} font-weight: bold; border: {border_width}px solid {border_color}; border-radius: {border_radius}px; }} QPushButton:pressed {{ background-color: {border_color}; padding-top: 2px; padding-left: 2px; }}")
-                
-                # Phase 4: Wire Button to SSH HAL Command
-                safe_title = title.replace(' ', '_').lower()
-                out_pin = f"ui.{safe_title}.out"
-                btn.pressed.connect(lambda _=None, p=out_pin: self.send_halcmd_setp(p, "True"))
-                btn.released.connect(lambda _=None, p=out_pin: self.send_halcmd_setp(p, "False"))
+                normalized_title = title.replace(" ", "_").upper()
+                if normalized_title in {"HOME_ALL", "UNHOME_ALL"}:
+                    self.custom_home_all_buttons.append(btn)
+                    btn.clicked.connect(self.home_all_axes)
+                elif normalized_title in {"HOME_X", "HOME_Y", "HOME_Z"}:
+                    btn.clicked.connect(lambda _, axis=normalized_title[-1]: self.home_axis(axis))
+                else:
+                    safe_title = title.replace(' ', '_').lower()
+                    out_pin = f"ui.{safe_title}.out"
+                    btn.pressed.connect(lambda _=None, p=out_pin: self.send_halcmd_setp(p, "True"))
+                    btn.released.connect(lambda _=None, p=out_pin: self.send_halcmd_setp(p, "False"))
                 widget_obj = btn
             elif w_type == "Toggle":
                 btn = QPushButton(display_title, self.custom_ui_widget)
@@ -1824,12 +1954,15 @@ except Exception as e:
                 lbl.setGeometry(10, 20, int(w)-20, int(h)-30)
                 lbl.setAlignment(q_align | q_valign)
                 lbl.setStyleSheet("font-size: 24px; color: #39FF14; background: black; padding: 5px;")
+                dro_key = next((axis for axis in ("X", "Y", "Z", "FEED", "RPM") if axis in title.upper()), title)
+                self.custom_dro_labels[dro_key] = lbl
                 widget_obj = grp
             elif w_type == "LED":
                 lbl = QLabel(display_title, self.custom_ui_widget)
                 lbl.setGeometry(int(x), int(y), int(w), int(h))
                 lbl.setAlignment(q_align | q_valign)
                 lbl.setStyleSheet(f"QLabel {{ {common_style} border: {border_width}px solid {border_color}; border-radius: {border_radius}px; font-weight: bold; }}")
+                self.custom_status_labels[title.upper()] = lbl
                 widget_obj = lbl
             elif "G-Code" in w_type:
                 container = QWidget(self.custom_ui_widget)
@@ -1980,6 +2113,19 @@ except Exception as e:
         if confirm == QMessageBox.StandardButton.Yes:
             self.execute_mdi(mdi_cmd)
 
+    def zero_axis(self, axis):
+        """Set one work-coordinate axis to zero through the secure agent when enrolled."""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.touch_off_axis(axis, 0.0)
+                self.update_real_coords(agent_client.telemetry())
+                self.update_status()
+            except Exception as error:
+                self.error_signal.emit(f"Zero {axis} failed: {error}")
+            return
+        self.execute_mdi(f"G10 L20 P0 {axis}0")
+
     def set_coolant(self, mode):
         """Apply one named coolant action without accepting arbitrary MDI in secure mode."""
         agent_client = client_from_settings(self.settings)
@@ -2035,7 +2181,7 @@ except Exception as e:
         agent_client = client_from_settings(self.settings)
         if agent_client is not None:
             try:
-                agent_client.machine_command("program_start")
+                agent_client.machine_command("program_start", timeout=15.0)
             except Exception as error:
                 self.error_signal.emit(f"Cycle start failed: {error}")
             return
@@ -2063,7 +2209,7 @@ except Exception as e:
         agent_client = client_from_settings(self.settings)
         if agent_client is not None:
             try:
-                agent_client.machine_command("program_pause_resume")
+                agent_client.machine_command("program_pause_resume", timeout=15.0)
             except Exception as error:
                 self.error_signal.emit(f"Pause/resume failed: {error}")
             return
@@ -2819,8 +2965,16 @@ except Exception as e: pass"""
         print(f"[dashboard.py] Pulsed HAL Pin: {pin_name}")
 
     def run_ocode(self):
-        macro_text = self.combo_ocodes.currentText()
-        ocode = macro_text.split(" ")[0]
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            ocode = self.combo_ocodes.currentData()
+            if not ocode:
+                self.error_signal.emit("No managed O-code macro is installed on the machine.")
+                return
+            macro_text = self.combo_ocodes.currentText()
+        else:
+            macro_text = self.combo_ocodes.currentText()
+            ocode = macro_text.split(" ")[0]
         
         confirm = QMessageBox.question(self, "Confirm Macro", 
                                        f"Are you sure you want to execute the following macro?\n\n{macro_text}", 
@@ -2828,6 +2982,12 @@ except Exception as e: pass"""
                                        
         if confirm == QMessageBox.StandardButton.Yes:
             print(f"[dashboard.py] Triggering Subroutine: {ocode}")
+            if agent_client is not None:
+                try:
+                    agent_client.run_subroutine(ocode)
+                except Exception as error:
+                    self.error_signal.emit(f"Subroutine failed: {error}")
+                return
             self.execute_mdi(f"{ocode} call")
 
     def save_toolpath_screenshot(self):
@@ -2909,8 +3069,6 @@ except Exception as e: pass"""
 
     def _check_tool_change_request(self):
         """Detect a pending manual M6 and offer an automatic tool-length probe."""
-        if client_from_settings(self.settings) is not None:
-            return  # Secure mode does not yet support automatic manual tool-change probing.
         blocked = self.mock_coords.get('TASK_BLOCKED', False)
         if not blocked:
             if self._tool_change_prompt_active:
@@ -2953,6 +3111,16 @@ try:
     time.sleep(0.3)
     os.system("halcmd setp iocontrol.0.tool-changed 0")
 except Exception: pass"""
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                agent_client.machine_command("tool_change_ack", timeout=15.0)
+                self._tool_change_prompt_active = False
+                self.update_real_coords(agent_client.telemetry())
+            except Exception as error:
+                self._tool_change_prompt_active = False
+                self.error_signal.emit(f"Tool-change acknowledge failed: {error}")
+            return
         self._send_b64_py_cmd(py_code, timeout=15)
 
     def load_gcode(self, text_widget):
@@ -3454,6 +3622,9 @@ except Exception as e: pass"""
                 if self._last_update_state.get(f"dro_{axis}") != text:
                     self.dro_labels[axis].setText(text)
                     self._last_update_state[f"dro_{axis}"] = text
+                custom_label = self.custom_dro_labels.get(axis)
+                if custom_label is not None:
+                    custom_label.setText(text)
 
         # Update live tool position in the 3D viewer
         tool_x = self.mock_coords.get('X', 0.0)
@@ -3511,14 +3682,20 @@ except Exception as e: pass"""
         # Drive 'Homed' status from the actual remote machine state
         _, _, _, expected_joints = self.get_kinematics_info()
         
-        # Fallback to local button disabled logic if SSH is offline
-        if self.ssh_connected:
-            is_homed = expected_joints > 0 and self.mock_coords.get('HOMED_COUNT', 0) >= expected_joints
+        # Prefer the machine-reported joint count whenever secure telemetry exists.
+        remote_joint_count = self.mock_coords.get('JOINTS', 0)
+        remote_homed_count = self.mock_coords.get('HOMED_COUNT', 0)
+        has_remote_homing_state = isinstance(remote_joint_count, (int, float)) and isinstance(remote_homed_count, (int, float)) and remote_joint_count > 0
+        if has_remote_homing_state:
+            is_homed = remote_homed_count >= remote_joint_count
             is_powered_on = self.mock_coords.get('MACHINE_ON', not self.is_estopped)
             
             if 'ESTOP_ACTIVATED' in self.mock_coords:
                 self.is_estopped = self.mock_coords['ESTOP_ACTIVATED']
                 self.machine_state = "ESTOP" if self.is_estopped else "STANDBY"
+        elif self.ssh_connected:
+            is_homed = expected_joints > 0 and remote_homed_count >= expected_joints
+            is_powered_on = self.mock_coords.get('MACHINE_ON', not self.is_estopped)
         else:
             is_homed = expected_joints > 0 and all(not btn.isEnabled() for btn in self.home_buttons.values())
             is_powered_on = not self.is_estopped
@@ -3659,11 +3836,23 @@ except Exception as e: pass"""
 
     def home_all_axes(self):
         """Homes all axes simultaneously."""
-        if getattr(self, 'is_estopped', False) or (hasattr(self, 'is_estopped') and self.is_estopped):
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                telemetry = agent_client.telemetry()
+                self.update_real_coords(telemetry)
+                machine_is_estopped = telemetry.get("ESTOP_ACTIVATED", False)
+                is_machine_homed = telemetry.get("JOINTS", 0) > 0 and telemetry.get("HOMED_COUNT", 0) >= telemetry.get("JOINTS", 0)
+            except Exception as error:
+                self.error_signal.emit(f"Home state unavailable: {error}")
+                return
+        else:
+            machine_is_estopped = getattr(self, 'is_estopped', False)
+            is_machine_homed = getattr(self, 'is_machine_homed', False)
+
+        if machine_is_estopped:
             QMessageBox.warning(self, "E-STOP", "Cannot home machine while E-STOP is active.\nPlease release the E-STOP first.")
             return
-
-        is_machine_homed = getattr(self, 'is_machine_homed', False)
 
         if is_machine_homed:
             confirm = QMessageBox.question(self, "Clear Homed State?",
@@ -3672,12 +3861,13 @@ except Exception as e: pass"""
             if confirm != QMessageBox.StandardButton.Yes:
                 return
 
-            agent_client = client_from_settings(self.settings)
             if agent_client is not None:
-                try:
-                    agent_client.machine_command("unhome_all")
-                except Exception as error:
-                    self.error_signal.emit(f"Unhome all failed: {error}")
+                self.unhome_all_worker = AgentUnhomeAllWorker(agent_client)
+                self.btn_home_all.setEnabled(False)
+                self.btn_home_all.setText("UNHOMING...")
+                self.unhome_all_worker.completed.connect(self._unhome_all_completed)
+                self.unhome_all_worker.failed.connect(self._unhome_all_failed)
+                self.unhome_all_worker.start()
                 return
 
             print("[dashboard.py] Unhoming all axes remotely...")
@@ -3706,7 +3896,17 @@ except Exception as e:
         agent_client = client_from_settings(self.settings)
         if agent_client is not None:
             try:
-                agent_client.machine_command("home_all")
+                self.home_all_worker = AgentHomeAllWorker(agent_client)
+                self.btn_home_all.setEnabled(False)
+                self.btn_home_all.setText("HOMING...")
+                self.home_all_worker.progress.connect(self.btn_home_all.setText)
+                for button in self.custom_home_all_buttons:
+                    button.setEnabled(False)
+                    button.setText("HOMING...")
+                    self.home_all_worker.progress.connect(button.setText)
+                self.home_all_worker.completed.connect(self._home_all_completed)
+                self.home_all_worker.failed.connect(self._home_all_failed)
+                self.home_all_worker.start()
             except Exception as error:
                 self.error_signal.emit(f"Home all failed: {error}")
             return
@@ -3736,6 +3936,60 @@ except Exception as e:
 """
         self._send_b64_py_cmd(py_code)
 
+    def _home_all_completed(self):
+        """Refresh secure state after the named homing operations finish."""
+        self.btn_home_all.setEnabled(True)
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                telemetry = agent_client.telemetry()
+                self.update_real_coords(telemetry)
+                joints = int(telemetry.get("JOINTS", 0))
+                homed = int(telemetry.get("HOMED_COUNT", 0))
+                self.btn_home_all.setText("UNHOME ALL" if joints > 0 and homed >= joints else "HOME ALL")
+                for button in self.custom_home_all_buttons:
+                    button.setEnabled(True)
+                    button.setText("UNHOME ALL" if joints > 0 and homed >= joints else "HOME ALL")
+            except Exception as error:
+                self.error_signal.emit(f"Home state refresh failed: {error}")
+        self.update_status()
+
+    def _home_all_failed(self, error):
+        """Restore the home control and expose the verified failure state."""
+        self.btn_home_all.setEnabled(True)
+        self.btn_home_all.setText("HOME ALL")
+        for button in self.custom_home_all_buttons:
+            button.setEnabled(True)
+            button.setText("HOME ALL")
+        self.error_signal.emit(f"Home all failed: {error}")
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                self.update_real_coords(agent_client.telemetry())
+                self.update_status()
+            except Exception:
+                pass
+
+    def _unhome_all_completed(self):
+        """Refresh secure state after unhoming completes."""
+        self.btn_home_all.setEnabled(True)
+        self.btn_home_all.setText("HOME ALL")
+        self._last_update_state.pop("led_state", None)
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            try:
+                self.update_real_coords(agent_client.telemetry())
+            except Exception as error:
+                self.error_signal.emit(f"Unhome state refresh failed: {error}")
+        self.update_status()
+
+    def _unhome_all_failed(self, error):
+        """Restore the button and surface an unhome failure."""
+        self.btn_home_all.setEnabled(True)
+        self.btn_home_all.setText("HOME ALL")
+        self._last_update_state.pop("led_state", None)
+        self.error_signal.emit(f"Unhome all failed: {error}")
+
     def send_ping(self):
         """Silently checks if the LinuxCNC machine is reachable on the network."""
         if client_from_settings(self.settings) is not None:
@@ -3762,6 +4016,7 @@ except Exception as e:
             self.stop_position_fetcher()
 
     def start_position_fetcher(self):
+        self.settings.reload()
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
@@ -3784,12 +4039,15 @@ except Exception as e:
 
     def handle_secure_telemetry(self, coords):
         """Treat a successful authenticated telemetry snapshot as machine connectivity."""
+        self._telemetry_error_count = 0
         self.ssh_connected = True
         self.update_real_coords(coords)
 
     def handle_secure_telemetry_error(self, message):
         """Mark the secure transport offline without presenting polling errors as motion errors."""
-        self.ssh_connected = False
+        self._telemetry_error_count = getattr(self, "_telemetry_error_count", 0) + 1
+        if self._telemetry_error_count >= 3:
+            self.ssh_connected = False
         if hasattr(self, 'status_leds') and "CONNECTION" in self.status_leds:
             self.status_leds["CONNECTION"].setToolTip(message)
 
@@ -3804,13 +4062,34 @@ except Exception as e:
             if axis in coords:
                 self.mock_coords[axis] = coords[axis]
                 
-        for key in ['HOMED_COUNT', 'MACHINE_ON', 'ESTOP_ACTIVATED', 'JOINTS', 'AXIS_MASK', 'STATUS', 'MODE', 'PROGRAM_LOADED', 'TOTAL_LINES', 'LINE']:
+        for key in ['HOMED_COUNT', 'MACHINE_ON', 'ESTOP_ACTIVATED', 'JOINTS', 'AXIS_MASK', 'STATUS', 'MODE', 'PROGRAM_LOADED', 'TOTAL_LINES', 'LINE', 'CURRENT_LINE', 'READ_LINE', 'EXEC_STATE', 'INTERP_STATE', 'TASK_STATE', 'COMMAND', 'PROGRAM_FILE']:
             if key in coords:
                 self.mock_coords[key] = coords[key]
                 
         for key in ['FEED_OVR', 'SPINDLE_OVR', 'ABSOLUTE_X', 'ABSOLUTE_Y', 'ABSOLUTE_Z', 'DTG_X', 'DTG_Y', 'DTG_Z']:
             if key in coords:
                 self.mock_coords[key] = coords[key]
+
+        for axis in ("X", "Y", "Z", "FEED", "RPM"):
+            custom_label = self.custom_dro_labels.get(axis)
+            if custom_label is not None:
+                if axis in ("X", "Y", "Z"):
+                    value = coords.get(axis, self.mock_coords.get(axis, 0.0))
+                    custom_label.setText(f"{value:.3f}")
+                else:
+                    value = coords.get(axis, self.mock_coords.get(axis, 0.0))
+                    custom_label.setText(f"{value:.1f}")
+
+        homed = int(coords.get("HOMED_COUNT", self.mock_coords.get("HOMED_COUNT", 0)))
+        joints = int(coords.get("JOINTS", self.mock_coords.get("JOINTS", 0)))
+        homed_active = joints > 0 and homed >= joints
+        for title, label in self.custom_status_labels.items():
+            if "HOMED" in title or "READY" in title:
+                label.setStyleSheet(
+                    "background-color: #00FF00; color: black; font-weight: bold;"
+                    if homed_active else
+                    "background-color: #f39c12; color: black; font-weight: bold;"
+                )
 
         if 'TOOL_IN_SPINDLE' in coords:
             self.mock_coords['TOOL_IN_SPINDLE'] = coords['TOOL_IN_SPINDLE']
@@ -3883,8 +4162,16 @@ except Exception as e:
         return is_gantry, is_4_axis, is_5_axis, total_joints
 
     def jog_button_pressed(self, axis, direction, speed_multiplier=1):
-        if client_from_settings(self.settings) is not None:
-            self.error_signal.emit("Jogging is CNC-PC-local only and is unavailable through the secure management connection.")
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            max_vel = float(self.settings.get_setting(f"AXIS_{axis}", "vel", 50.0))
+            velocity = (self.jog_speed_slider.value() / 100.0) * max_vel * speed_multiplier * direction
+            self.active_jogs.add(axis)
+            try:
+                agent_client.jog_start(axis, velocity)
+            except Exception as error:
+                self.active_jogs.discard(axis)
+                self.error_signal.emit(f"Jog start failed: {error}")
             return
 
         if self.is_estopped:
@@ -3947,7 +4234,15 @@ except Exception as e:
         self._send_b64_py_cmd(py_code)
 
     def jog_button_released(self, axis=None):
-        if client_from_settings(self.settings) is not None:
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            axes_to_stop = [axis] if axis else list(self.active_jogs)
+            for ax in axes_to_stop:
+                self.active_jogs.discard(ax)
+                try:
+                    agent_client.jog_stop(ax)
+                except Exception as error:
+                    self.error_signal.emit(f"Jog stop failed: {error}")
             return
 
         axes_to_stop = [axis] if axis else list(self.active_jogs)

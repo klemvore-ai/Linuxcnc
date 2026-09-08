@@ -1,0 +1,63 @@
+(O110 - Auto Tool Change with Probe)
+(Complete automated tool change cycle:)
+(1. Move to tool setter location)
+(2. Probe tool length)
+(3. Store offset in tool table)
+(4. Return to work and continue)
+(Call as: O110 call [tool_number])
+(Requires: [TOOL_SETTER] X, Y, VEL, REF_Z, MAX_PROBE_DEPTH in INI)
+(Requires: [PROBE] Z_SAFE in INI for safe retract height)
+
+O110 sub
+
+    #<tool_num> = #1
+    #<setter_x> = #<_ini[TOOL_SETTER]X>
+    #<setter_y> = #<_ini[TOOL_SETTER]Y>
+    #<setter_vel> = #<_ini[TOOL_SETTER]VEL>
+    #<setter_ref_z> = #<_ini[TOOL_SETTER]REF_Z>
+    #<max_depth> = #<_ini[TOOL_SETTER]MAX_PROBE_DEPTH>
+    #<z_safe> = #<_ini[PROBE]Z_SAFE>
+
+    (Safety: stop spindle and coolant)
+    M5
+    M9
+
+    (Save current position to return later)
+    #<saved_x> = #5420
+    #<saved_y> = #5421
+    #<saved_z> = #5422
+
+    (Move to safe Z height)
+    G90
+    G53 G0 Z#<z_safe>
+
+    (Move to tool setter XY)
+    G53 G0 X#<setter_x> Y#<setter_y>
+
+    (Fast probe down)
+    G91
+    G38.2 Z[0 - #<max_depth>] F[#<setter_vel> * 4]
+    G0 Z2.0
+
+    (Slow probe for accuracy)
+    G38.2 Z-4.0 F#<setter_vel>
+
+    (Calculate tool length relative to setter reference)
+    #<tool_length> = [#5063 - #<setter_ref_z>]
+
+    (Store in tool table)
+    G10 L1 P#<tool_num> Z#<tool_length>
+
+    (Activate the new offset)
+    G43 H#<tool_num>
+
+    (Return to saved position)
+    G90
+    G53 G0 Z#<z_safe>
+    G0 X#<saved_x> Y#<saved_y>
+    G0 Z#<saved_z>
+
+    (MSG, Tool #<tool_num> probed. Length: #<tool_length>)
+
+O110 endsub
+M2

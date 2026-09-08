@@ -332,6 +332,17 @@ class RemoteLifecycleTests(unittest.TestCase):
     def test_helper_machine_command_rejects_unknown_command(self):
         with self.assertRaises(Exception):
             hal_helper.linuxcnc_machine_command("mdi G0 X1")
+    
+        def test_helper_commands_include_home_all_operations(self):
+            source = Path("agent/hal_helper.py").read_text(encoding="utf-8")
+            self.assertIn('"home_all":', source)
+            self.assertIn('"unhome_all":', source)
+            self.assertIn('120 if command in {"home_all", "unhome_all"}', source)
+
+        def test_helper_includes_tool_change_acknowledge(self):
+            source = Path("agent/hal_helper.py").read_text(encoding="utf-8")
+            self.assertIn('command == "tool_change_ack"', source)
+            self.assertIn('iocontrol.0.tool-changed', source)
 
     def test_linuxcnc_status_runs_a_short_lived_status_probe(self):
         completed = SimpleNamespace(
@@ -386,6 +397,20 @@ class RemoteLifecycleTests(unittest.TestCase):
         self.assertEqual(client.list_gcode()["files"], ["macro.ngc"])
         self.assertEqual(client.read_gcode("macro.ngc")["content"], "G0 X1")
         self.assertEqual(requests, ["/v1/gcode", "/v1/gcode/macro.ngc"])
+
+    def test_macro_list_and_upload_use_typed_endpoints(self):
+        client = MachineAgentClient.__new__(MachineAgentClient)
+        requests = []
+        client.get = lambda path: requests.append(("GET", path)) or {"macros": [{"ocode": "O100", "filename": "O100.ngc"}]}
+        client.post = lambda path, payload: requests.append(("POST", path, payload)) or {"accepted": True}
+
+        self.assertEqual(client.list_macros()["macros"][0]["filename"], "O100.ngc")
+        result = client.upload_macro("O100.ngc", "O100 sub\nO100 endsub\nM2\n")
+
+        self.assertTrue(result["accepted"])
+        self.assertEqual(requests[0], ("GET", "/v1/macros"))
+        self.assertEqual(requests[1][0:2], ("POST", "/v1/macros"))
+        self.assertEqual(requests[1][2]["filename"], "O100.ngc")
 
     def test_program_open_uses_structured_relative_path(self):
         client = MachineAgentClient.__new__(MachineAgentClient)

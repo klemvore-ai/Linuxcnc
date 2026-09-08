@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent.policy import AgentPolicyError, validate_action, validate_upload, validate_activation, validate_restart_activation, validate_mesa_identification, validate_tool_table_path, validate_gcode_path, validate_override, validate_pid, validate_firmware, validate_machine_command, validate_spindle_command, validate_tool_change, validate_home_axis, validate_probe_operation, validate_touch_off_z, validate_tool_setter_move, validate_hal_value_request
+from agent.policy import AgentPolicyError, validate_action, validate_upload, validate_activation, validate_restart_activation, validate_mesa_identification, validate_tool_table_path, validate_gcode_path, validate_override, validate_pid, validate_firmware, validate_machine_command, validate_spindle_command, validate_tool_change, validate_home_axis, validate_jog_operation, validate_touch_off_axis, validate_o_code_subroutine, validate_macro_upload, validate_probe_operation, validate_touch_off_z, validate_tool_setter_move, validate_hal_value_request
 
 
 class AgentPolicyTests(unittest.TestCase):
@@ -72,6 +72,10 @@ class AgentPolicyTests(unittest.TestCase):
         self.assertEqual(
             validate_machine_command({"command": "home_all"}),
             "home_all",
+        )
+        self.assertEqual(
+            validate_machine_command({"command": "tool_change_ack"}),
+            "tool_change_ack",
         )
 
     def test_validates_bounded_named_spindle_commands(self):
@@ -272,6 +276,37 @@ class AgentPolicyTests(unittest.TestCase):
         self.assertEqual(validate_machine_command({"command": "estop"}), "estop")
         with self.assertRaises(AgentPolicyError):
             validate_machine_command({"command": "mdi G0 X1"})
+
+    def test_jog_operation_accepts_bounded_start_and_stop(self):
+        self.assertEqual(validate_jog_operation({"action": "start", "axis": "x", "velocity": 25}), ("start", "X", 25.0))
+        self.assertEqual(validate_jog_operation({"action": "stop", "axis": "Z"}), ("stop", "Z", 0.0))
+        with self.assertRaises(AgentPolicyError):
+            validate_jog_operation({"action": "start", "axis": "X", "velocity": 0})
+        with self.assertRaises(AgentPolicyError):
+            validate_jog_operation({"action": "start", "axis": "X", "velocity": "G0 X1"})
+
+    def test_touch_off_axis_accepts_only_bounded_xyz_values(self):
+        self.assertEqual(validate_touch_off_axis({"axis": "x", "value": 0}), ("X", 0.0))
+        with self.assertRaises(AgentPolicyError):
+            validate_touch_off_axis({"axis": "A", "value": 0})
+        with self.assertRaises(AgentPolicyError):
+            validate_touch_off_axis({"axis": "X", "value": "G10"})
+
+    def test_o_code_subroutine_accepts_allowlisted_values_only(self):
+        self.assertEqual(validate_o_code_subroutine({"ocode": "o100"}), "O100")
+        with self.assertRaises(AgentPolicyError):
+            validate_o_code_subroutine({"ocode": "O999"})
+        with self.assertRaises(AgentPolicyError):
+            validate_o_code_subroutine({"ocode": "O100 call G0 X1"})
+
+    def test_macro_upload_requires_matching_o_code_definition(self):
+        content = "O100 sub\nG90\nO100 endsub\nM2\n"
+        payload = {"filename": "o100", "sha256": "a" * 64, "content": content}
+        self.assertEqual(validate_macro_upload(payload), "O100")
+        with self.assertRaises(AgentPolicyError):
+            validate_macro_upload({"filename": "O999", "sha256": "a" * 64, "content": "O999 sub\nO999 endsub"})
+        with self.assertRaises(AgentPolicyError):
+            validate_macro_upload({"filename": "O100", "sha256": "a" * 64, "content": "O101 sub\nO101 endsub"})
 
     def test_home_axis_policy_allows_standard_axis_names_only(self):
         self.assertEqual(validate_home_axis({"axis": "z"}), "Z")
