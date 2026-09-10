@@ -156,3 +156,11 @@ class ApplicationUpdateTests(unittest.TestCase):
             self.assertEqual((application / "main.py").read_text(encoding="utf-8"), "old")
             self.assertEqual((application / ".venv" / "marker").read_text(encoding="utf-8"), "keep")
             self.assertTrue(archive.exists())
+
+    def test_workspace_packaging_includes_required_application_files(self):
+        workspace_root = Path(__file__).resolve().parent.parent
+        self.assertTrue((workspace_root / "main.py").is_file())
+        self.assertTrue((workspace_root / "requirements.txt").is_file())
+        self.assertTrue((workspace_root / "agent" / "__init__.py").is_file())
+        self.assertTrue((workspace_root / "agent" / "__main__.py").is_file())
+        self.assertTrue((workspace_root / "agent" / "status.py").is_file())

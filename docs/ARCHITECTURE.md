@@ -186,13 +186,13 @@ CNCFusion project metadata may preserve wizard state, but LinuxCNC must not requ
 
 Axis homing uses the named `POST /v1/machine/home-axis` operation. It accepts only a standard axis identifier and requires powered LinuxCNC on the machine. Arbitrary homing or MDI strings are not sent through the secure agent.
 
-The first typed probe operation is `POST /v1/machine/probe-z`, restricted to the `technician` role and powered/idle LinuxCNC. Existing tool-setter and edge-finding workflows contain multiple motion steps and remain legacy until they are decomposed into reviewed, bounded operations.
+The secure probe surface includes `POST /v1/machine/probe-z`, `POST /v1/machine/touch-off-z`, bounded tool-setter positioning, and technician-only tool-setter calibration. These operations are reviewed bounded operations with machine-state checks; they use a locally selected probe source and do not accept arbitrary MDI strings.
 
 The first typed touch-off workflow is `POST /v1/machine/touch-off-z`. It requires the probe source to be selected locally, verifies a downward probe contact, applies only the requested Z work offset, and retracts a bounded distance. Tool-height calibration and edge-finding remain separate workflows because they combine multiple moves, additional measurements, and persistent result handling.
 
-Before tool-height calibration is exposed through the secure agent, define and test its complete contract: a locally selected and verified tool-setter input; bounded machine-coordinate approach and clearance moves; fast and slow probe passes; contact, timeout, and local error-channel handling at every step; the exact formula using the configured setter reference; atomic tool-table persistence and reload; post-update offset activation; safe retract/return behavior; and an explicit partial-completion record if a later step fails after the tool table changed. Edge-finding requires an equivalent reviewed contract per supported geometry.
+The current secure setter calibration contract uses bounded machine-coordinate approach and clearance moves, fast and slow setter probe passes, local error handling, and an explicit calibration result. Automatic tool-length persistence and advanced XY edge-finding still require additional acceptance testing and remain separate from the secure Z probe surface.
 
-Tool-setter positioning is the first decomposed calibration operation at `POST /v1/machine/tool-setter`. It accepts bounded coordinates, requires powered/idle LinuxCNC, and uses fixed local MDI commands. Full tool-setter calibration remains separate because it includes multi-step probing and result calculation.
+Tool-setter positioning is available at `POST /v1/machine/tool-setter`, and setter calibration is available at `POST /v1/machine/tool-setter/calibrate`. Both accept bounded parameters, require powered/idle LinuxCNC, and use fixed local operations. Advanced XY edge-finding remains separate because each geometry needs its own motion and offset contract.
 
 Secure Macro Editor file management uses the approved G-code list/read endpoints and checksum-verified uploads. It does not execute macro text through the agent. Macro execution requires a future named operation with explicit program allowlisting, machine-state checks, role authorization, and confirmation.
 
@@ -201,6 +201,8 @@ Legacy SSH consumers remain compatible during migration. When `keyring` is insta
 `SettingsManager` now migrates an existing SSH password to the OS keyring when available, returns the keyring value through the existing `get_setting("SSH", "password")` API, and clears plaintext on future password writes. This keeps legacy SSH consumers compatible while the UI is migrated away from direct credential persistence.
 
 The machine agent applies role checks in its request handler. Certificates may be mapped with `--client-role FINGERPRINT=role,role`; the operation matrix is `monitor` for inspection, `operator` for program loading and overrides, `technician` for PID tuning, and `administrator` for deployment, restore, firmware, and recovery. The desktop UI is not the security boundary; the agent repeats these checks on the LinuxCNC host.
+
+For the current operator dashboard classification, see [SAFETY_CONTROL_CHECKLIST.md](SAFETY_CONTROL_CHECKLIST.md). It records which controls are safe, which require the secure machine agent, and which remain explicitly unsafe.
 
 The LinuxCNC host deployment template is [agent/cncfusion-agent.service](../agent/cncfusion-agent.service), with deployment variables shown in [agent/agent.env.example](../agent/agent.env.example). The agent should bind to the management interface, while the control NIC remains dedicated to Mesa/EtherCAT real-time traffic. Service hardening and firewall configuration are required before production use.
 
@@ -227,4 +229,4 @@ python -m unittest tests.test_agent_policy tests.test_lifecycle tests.test_remot
 
 Before enabling remote deployment on a machine, test certificate enrollment, firewall/interface selection, graceful shutdown, staged upload, rollback, and recovery on a non-production LinuxCNC host.
 
-Before treating a machine as ready for normal secure operation, complete the real-machine acceptance checklist in [docs/LINUXCNC_BEGINNER_SETUP.md](LINUXCNC_BEGINNER_SETUP.md): verify service health, mTLS capability discovery, read-only diagnostics, named controls in safe states, local update approval, and the local-only jogging boundary. Multi-step probing and coordinate-offset workflows remain local-only until their complete safety contracts are implemented.
+Before treating a machine as ready for normal secure operation, complete the real-machine acceptance checklist in [docs/LINUXCNC_BEGINNER_SETUP.md](LINUXCNC_BEGINNER_SETUP.md): verify service health, mTLS capability discovery, read-only diagnostics, named controls in safe states, secure Z/setter probing on the real machine, local update approval, and the local-only jogging boundary. Advanced XY probing and coordinate-offset workflows remain local-only until their complete safety contracts are implemented.

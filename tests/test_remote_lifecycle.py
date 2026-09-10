@@ -518,13 +518,13 @@ class RemoteLifecycleTests(unittest.TestCase):
     def test_probe_z_uses_bounded_named_agent_operation(self):
         client = MachineAgentClient.__new__(MachineAgentClient)
         requests = []
-        client.post = lambda path, payload: requests.append((path, payload)) or {"accepted": True}
+        client._request = lambda method, path, payload, timeout=None: requests.append((method, path, payload, timeout)) or {"accepted": True}
 
         client.probe_z(-10.0, 50.0)
 
         self.assertEqual(
             requests,
-            [("/v1/machine/probe-z", {"operation": "probe_z", "target": -10.0, "velocity": 50.0})],
+            [("POST", "/v1/machine/probe-z", {"operation": "probe_z", "target": -10.0, "velocity": 50.0}, 60.0)],
         )
 
     def test_tool_setter_move_uses_named_coordinate_operation(self):

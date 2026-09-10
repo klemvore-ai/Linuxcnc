@@ -1,0 +1,45 @@
+(CNCFusion Multi-Tool Change and Probe Test)
+(No cutting motion. Uses the configured tool setter.)
+(Operator must install each requested tool when prompted.)
+(Run Dashboard Tool Setter Calibration and sync REF_Z before this test.)
+(Requires tool table entries T1, T2, and T3.)
+(Requires O113 tool-probe subroutine installed as 113.ngc.)
+
+G21 G90 G17 G40 G49 G94 G97
+G54
+M5
+M9
+
+(MSG, Beginning multi-tool change test)
+
+(MSG, Install Tool 1 when prompted)
+T1 M6
+O113 call [1]
+G43 H1
+(MSG, Tool 1 measured)
+M3 S3000
+G4 P5
+M5
+
+(MSG, Install Tool 2 when prompted)
+T2 M6
+O113 call [2]
+G43 H2
+(MSG, Tool 2 measured)
+M3 S6000
+G4 P5
+M5
+
+(MSG, Install Tool 3 when prompted)
+T3 M6
+O113 call [3]
+G43 H3
+(MSG, Tool 3 measured)
+M3 S9000
+G4 P5
+M5
+
+(MSG, Multi-tool change and probe test complete)
+M9
+G90
+M2

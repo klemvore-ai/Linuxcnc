@@ -301,8 +301,10 @@ class AgentPolicyTests(unittest.TestCase):
 
     def test_macro_upload_requires_matching_o_code_definition(self):
         content = "O100 sub\nG90\nO100 endsub\nM2\n"
-        payload = {"filename": "o100", "sha256": "a" * 64, "content": content}
-        self.assertEqual(validate_macro_upload(payload), "O100")
+        payload = {"filename": "O100", "sha256": "a" * 64, "content": content}
+        self.assertEqual(validate_macro_upload(payload), "100.ngc")
+        payload = {"filename": "o100.ngc", "sha256": "a" * 64, "content": content}
+        self.assertEqual(validate_macro_upload(payload), "100.ngc")
         with self.assertRaises(AgentPolicyError):
             validate_macro_upload({"filename": "O999", "sha256": "a" * 64, "content": "O999 sub\nO999 endsub"})
         with self.assertRaises(AgentPolicyError):

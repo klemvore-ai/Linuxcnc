@@ -48,11 +48,11 @@ Dashboard machine controls use `POST /v1/machine/command` with named actions for
 
 Axis homing uses `POST /v1/machine/home-axis` with a validated axis name and requires powered LinuxCNC.
 
-The first probing operation is `POST /v1/machine/probe-z`, which accepts a bounded downward target and velocity, requires powered, idle LinuxCNC, verifies that the local probe input tripped, and then performs a fixed retract. It does not select probe hardware or change work offsets. Multi-step tool-setter and edge-finding calibration sequences remain separate until their motion and fault behavior is individually specified.
+The secure probing operations include `POST /v1/machine/probe-z` for a bounded raw Z probe, `POST /v1/machine/touch-off-z` for a bounded Z touch-off, `POST /v1/machine/tool-setter` for bounded setter positioning, and `POST /v1/machine/tool-setter/calibrate` for the technician-only setter calibration worker. These operations require powered/idle LinuxCNC and use the locally selected probe source; they do not accept arbitrary MDI text.
 
 `POST /v1/machine/touch-off-z` is the first complete touch-plate workflow. It accepts bounded downward travel, velocity, plate thickness, and retract values; requires a locally selected probe input to trip; checks LinuxCNC's local error channel after each motion and offset step; applies only `G10 L20 P0 Z<plate_thickness>`; and then retracts. If retract fails after the offset succeeds, the returned error explicitly reports that the Z work offset was already applied. It does not select probe hardware, calibrate tool length, or execute edge-finding sequences.
 
-Tool-height calibration and edge-finding remain local-only until they have explicit bounded contracts for approach/retract motion, probe-source selection, contact/timeouts, tool-table mutation and reload, offset activation, and partial-completion reporting.
+Advanced XY edge-finding, corner, boss, and hole workflows remain local-only until they have explicit bounded contracts for approach/retract motion, probe-source selection, contact/timeouts, offset mutation, and partial-completion reporting. The Dashboard keeps those legacy routines disabled in secure mode while the bounded Z and tool-setter operations remain available.
 
 Tool-setter positioning uses `POST /v1/machine/tool-setter` with bounded absolute X/Y/Z coordinates and requires powered, idle LinuxCNC. The operation is technician-only; it does not execute arbitrary MDI.
 

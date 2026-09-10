@@ -1,0 +1,21 @@
+[Unit]
+Description=CNCFusion read-only LinuxCNC HAL helper
+After=network.target
+
+[Service]
+Type=simple
+User=darrell
+Group=cncfusion
+WorkingDirectory=/opt/CNCFusion
+ExecStart=/opt/CNCFusion/.venv/bin/python -m agent.hal_helper --socket /run/cncfusion/hal-helper.sock
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=false
+ProtectSystem=full
+ProtectHome=true
+RuntimeDirectory=cncfusion
+RuntimeDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

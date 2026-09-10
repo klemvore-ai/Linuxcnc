@@ -528,8 +528,9 @@ class MachineAgentServer:
                     self._send_error(400, str(error))
                 except MachineStateError as error:
                     self._send_error(409, str(error))
-                except Exception:
-                    self._send_error(409, "Z probing was rejected.")
+                except Exception as error:
+                    logger.error("Z probing was rejected: %s\n%s", error, traceback.format_exc())
+                    self._send_error(409, str(error)[-512:] or "Z probing was rejected.")
 
             def _touch_off_z(self):
                 """Run one validated touch-plate Z work-offset operation."""
@@ -545,8 +546,9 @@ class MachineAgentServer:
                     self._send_error(400, str(error))
                 except MachineStateError as error:
                     self._send_error(409, str(error))
-                except Exception:
-                    self._send_error(409, "Touch-off was rejected.")
+                except Exception as error:
+                    logger.error("Touch-off was rejected: %s\n%s", error, traceback.format_exc())
+                    self._send_error(409, str(error)[-512:] or "Touch-off was rejected.")
 
             def _touch_off_axis(self):
                 """Set one validated work-coordinate axis value."""

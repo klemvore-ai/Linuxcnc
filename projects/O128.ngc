@@ -1,0 +1,21 @@
+(O128 - Measure Inside Front Edge)
+(O128 probes Y- and sets the inside front edge to Y0)
+
+O128 sub
+    #<probe_vel> = #<_ini[PROBE]VEL>
+    #<search_dist> = #<_ini[PROBE]SEARCH_DIST>
+    #<xy_clear> = #<_ini[PROBE]XY_CLEARANCE>
+    #<z_drop> = #<_ini[PROBE]Z_DROP>
+    #<probe_diam> = #<_ini[PROBE]DIAMETER>
+    #<radius> = [#<probe_diam> / 2.0]
+    G90
+    G91
+    G0 Z-#<z_drop>
+    G38.2 Y-#<search_dist> F#<probe_vel>
+    #<y1> = #5062
+    G0 Y#<xy_clear>
+    G0 Z#<z_drop>
+    G90
+    G10 L20 P0 Y[#<y1> + #<radius>]
+O128 endsub
+M2

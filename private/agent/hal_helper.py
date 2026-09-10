@@ -21,32 +21,6 @@ REQUESTS = {
 }
 
 
-def _safe_poll(stat_obj, retries=5, delay=0.1):
-    """Poll a linuxcnc.stat object with retry on transient NML/SHM failures.
-    
-    The SystemError: <method 'poll' of 'linuxcnc.stat' objects> returned NULL
-    without setting an exception can occur when the NML/SHM connection is
-    momentarily unstable (e.g., during tool_mmap warnings). Retry briefly.
-    """
-    for attempt in range(retries):
-        try:
-            stat_obj.poll()
-            return True
-        except (SystemError, OSError, AttributeError):
-            if attempt == retries - 1:
-                raise
-            time.sleep(delay)
-    return False
-
-
-def _get_status():
-    """Get a fresh linuxcnc.stat object with safe polling."""
-    import linuxcnc
-    s = linuxcnc.stat()
-    _safe_poll(s)
-    return s
-
-
 def _show_hal(argv):
     """Run one fixed, read-only HAL inspection operation."""
     result = subprocess.run(
@@ -158,6 +132,20 @@ tool = getattr(status, 'tool_offset', (0.0,) * 9)
 x_position = x_machine_position - (g5x[0] + g92[0] + tool[0])
 y_position = y_machine_position - (g5x[1] + g92[1] + tool[1])
 z_position = z_machine_position - (g5x[2] + g92[2] + tool[2])
+# This machine has no spindle encoder: report commanded RPM, not feedback.
+spindle_rpm = 0.0
+try:
+    spindle_list = getattr(status, 'spindle', ())
+    if spindle_list and len(spindle_list) > 0:
+        spindle0 = spindle_list[0]
+        if isinstance(spindle0, dict):
+            commanded = spindle0.get('commanded_speed')
+            if commanded is None:
+                commanded = spindle0.get('speed', 0.0)
+            spindle_rpm = abs(float(commanded))
+except Exception:
+    pass
+
 result = {
     'machine_state': {
         'running': True,
@@ -170,7 +158,7 @@ result = {
         'Y': y_position,
         'Z': z_position,
         'FEED': getattr(status, 'current_vel', 0.0) * 60.0,
-        'RPM': abs(getattr(status, 'spindle_speed', 0.0)),
+        'RPM': spindle_rpm,
         'FEED_OVR': getattr(status, 'feedrate', 1.0),
         'SPINDLE_OVR': getattr(status, 'spindle_scale', 1.0),
         'HOMED_COUNT': homed_count,
@@ -362,6 +350,19 @@ print(json.dumps({"accepted": True, "command": "program_pause_resume"}, separato
             if value == "1":
                 time.sleep(0.3)
         return {"accepted": True, "command": "tool_change_ack"}
+
+    if command in {"probe_source_setter", "probe_source_probe"}:
+        value = "0" if command == "probe_source_setter" else "1"
+        result = subprocess.run(
+            ["halcmd", "setp", "lut5.0.in-2", value],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Probe source selection failed.")
+        return {"accepted": True, "command": command, "source": "setter" if value == "0" else "probe"}
 
     if command in {"estop_reset", "power_on", "power_off", "estop"}:
         state_commands = {
@@ -595,7 +596,129 @@ print(json.dumps({{"accepted": True, "path": {str(path)!r}}}, separators=(",", "
     return payload
 
 
+def linuxcnc_probe_z(target, velocity):
+    """Run one bounded raw Z probe as the LinuxCNC owner."""
+    program = f"""import json, linuxcnc, subprocess
+controller = linuxcnc.command()
+
+def probe_input_active():
+    result = subprocess.run(
+        ["halcmd", "getp", "motion.probe-input"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    return result.returncode == 0 and result.stdout.strip().upper() == "TRUE"
+
+controller.mode(linuxcnc.MODE_MDI)
+if controller.wait_complete(5) in (-1, getattr(linuxcnc, "RCS_ERROR", -1)):
+    raise RuntimeError("Probe MDI mode selection did not complete.")
+controller.mdi("G91 G38.2 Z{target:.4f} F{velocity:.4f}")
+result = controller.wait_complete(45)
+if result in (-1, getattr(linuxcnc, "RCS_ERROR", -1)):
+    raise RuntimeError("Raw Z probe motion did not complete.")
+if not probe_input_active():
+    raise RuntimeError("Raw Z probe failed because the probe did not trip.")
+controller.mdi("G91 G0 Z2.0000")
+if controller.wait_complete(45) in (-1, getattr(linuxcnc, "RCS_ERROR", -1)):
+    raise RuntimeError("Raw Z probe retract did not complete.")
+print(json.dumps({{"accepted": True, "operation": "probe_z"}}, separators=(",", ":")))
+"""
+    result = subprocess.run(
+        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        capture_output=True,
+        text=True,
+        timeout=50,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Raw Z probe failed.")
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    if payload.get("accepted") is not True:
+        raise RuntimeError("LinuxCNC did not accept raw Z probe.")
+    return payload
+
+
+def linuxcnc_touch_off_z(target, velocity, plate_thickness, retract):
+    """Run one bounded touch-off cycle (probe down, set G10 L20 P0 Z, retract) as the LinuxCNC owner."""
+    program = f"""import json, linuxcnc, subprocess
+controller = linuxcnc.command()
+
+def probe_input_active():
+    result = subprocess.run(
+        ["halcmd", "getp", "motion.probe-input"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    return result.returncode == 0 and result.stdout.strip().upper() == "TRUE"
+
+controller.mode(linuxcnc.MODE_MDI)
+if controller.wait_complete(5) in (-1, getattr(linuxcnc, "RCS_ERROR", -1)):
+    raise RuntimeError("Touch-off MDI mode selection did not complete.")
+controller.mdi("G91 G38.2 Z{target:.4f} F{velocity:.4f}")
+result = controller.wait_complete(45)
+if result in (-1, getattr(linuxcnc, "RCS_ERROR", -1)):
+    raise RuntimeError("Touch-off probe motion did not complete.")
+if not probe_input_active():
+    raise RuntimeError("Touch-off failed because the probe did not trip.")
+controller.mdi("G10 L20 P0 Z{plate_thickness:.4f}")
+if controller.wait_complete(5) in (-1, getattr(linuxcnc, "RCS_ERROR", -1)):
+    raise RuntimeError("Touch-off Z offset command did not complete.")
+controller.mdi("G91 G0 Z{retract:.4f}")
+if controller.wait_complete(45) in (-1, getattr(linuxcnc, "RCS_ERROR", -1)):
+    raise RuntimeError("Touch-off retract did not complete.")
+print(json.dumps({{"accepted": True, "operation": "touch_off_z", "plate_thickness": {plate_thickness:.4f}, "retract": {retract:.4f}}}, separators=(",", ":")))
+"""
+    result = subprocess.run(
+        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        capture_output=True,
+        text=True,
+        timeout=50,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Touch-off failed.")
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    if payload.get("accepted") is not True:
+        raise RuntimeError("LinuxCNC did not accept touch-off.")
+    return payload
+
+
+def linuxcnc_move_tool_setter(x, y, z):
+    """Move to tool-setter location (G53 Z, then G53 XY) as the LinuxCNC owner."""
+    program = f"""import json, linuxcnc
+controller = linuxcnc.command()
+controller.mode(linuxcnc.MODE_MDI)
+if controller.wait_complete(5) in (-1, getattr(linuxcnc, "RCS_ERROR", -1)):
+    raise RuntimeError("Tool-setter move MDI mode selection did not complete.")
+controller.mdi("G53 G0 Z{z:.4f}")
+if controller.wait_complete(30) in (-1, getattr(linuxcnc, "RCS_ERROR", -1)):
+    raise RuntimeError("Tool-setter Z retract did not complete.")
+controller.mdi("G53 G0 X{x:.4f} Y{y:.4f}")
+if controller.wait_complete(45) in (-1, getattr(linuxcnc, "RCS_ERROR", -1)):
+    raise RuntimeError("Tool-setter XY move did not complete.")
+print(json.dumps({{"accepted": True, "operation": "move_tool_setter"}}, separators=(",", ":")))
+"""
+    result = subprocess.run(
+        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        capture_output=True,
+        text=True,
+        timeout=50,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-MAX_ERROR_BYTES:] or "Tool-setter move failed.")
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    if payload.get("accepted") is not True:
+        raise RuntimeError("LinuxCNC did not accept tool-setter move.")
+    return payload
+
+
 def linuxcnc_run_subroutine(ocode):
+
     """Run one allowlisted O-code subroutine as a fixed MDI call."""
     # Run from the LinuxCNC config directory so SUBROUTINE_PATH resolves correctly
     linuxcnc_config_dir = "/home/darrell/linuxcnc/configs/CNCFusion"
@@ -679,32 +802,29 @@ print(json.dumps({{"accepted": True, "ocode": {ocode!r}}}, separators=(",", ":")
 
 def linuxcnc_tool_setter_calibration(x, y, velocity, search_distance):
     """Run the fixed tool-setter probe cycle as the LinuxCNC owner."""
-    program = f"""import json, linuxcnc, time
+    program = f"""import json, linuxcnc, time, subprocess, re
 controller = linuxcnc.command()
 errors = linuxcnc.error_channel()
 
-# Inline safe_poll for subprocess stability
-def safe_poll(stat_obj, retries=5, delay=0.1):
-    for attempt in range(retries):
-        try:
-            stat_obj.poll()
-            return True
-        except (SystemError, OSError, AttributeError):
-            if attempt == retries - 1:
-                raise
-            time.sleep(delay)
-    return False
+def hal_true(pin):
+    result = subprocess.run(["halcmd", "getp", pin], capture_output=True, text=True, timeout=5, check=False)
+    return result.returncode == 0 and result.stdout.strip() == "TRUE"
 
-status = linuxcnc.stat()
-safe_poll(status)
-if status.task_state != linuxcnc.STATE_ON or status.interp_state != linuxcnc.INTERP_IDLE:
-    raise RuntimeError("Tool-setter calibration requires powered, idle LinuxCNC.")
+if not hal_true("halui.machine.is-on"):
+    raise RuntimeError("Tool-setter calibration requires powered LinuxCNC.")
 
 def wait_for_step(step):
-    controller.wait_complete()
-    error = errors.poll()
-    if error:
-        raise RuntimeError(f"Tool-setter {{step}} failed: {{error[1]}}")
+    result = controller.wait_complete(120)
+    if result == -1 or result == linuxcnc.RCS_ERROR:
+        raise RuntimeError(f"Tool-setter {{step}} did not complete.")
+    messages = []
+    while True:
+        error = errors.poll()
+        if not error:
+            break
+        messages.append(str(error[1]))
+    if messages:
+        raise RuntimeError(f"Tool-setter {{step}} failed: {{messages[-1]}}")
 
 controller.mode(linuxcnc.MODE_MDI)
 wait_for_step("mode selection")
@@ -715,37 +835,32 @@ wait_for_step("safe Z move")
 controller.mdi("G53 G0 X{x:.4f} Y{y:.4f}")
 wait_for_step("setter XY move")
 
-safe_poll(status)
-if getattr(status, "probe_tripped", False):
-    controller.mdi("G91 G38.4 Z{search_distance:.4f} F{velocity:.4f}")
-    wait_for_step("probe retract")
-    controller.mdi("G90")
-    wait_for_step("absolute mode")
-
-try:
-    z_min = float(status.axis[2]["min_position_limit"])
-except (AttributeError, KeyError, TypeError, IndexError):
-    z_min = -1000.0
-safe_poll(status)
-z_offset = status.g5x_offset[2] + status.g92_offset[2] + status.tool_offset[2]
-z_target = z_min - z_offset + 0.1
-current_z = status.position[2] - z_offset
-if z_target >= current_z:
-    z_target = current_z - 200.0
-
-controller.mdi(f"G38.2 Z{{z_target:.4f}} F{velocity * 4.0:.4f}")
+controller.mdi("G91")
+wait_for_step("relative mode")
+controller.mdi(f"G38.2 Z-{search_distance:.4f} F{velocity * 4.0:.4f}")
 wait_for_step("fast probe")
-safe_poll(status)
-if not status.probe_tripped:
-    raise RuntimeError("Fast probe did not trip the tool setter.")
 controller.mdi("G91 G0 Z2.0000")
 wait_for_step("probe retract")
-controller.mdi(f"G38.2 Z{{z_target:.4f}} F{velocity:.4f}")
+controller.mdi(f"G38.2 Z-4.0000 F{velocity:.4f}")
 wait_for_step("slow probe")
-safe_poll(status)
-if not status.probe_tripped:
-    raise RuntimeError("Slow probe did not trip the tool setter.")
-setter_height = float(status.probed_position[2])
+controller.mdi("G90")
+wait_for_step("absolute mode")
+controller.mdi("(DEBUG, SETTER_HEIGHT=#5063)")
+result = controller.wait_complete(10)
+if result == -1 or result == linuxcnc.RCS_ERROR:
+    raise RuntimeError("Unable to read the probed setter height.")
+setter_height = None
+for _ in range(20):
+    error = errors.poll()
+    if not error:
+        time.sleep(0.05)
+        continue
+    match = re.search(r"SETTER_HEIGHT\\s*=\\s*(-?\\d+(?:\\.\\d+)?)", str(error[1]))
+    if match:
+        setter_height = float(match.group(1))
+        break
+if setter_height is None:
+    raise RuntimeError("LinuxCNC did not report the probed setter height.")
 controller.mdi("G91 G0 Z5.0000")
 wait_for_step("final retract")
 print(json.dumps({{"setter_height": setter_height}}, separators=(",", ":")))
@@ -810,6 +925,21 @@ def _handle_connection(connection):
                 response = linuxcnc_touch_off_axis(payload["axis"], float(payload["value"]))
             elif payload["operation"] == "linuxcnc_open_program" and set(payload) == {"operation", "path"} and isinstance(payload["path"], str):
                 response = linuxcnc_open_program(payload["path"])
+            elif payload["operation"] == "linuxcnc_probe_z" and set(payload) == {"operation", "target", "velocity"}:
+                response = linuxcnc_probe_z(float(payload["target"]), float(payload["velocity"]))
+            elif payload["operation"] == "linuxcnc_touch_off_z" and set(payload) == {"operation", "target", "velocity", "plate_thickness", "retract"}:
+                response = linuxcnc_touch_off_z(
+                    float(payload["target"]),
+                    float(payload["velocity"]),
+                    float(payload["plate_thickness"]),
+                    float(payload["retract"]),
+                )
+            elif payload["operation"] == "linuxcnc_move_tool_setter" and set(payload) == {"operation", "x", "y", "z"}:
+                response = linuxcnc_move_tool_setter(
+                    float(payload["x"]),
+                    float(payload["y"]),
+                    float(payload["z"]),
+                )
             elif payload["operation"] == "linuxcnc_run_subroutine" and set(payload) == {"operation", "ocode"} and isinstance(payload["ocode"], str):
                 response = linuxcnc_run_subroutine(payload["ocode"])
             elif payload["operation"] == "linuxcnc_tool_setter_calibration" and set(payload) == {"operation", "x", "y", "velocity", "search_distance"}:

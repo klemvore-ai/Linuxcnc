@@ -1,5 +1,4 @@
-"""Static capability metadata exposed by the LinuxCNC machine agent."""
-
+"""Compatibility metadata entry point for the private LinuxCNC machine-agent implementation."""
 
 AGENT_VERSION = "0.3.0"
 CAPABILITIES = (
@@ -39,13 +38,6 @@ CAPABILITIES = (
 
 def build_status(runtime, role_mode="compatibility"):
     """Build a bounded status response for an authenticated monitor client."""
-    try:
-        machine = runtime.machine_state()
-    except Exception:
-        machine = {"running": False, "idle": False, "state_available": False}
-    return {
-        "agent_version": AGENT_VERSION,
-        "capabilities": list(CAPABILITIES),
-        "role_mode": role_mode,
-        "machine": machine,
-    }
+    from private.agent.status import build_status as _build_status
+    return _build_status(runtime, role_mode=role_mode)
+

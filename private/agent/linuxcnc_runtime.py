@@ -55,6 +55,16 @@ class LinuxCNCRuntime:
                 "machine_on": False,
                 "state_available": False,
             }
+        spindle_rpm = 0.0
+        spindle_list = getattr(status, "spindle", ())
+        if spindle_list and isinstance(spindle_list[0], dict):
+            spindle0 = spindle_list[0]
+            commanded = spindle0.get("commanded_speed")
+            if commanded is None:
+                commanded = spindle0.get("speed", 0.0)
+            spindle_rpm = abs(float(commanded))
+        else:
+            spindle_rpm = abs(getattr(status, "spindle_speed", 0.0))
         return {
             "running": True,
             "idle": getattr(status, "interp_state", None) == linuxcnc.INTERP_IDLE,
@@ -87,12 +97,22 @@ class LinuxCNCRuntime:
             else "UNKNOWN"
         )
         distance_to_go = getattr(status, "dtg", (0.0, 0.0, 0.0))
+        spindle_rpm = 0.0
+        spindle_list = getattr(status, "spindle", ())
+        if spindle_list and isinstance(spindle_list[0], dict):
+            spindle0 = spindle_list[0]
+            commanded = spindle0.get("commanded_speed")
+            if commanded is None:
+                commanded = spindle0.get("speed", 0.0)
+            spindle_rpm = abs(float(commanded))
+        else:
+            spindle_rpm = abs(getattr(status, "spindle_speed", 0.0))
         return {
             "X": positions[0] if len(positions) > 0 else 0.0,
             "Y": positions[1] if len(positions) > 1 else 0.0,
             "Z": positions[2] if len(positions) > 2 else 0.0,
             "FEED": getattr(status, "current_vel", 0.0) * 60.0,
-            "RPM": abs(getattr(status, "spindle_speed", 0.0)),
+            "RPM": spindle_rpm,
             "FEED_OVR": getattr(status, "feedrate", 1.0),
             "SPINDLE_OVR": getattr(status, "spindle_scale", 1.0),
             "HOMED_COUNT": sum(1 for value in getattr(status, "homed", []) if value),
@@ -313,18 +333,31 @@ class LinuxCNCRuntime:
         macros = []
         if not root_path.is_dir():
             return macros
-        for path in sorted(root_path.glob("O*"), key=lambda item: item.name.upper()):
-            ocode = path.stem.upper()
-            # LinuxCNC expects O-code files without extension
-            if ocode not in ALLOWED_O_CODE_SUBROUTINES or path.suffix:
+        for path in sorted(root_path.glob("*.ngc"), key=lambda item: item.stem):
+            # LinuxCNC resolves "O100 call" to the file "100.ngc"
+            if not path.stem.isdigit():
+                continue
+            ocode = f"O{path.stem}"
+            if ocode not in ALLOWED_O_CODE_SUBROUTINES:
                 continue
             try:
                 content = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            if not re.search(rf"(?im)^\s*{re.escape(ocode)}\s+sub\b", content):
+            if not re.search(rf"(?im)^\s*o\s*{re.escape(path.stem)}\s+sub\b", content):
                 continue
-            macros.append({"ocode": ocode, "filename": path.name, "size": path.stat().st_size})
+            description = ""
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("(") and stripped.endswith(")"):
+                    description = stripped[1:-1].strip()
+                    break
+            macros.append({
+                "ocode": ocode,
+                "filename": path.name,
+                "size": path.stat().st_size,
+                "description": description,
+            })
         return macros
 
     def upload_macro(self, root, filename, content, expected_sha256):
@@ -498,7 +531,7 @@ class LinuxCNCRuntime:
 
     def machine_command(self, command):
         """Execute one allowlisted LinuxCNC command through its command API."""
-        if self.hal_helper_socket and command in {"abort", "power_on", "power_off", "estop", "estop_reset", "override_limits", "mode_manual", "mode_auto", "coolant_mist_on", "coolant_flood_on", "coolant_off", "program_start", "program_pause_resume", "tool_change_ack", "home_all", "unhome_all"}:
+        if self.hal_helper_socket and command in {"abort", "power_on", "power_off", "estop", "estop_reset", "override_limits", "mode_manual", "mode_auto", "coolant_mist_on", "coolant_flood_on", "coolant_off", "program_start", "program_pause_resume", "tool_change_ack", "probe_source_setter", "probe_source_probe", "home_all", "unhome_all"}:
             return self._linuxcnc_machine_command_with_helper(command)
         linuxcnc = importlib.import_module("linuxcnc")
         controller = linuxcnc.command()
@@ -728,42 +761,128 @@ class LinuxCNCRuntime:
 
     def probe_z(self, target, velocity):
         """Run one downward probe and retract a fixed distance while powered and idle."""
-        linuxcnc = importlib.import_module("linuxcnc")
         state = self.machine_state()
         if not state.get("running") or not state.get("machine_on") or not state.get("idle"):
             raise MachineStateError("Z probing requires powered and idle LinuxCNC.")
-        controller = linuxcnc.command()
-        controller.mode(linuxcnc.MODE_MDI)
-        controller.mdi(f"G91 G38.2 Z{target:.4f} F{velocity:.4f}")
-        controller.wait_complete()
-        status = linuxcnc.stat()
-        status.poll()
-        if not getattr(status, "probe_tripped", False):
-            raise MachineStateError("Raw Z probe failed because the probe did not trip.")
-        controller.mdi("G91 G0 Z2.0000")
-        controller.wait_complete()
+        if not self.hal_helper_socket:
+            # Legacy/local compatibility path. Secure Debian deployments use
+            # the helper branch below so LinuxCNC runs as its owning user.
+            linuxcnc = importlib.import_module("linuxcnc")
+            controller = linuxcnc.command()
+            controller.mode(linuxcnc.MODE_MDI)
+            controller.mdi(f"G91 G38.2 Z{target:.4f} F{velocity:.4f}")
+            result = controller.wait_complete(45)
+            if result == -1 or result == getattr(linuxcnc, "RCS_ERROR", -1):
+                raise MachineStateError("Raw Z probe motion did not complete.")
+            status = linuxcnc.stat()
+            status.poll()
+            if not getattr(status, "probe_tripped", False):
+                raise MachineStateError("Raw Z probe failed because the probe did not trip.")
+            controller.mdi("G91 G0 Z2.0000")
+            controller.wait_complete(45)
+            return
+        request = json.dumps(
+            {"operation": "linuxcnc_probe_z", "target": target, "velocity": velocity},
+            separators=(",", ":"),
+        ).encode("utf-8")
+        try:
+            with socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM) as connection:
+                connection.settimeout(60)
+                connection.connect(self.hal_helper_socket)
+                connection.sendall(request)
+                response = b""
+                while not response.endswith(b"\n") and len(response) <= 1024 * 1024:
+                    chunk = connection.recv(65536)
+                    if not chunk:
+                        break
+                    response += chunk
+            payload = json.loads(response.decode("utf-8"))
+            if payload.get("error"):
+                raise MachineStateError(payload["error"])
+            if payload.get("accepted") is not True:
+                raise MachineStateError("LinuxCNC did not accept raw Z probe.")
+        except (AttributeError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"LinuxCNC helper unavailable: {error}") from error
 
     def touch_off_z(self, target, velocity, plate_thickness, retract):
         """Probe a locally selected touch plate, set Z work offset, then retract."""
-        linuxcnc = importlib.import_module("linuxcnc")
         state = self.machine_state()
         if not state.get("running") or not state.get("machine_on") or not state.get("idle"):
             raise MachineStateError("Touch-off requires powered, idle LinuxCNC.")
+        if self.hal_helper_socket:
+            request = json.dumps(
+                {
+                    "operation": "linuxcnc_touch_off_z",
+                    "target": target,
+                    "velocity": velocity,
+                    "plate_thickness": plate_thickness,
+                    "retract": retract,
+                },
+                separators=(",", ":"),
+            ).encode("utf-8")
+            try:
+                with socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM) as connection:
+                    connection.settimeout(60)
+                    connection.connect(self.hal_helper_socket)
+                    connection.sendall(request)
+                    response = b""
+                    while not response.endswith(b"\n") and len(response) <= 1024 * 1024:
+                        chunk = connection.recv(65536)
+                        if not chunk:
+                            break
+                        response += chunk
+                payload = json.loads(response.decode("utf-8"))
+                if payload.get("error"):
+                    raise MachineStateError(payload["error"])
+                if payload.get("accepted") is not True:
+                    raise MachineStateError("LinuxCNC did not accept touch-off Z.")
+                return {"plate_thickness": plate_thickness, "retract": retract}
+            except (AttributeError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+                raise RuntimeError(f"LinuxCNC helper unavailable: {error}") from error
+
+        linuxcnc = importlib.import_module("linuxcnc")
         controller = linuxcnc.command()
-        errors = linuxcnc.error_channel()
+        errors = linuxcnc.error_channel() if hasattr(linuxcnc, "error_channel") else None
+        rcs_error = getattr(linuxcnc, "RCS_ERROR", -1)
+
+        def probe_input_active():
+            try:
+                result = subprocess.run(
+                    ["halcmd", "getp", "motion.probe-input"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+            except FileNotFoundError:
+                result = None
+            if result is not None and result.returncode == 0 and result.stdout.strip().upper() == "TRUE":
+                return True
+            # Test doubles and older bindings may expose probe_tripped on stat;
+            # use it only as a fallback when HAL probing is unavailable.
+            try:
+                status = linuxcnc.stat()
+                status.poll()
+                return bool(getattr(status, "probe_tripped", False))
+            except (SystemError, OSError, AttributeError):
+                return False
 
         def wait_for_step(step):
-            controller.wait_complete()
-            error = errors.poll()
-            if error:
-                raise MachineStateError(f"Touch-off {step} failed: {error[1]}")
+            result = controller.wait_complete(45)
+            if result == -1 or result == rcs_error:
+                raise MachineStateError(f"Touch-off {step} did not complete.")
+            if errors is not None:
+                try:
+                    error = errors.poll()
+                except (SystemError, OSError, AttributeError):
+                    error = None
+                if error:
+                    raise MachineStateError(f"Touch-off {step} failed: {error[1]}")
 
         controller.mode(linuxcnc.MODE_MDI)
         controller.mdi(f"G91 G38.2 Z{target:.4f} F{velocity:.4f}")
         wait_for_step("probe")
-        status = linuxcnc.stat()
-        status.poll()
-        if not getattr(status, "probe_tripped", False):
+        if not probe_input_active():
             raise MachineStateError("Touch-off failed because the probe did not trip.")
         controller.mdi(f"G10 L20 P0 Z{plate_thickness:.4f}")
         wait_for_step("offset")
@@ -776,14 +895,40 @@ class LinuxCNCRuntime:
 
     def move_tool_setter(self, x, y, z):
         """Move to bounded tool-setter coordinates through fixed MDI commands."""
-        linuxcnc = importlib.import_module("linuxcnc")
         state = self.machine_state()
         if not state.get("running") or not state.get("machine_on") or not state.get("idle"):
             raise MachineStateError("Tool-setter move requires powered and idle LinuxCNC.")
+        if self.hal_helper_socket:
+            request = json.dumps(
+                {"operation": "linuxcnc_move_tool_setter", "x": x, "y": y, "z": z},
+                separators=(",", ":"),
+            ).encode("utf-8")
+            try:
+                with socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM) as connection:
+                    connection.settimeout(60)
+                    connection.connect(self.hal_helper_socket)
+                    connection.sendall(request)
+                    response = b""
+                    while not response.endswith(b"\n") and len(response) <= 1024 * 1024:
+                        chunk = connection.recv(65536)
+                        if not chunk:
+                            break
+                        response += chunk
+                payload = json.loads(response.decode("utf-8"))
+                if payload.get("error"):
+                    raise MachineStateError(payload["error"])
+                if payload.get("accepted") is not True:
+                    raise MachineStateError("LinuxCNC did not accept tool-setter move.")
+                return
+            except (AttributeError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+                raise RuntimeError(f"LinuxCNC helper unavailable: {error}") from error
+
+        linuxcnc = importlib.import_module("linuxcnc")
         controller = linuxcnc.command()
         controller.mode(linuxcnc.MODE_MDI)
         controller.mdi(f"G53 G0 Z{z:.4f}")
         controller.mdi(f"G53 G0 X{x:.4f} Y{y:.4f}")
+
 
     def calibrate_tool_setter(self, x, y, velocity, search_distance):
         """Run the complete bounded tool-setter calibration through the helper."""

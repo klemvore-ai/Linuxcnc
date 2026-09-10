@@ -288,6 +288,7 @@ class ToolpathViewer(QGraphicsView):
 
         x, y, z = 0.0, 0.0, 0.0
         current_mode = 'G1'
+        distance_mode = 'G90'
 
         feed_pen = QPen(QColor("#39FF14"), 1.5)
         feed_pen.setCosmetic(True)
@@ -299,25 +300,32 @@ class ToolpathViewer(QGraphicsView):
             clean_line = line.split(';')[0].split('(')[0].strip().upper()
             if not clean_line: continue
 
-            tokens = clean_line.split()
+            tokens = re.findall(r'[A-Z][-+]?[^A-Z\s]*', clean_line)
             for token in tokens:
                 if token in ['G0', 'G00']: current_mode = 'G0'
                 elif token in ['G1', 'G01']: current_mode = 'G1'
                 elif token in ['G2', 'G02']: current_mode = 'G2'
                 elif token in ['G3', 'G03']: current_mode = 'G3'
+                elif token in ['G38.2', 'G38.3', 'G38.4', 'G38.5']:
+                    current_mode = 'G38'
+                elif token in ['G90', 'G90.0']:
+                    distance_mode = 'G90'
+                elif token in ['G91', 'G91.0']:
+                    distance_mode = 'G91'
 
             new_x, new_y, new_z = x, y, z
             i, j = 0.0, 0.0
             has_move = False
+            move_values = {}
             for token in tokens:
                 if token.startswith('X'):
-                    try: new_x = float(token[1:]); has_move = True
+                    try: move_values['X'] = float(token[1:]); has_move = True
                     except: pass
                 elif token.startswith('Y'):
-                    try: new_y = float(token[1:]); has_move = True
+                    try: move_values['Y'] = float(token[1:]); has_move = True
                     except: pass
                 elif token.startswith('Z'):
-                    try: new_z = float(token[1:]); has_move = True
+                    try: move_values['Z'] = float(token[1:]); has_move = True
                     except: pass
                 elif token.startswith('I'):
                     try: i = float(token[1:])
@@ -327,6 +335,15 @@ class ToolpathViewer(QGraphicsView):
                     except: pass
 
             if has_move:
+                if distance_mode == 'G91':
+                    new_x += move_values.get('X', 0.0)
+                    new_y += move_values.get('Y', 0.0)
+                    new_z += move_values.get('Z', 0.0)
+                else:
+                    new_x = move_values.get('X', new_x)
+                    new_y = move_values.get('Y', new_y)
+                    new_z = move_values.get('Z', new_z)
+
                 path = QPainterPath()
                 path.moveTo(*to_iso(x, y, z))
 
@@ -531,11 +548,18 @@ while True:
         out['Z'] = get_pos(2, z_joint)
         
         out['FEED'] = getattr(s, 'current_vel', 0.0) * 60.0
+        # This analog spindle has no encoder: display commanded RPM.
         out['RPM'] = 0.0
         try:
-            if hasattr(s, 'spindle') and len(s.spindle) > 0: out['RPM'] = abs(s.spindle[0]['speed'])
-            else: out['RPM'] = abs(getattr(s, 'spindle_speed', 0.0))
-        except Exception: pass
+            if hasattr(s, 'spindle') and len(s.spindle) > 0 and isinstance(s.spindle[0], dict):
+                commanded = s.spindle[0].get('commanded_speed')
+                if commanded is None:
+                    commanded = s.spindle[0].get('speed', 0.0)
+                out['RPM'] = abs(float(commanded))
+            else:
+                out['RPM'] = abs(float(getattr(s, 'spindle_speed', 0.0)))
+        except Exception:
+            pass
         
         out['FEED_OVR'] = getattr(s, 'feedrate', 1.0)
         out['SPINDLE_OVR'] = getattr(s, 'spindle_scale', 1.0)
@@ -931,6 +955,22 @@ class MachineDashboard(QWidget):
             "O111": "Calibrate Setter",
             "O112": "Calibrate Spindle Nose",
             "O113": "Quick Tool Change",
+            "O114": "Outside Back-Left Corner",
+            "O115": "Outside Back Edge",
+            "O116": "Outside Back-Right Corner",
+            "O117": "Outside Left Edge",
+            "O118": "Outside Right Edge",
+            "O119": "Outside Front-Left Corner",
+            "O120": "Outside Front Edge",
+            "O121": "Outside Front-Right Corner",
+            "O122": "Inside Back-Left Corner",
+            "O123": "Inside Back Edge",
+            "O124": "Inside Back-Right Corner",
+            "O125": "Inside Left Edge",
+            "O126": "Inside Right Edge",
+            "O127": "Inside Front-Left Corner",
+            "O128": "Inside Front Edge",
+            "O129": "Inside Front-Right Corner",
         }
         for macro in macros:
             ocode = macro.get("ocode")
@@ -950,6 +990,9 @@ class MachineDashboard(QWidget):
 
     def apply_agent_capabilities(self, capabilities):
         """Disable typed controls unavailable on an older enrolled machine agent."""
+        # A successful capability response proves the mTLS agent is reachable.
+        # Do not let a transient telemetry/motion error flap this indicator.
+        self.ssh_connected = True
         available = set(capabilities)
         capability_map = {
             "program_control": [self.btn_cycle_start, self.btn_cycle_pause],
@@ -1007,7 +1050,7 @@ class MachineDashboard(QWidget):
         setter_x = float(self.settings.get_setting("PROBING", "tool_setter_x", 0.0))
         setter_y = float(self.settings.get_setting("PROBING", "tool_setter_y", 0.0))
         setter_vel = float(self.settings.get_setting("PROBING", "setter_vel", 150.0))
-        search_dist = float(self.settings.get_setting("PROBING", "search_dist", 10.0))
+        setter_search_dist = float(self.settings.get_setting("PROBING", "setter_search_dist", 100.0))
 
         self.settings.reload()
         agent_client = client_from_settings(self.settings)
@@ -1035,6 +1078,8 @@ class MachineDashboard(QWidget):
             self,
             "Probe Tool Setter",
             "Confirm the spindle is clear and the tool setter is ready.\n\n"
+            "Select 'Touch Plate / Setter' as the active probe input.\n"
+            "The setter search can travel up to the configured setter search distance.\n\n"
             "Click Yes to begin the bounded calibration cycle.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -1042,7 +1087,7 @@ class MachineDashboard(QWidget):
             return
 
         self.cal_worker = AgentCalibrationWorker(
-            agent_client, setter_x, setter_y, setter_vel, search_dist
+            agent_client, setter_x, setter_y, setter_vel, setter_search_dist
         )
         self.cal_worker.calibration_complete.connect(self.on_calibration_complete)
         self.cal_worker.calibration_failed.connect(self.on_calibration_failed)
@@ -1143,7 +1188,14 @@ except Exception as e:
         try:
             val = float(result_str)
             self.input_tool_setter.setText(f"{val:.4f}")
-            QMessageBox.information(self, "Success", f"Tool setter height calibrated to {val:.4f} and has been saved.")
+            QMessageBox.information(
+                self,
+                "Tool Setter Calibration Complete",
+                f"Setter reference Z measured as {val:.4f}.\n\n"
+                "The value is saved in CNCFusion settings. Use Settings -> "
+                "Probing & Locations -> Sync Probing to Machine INI before "
+                "running automatic tool probing.",
+            )
         except ValueError:
             self.on_calibration_failed(f"Received invalid result from machine: {result_str}")
 
@@ -1524,15 +1576,8 @@ except Exception as e:
         probe_tabs.addTab(tool_tab, "Tool Setter")
 
         if client_from_settings(self.settings) is not None:
-            message = "This multi-step probing workflow is not available through the secure management connection."
-            for button in [btn_set_z, btn_fast_probe, btn_probe_z, btn_tool_probe]:
-                button.setEnabled(False)
-                button.setToolTip(message)
-            for button in touch_tab.findChildren(QPushButton):
-                button.setEnabled(False)
-                button.setToolTip(message)
-            self.probe_selector.setEnabled(False)
-            self.probe_selector.setToolTip("Select and verify the probe source locally before using secure probe operations.")
+            self.probe_selector.setToolTip("Select the verified probe source before a secure Z probe or setter operation.")
+
         
         # --- PARK TAB ---
         park_tab = QWidget()
@@ -2061,7 +2106,19 @@ except Exception as e:
         self.cmd_queue.put(cmd)
 
     def switch_probe_hardware(self, index):
-        self.send_halcmd_setp("lut5.0.in-2", str(index))
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            command = "probe_source_setter" if index == 0 else "probe_source_probe"
+            try:
+                agent_client.machine_command(command)
+            except Exception as error:
+                self.error_signal.emit(f"Probe source selection failed: {error}")
+                self.probe_selector.blockSignals(True)
+                self.probe_selector.setCurrentIndex(1 - index)
+                self.probe_selector.blockSignals(False)
+                return
+        else:
+            self.send_halcmd_setp("lut5.0.in-2", str(index))
         if index == 0:
             self.probe_selector.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 6px; border-radius: 4px; margin-bottom: 5px;")
         else:
@@ -2337,9 +2394,41 @@ except Exception as e:
         probe_vel = float(self.settings.get_setting("PROBING", "probe_vel", 100.0))
         setter_vel = float(self.settings.get_setting("PROBING", "setter_vel", 150.0))
 
+        if routine_name == "probe_z":
+            agent_client = client_from_settings(self.settings)
+            if agent_client is not None:
+                try:
+                    target = float(self.input_raw_probe_distance.text())
+                except (AttributeError, ValueError):
+                    self.error_signal.emit("Probe Z requires a numeric downward travel distance.")
+                    return
+                if target >= 0:
+                    self.error_signal.emit("Probe Z requires a negative downward travel distance.")
+                    return
+                confirm = QMessageBox.question(
+                    self,
+                    "Confirm Probe Z",
+                    f"Probe downward {abs(target):g} units at {probe_vel:g} velocity, then retract 2 units?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if confirm != QMessageBox.StandardButton.Yes:
+                    return
+                try:
+                    agent_client.probe_z(target, probe_vel)
+                except Exception as error:
+                    self.error_signal.emit(f"Probe Z failed: {error}")
+                return
+
         if routine_name == "tool_height":
             self.probe_selector.setCurrentIndex(0)
             print("[dashboard.py] Triggering Tool Height Probe")
+            agent_client = client_from_settings(self.settings)
+            if agent_client is not None:
+                try:
+                    agent_client.move_tool_setter(setter_x, setter_y, setter_ref_z)
+                except Exception as error:
+                    self.error_signal.emit(f"Tool height probe failed: {error}")
+                return
             py_code = f"""import linuxcnc, time, sys, os
 try:
     os.system("halcmd setp lut5.0.in-2 0") #Force Touch Plate Mode
@@ -2422,6 +2511,26 @@ except Exception as e: pass"""
 
         self.probe_selector.setCurrentIndex(1)
         
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            macro_map = {
+                "out_boss": "O106",
+                "in_hole": "O107",
+                "out_bl": "O114", "out_b": "O115", "out_br": "O116",
+                "out_l": "O117", "out_r": "O118",
+                "out_fl": "O119", "out_f": "O120", "out_fr": "O121",
+                "in_bl": "O122", "in_b": "O123", "in_br": "O124",
+                "in_l": "O125", "in_r": "O126",
+                "in_fl": "O127", "in_f": "O128", "in_fr": "O129",
+            }
+            ocode = macro_map.get(routine_name)
+            if ocode:
+                try:
+                    agent_client.run_subroutine(ocode)
+                except Exception as error:
+                    self.error_signal.emit(f"Probing subroutine failed: {error}")
+                return
+
         pr = abs(probe_diam / 2.0)  #Calculate Probe Radius
         vel = abs(probe_vel)  #Set Velocity
         search = abs(search_dist)
@@ -3436,6 +3545,11 @@ except Exception as e: pass"""
             QMessageBox.warning(self, "Power Off", "Machine power is OFF.\n\nPlease click the 'POWER ON' button before probing.")
             return
 
+        agent_client = client_from_settings(self.settings)
+        if agent_client is not None:
+            self.run_touch_off_z()
+            return
+
         probe_vel = float(self.settings.get_setting("PROBING", "probe_vel", 100.0))
         z_min = float(self.settings.get_setting("AXIS_Z", "min", -125.0))
         try:
@@ -3526,10 +3640,17 @@ except Exception as e: pass"""
             return
         try:
             val = float(self.input_z_thickness.text() or 0.0)
+            agent_client = client_from_settings(self.settings)
+            if agent_client is not None:
+                agent_client.touch_off_axis("Z", val)
+                self.update_real_coords(agent_client.telemetry())
+                self.update_status()
+                return
             self.execute_mdi(f"G10 L20 P0 Z{val}")
             print(f"[dashboard.py] Z Zero set to {val}")
         except ValueError:
             print("[dashboard.py] Invalid input for Z Zero")
+
 
     def run_raw_z_probe(self):
         """Run the typed downward probe primitive without selecting hardware or changing offsets."""
@@ -3560,6 +3681,8 @@ except Exception as e: pass"""
         if confirm != QMessageBox.StandardButton.Yes:
             return
         try:
+            if self.active_jogs:
+                self.jog_button_released()
             agent_client.probe_z(target, velocity)
         except Exception as error:
             self.error_signal.emit(f"Raw Z probe failed: {error}")
@@ -3594,6 +3717,8 @@ except Exception as e: pass"""
         if confirm != QMessageBox.StandardButton.Yes:
             return
         try:
+            if self.active_jogs:
+                self.jog_button_released()
             agent_client.touch_off_z(target, velocity, plate_thickness)
         except Exception as error:
             self.error_signal.emit(f"Touch-off failed: {error}")
@@ -4046,8 +4171,6 @@ except Exception as e:
     def handle_secure_telemetry_error(self, message):
         """Mark the secure transport offline without presenting polling errors as motion errors."""
         self._telemetry_error_count = getattr(self, "_telemetry_error_count", 0) + 1
-        if self._telemetry_error_count >= 3:
-            self.ssh_connected = False
         if hasattr(self, 'status_leds') and "CONNECTION" in self.status_leds:
             self.status_leds["CONNECTION"].setToolTip(message)
 

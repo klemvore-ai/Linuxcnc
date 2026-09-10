@@ -1,7 +1,15 @@
+"""Public CNCFusion settings manager for user-facing machine configuration.
+
+This file owns normal INI settings for the GUI and operator workflow.
+Private machine-admin secrets and system-critical credential handling remain
+isolated behind the credential store boundary used by the private layer.
+"""
+
 import configparser
 import os
 import json
 from core.credentials import CredentialStore, CredentialStoreError
+
 
 class SettingsManager:
     def __init__(self, filename="settings.ini", credential_store=None):
@@ -19,7 +27,12 @@ class SettingsManager:
         return f"{section.lower()}_{key.lower()}"
 
     def _get_credential_store(self):
-        """Return the injected store or construct the OS-backed default."""
+        """Return the injected store or construct the default OS-backed credential store.
+
+        Public config code may read SSH credentials from the system keyring, but the
+        machine-admin credential policy is intentionally kept separate from the rest
+        of the public app config surface.
+        """
         return self.credential_store or CredentialStore()
 
     def _migrate_legacy_ssh_password(self):

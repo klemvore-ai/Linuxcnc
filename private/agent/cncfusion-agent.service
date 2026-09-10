@@ -1,0 +1,29 @@
+[Unit]
+Description=CNCFusion LinuxCNC Machine Agent
+After=network-online.target
+Wants=network-online.target
+Requires=cncfusion-hal-helper.service
+After=cncfusion-hal-helper.service
+
+[Service]
+Type=simple
+User=cncfusion
+Group=cncfusion
+WorkingDirectory=/opt/CNCFusion
+EnvironmentFile=/etc/cncfusion/agent.env
+Environment=TMPDIR=/var/lib/cncfusion/updates/tmp
+# Paths are configurable via environment variables set by installer or admin
+# CNCFUSION_CONFIG_ROOT: LinuxCNC configs directory (default: /home/operator/linuxcnc/configs)
+# CNCFUSION_GCODE_ROOT: G-code/nc_files directory (default: /home/operator/linuxcnc/nc_files)
+# CNCFUSION_AGENT_ROOT: Installation directory (default: /opt/CNCFusion)
+ExecStart=/opt/CNCFusion/.venv/bin/python -m agent --bind ${CNCFUSION_AGENT_BIND} --port ${CNCFUSION_AGENT_PORT} --ca-file /etc/cncfusion/ca.crt --certificate-file /etc/cncfusion/server.crt --private-key-file /etc/cncfusion/server.key --config-root ${CNCFUSION_CONFIG_ROOT:-/home/operator/linuxcnc/configs} --gcode-root ${CNCFUSION_GCODE_ROOT:-/home/operator/linuxcnc/nc_files} --hal-helper-socket /run/cncfusion/hal-helper.sock --client-fingerprint ${CNCFUSION_CLIENT_FINGERPRINT}
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/cncfusion/updates /var/lib/cncfusion/updates/tmp ${CNCFUSION_CONFIG_ROOT:-/home/operator/linuxcnc/configs} ${CNCFUSION_GCODE_ROOT:-/home/operator/linuxcnc/nc_files}
+
+[Install]
+WantedBy=multi-user.target

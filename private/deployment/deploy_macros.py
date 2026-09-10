@@ -3,9 +3,12 @@
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pathlib import Path
 
-from core.machine_agent import client_from_settings
+repository_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(repository_root))
+
+from private.core.machine_agent import client_from_settings
 from settings_manager import SettingsManager
 
 def main():
@@ -15,16 +18,19 @@ def main():
         print("ERROR: No secure agent configured. Check AGENT settings in settings.ini")
         sys.exit(1)
 
-    macros_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects")
+    macros_dir = Path(__file__).resolve().parents[2] / "projects"
     files = [
         "O100.ngc", "O101.ngc", "O102.ngc", "O103.ngc", "O104.ngc",
         "O105.ngc", "O106.ngc", "O107.ngc", "O108.ngc", "O109.ngc",
-        "O110.ngc", "O111.ngc", "O112.ngc", "O113.ngc",
+        "O110.ngc", "O111.ngc", "O112.ngc", "O113.ngc", "O114.ngc",
+        "O115.ngc", "O116.ngc", "O117.ngc", "O118.ngc", "O119.ngc",
+        "O120.ngc", "O121.ngc", "O122.ngc", "O123.ngc", "O124.ngc",
+        "O125.ngc", "O126.ngc", "O127.ngc", "O128.ngc", "O129.ngc",
     ]
 
     for filename in files:
-        path = os.path.join(macros_dir, filename)
-        if not os.path.exists(path):
+        path = macros_dir / filename
+        if not path.exists():
             print(f"SKIP: {filename} not found in {macros_dir}")
             continue
         with open(path, "r", encoding="utf-8") as f:

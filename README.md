@@ -8,6 +8,16 @@ For maintainers and contributors, see the [Architecture Guide](docs/ARCHITECTURE
 
 For first-time LinuxCNC machine setup, follow the [Beginner LinuxCNC Setup Guide](docs/LINUXCNC_BEGINNER_SETUP.md). It explains where commands run, how to verify each step, and how to avoid mixing the management network with the Mesa/EtherCAT control network.
 
+## Licensing and Release Boundary
+
+This project is intentionally split into a public-facing CNCFusion layer and a private machine-admin layer.
+
+- The public release is governed by [public/LICENSE](public/LICENSE) and is intended for the end-user GUI and CNC workflow experience.
+- The private release is governed by [private/LICENSE](private/LICENSE) and is reserved for machine-admin, deployment, certificate, recovery, and privileged lifecycle functionality.
+- LinuxCNC remains the runtime owner of machine control and configuration; CNCFusion is the interface and configuration layer around it.
+
+This separation is intended to keep the user-facing app open and understandable while preserving private operational controls behind a separate legal and technical boundary.
+
 ---
 
 ## Table of Contents
@@ -201,7 +211,7 @@ The **🖥️ DASHBOARD** tab is the primary operator interface. It streams live
   - A red **Live Tool Marker** actively traces the path as the physical machine moves.
   - **Double-Click** any line in the 3D drawing to instantly jump the G-Code Editor to that specific coordinate!
   - Click **📸 Save Screenshot** to export the render to a `.png`.
-- **Probing:** The Offsets & Probing tabs allow you to trigger standard Plate Z-Zeroing, Edge Finding, or Tool Height Setter routines directly via MDI subroutines.
+- **Probing:** The secure Offsets & Probing controls support bounded raw Z probing, touch-plate Z offset, tool-setter positioning, and technician-only setter calibration. Advanced XY edge-finding and geometry-specific routines remain disabled in secure mode until their individual motion and offset contracts are reviewed.
 
 ---
 

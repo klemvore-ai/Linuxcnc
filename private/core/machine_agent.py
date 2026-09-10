@@ -147,14 +147,17 @@ class MachineAgentClient:
 
     def probe_z(self, target, velocity):
         """Request a bounded Z probe cycle through the machine agent."""
-        return self.post(
+        return self._request(
+            "POST",
             "/v1/machine/probe-z",
             {"operation": "probe_z", "target": target, "velocity": velocity},
+            timeout=60.0,
         )
 
     def touch_off_z(self, target, velocity, plate_thickness, retract=2.0):
         """Probe a locally selected plate, set the Z work offset, and retract."""
-        return self.post(
+        return self._request(
+            "POST",
             "/v1/machine/touch-off-z",
             {
                 "target": target,
@@ -162,6 +165,7 @@ class MachineAgentClient:
                 "plate_thickness": plate_thickness,
                 "retract": retract,
             },
+            timeout=60.0,
         )
 
     def touch_off_axis(self, axis, value=0.0):

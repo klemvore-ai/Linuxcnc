@@ -16,11 +16,15 @@ MAX_HAL_VALUE_PINS = 16
 ALLOWED_O_CODE_SUBROUTINES = {
     "O100", "O101", "O102", "O103", "O104", "O105",
     "O106", "O107", "O108", "O109", "O110", "O111",
-    "O112", "O113",
+    "O112", "O113", "O114", "O115", "O116", "O117",
+    "O118", "O119", "O120", "O121", "O122", "O123",
+    "O124", "O125", "O126", "O127", "O128", "O129",
 }
-# LinuxCNC expects O-code files WITHOUT .ngc extension (e.g., "O100", not "O100.ngc")
-O_CODE_FILENAME_PATTERN = re.compile(r"(?i)^o(100|101|102|103|104|105|106|107|108|109|110|111|112|113)$")
-O_CODE_DEFINITION_PATTERN = re.compile(r"(?im)^\s*o\s*(100|101|102|103|104|105|106|107|108|109|110|111|112|113)\s+sub\b")
+# LinuxCNC strips the "O" prefix from a numbered O-word and appends ".ngc"
+# when searching for the subroutine file (interp_read.cc -> find_ngc_file),
+# so "O100 call" opens the file "100.ngc" from SUBROUTINE_PATH.
+O_CODE_FILENAME_PATTERN = re.compile(r"(?i)^(?:o)?(1(?:0[0-9]|1[0-9]|2[0-9]))(?:\.ngc)?$")
+O_CODE_DEFINITION_PATTERN = re.compile(r"(?im)^\s*o\s*(1(?:0[0-9]|1[0-9]|2[0-9]))\s+sub\b")
 
 
 def validate_o_code_subroutine(payload):
@@ -42,17 +46,19 @@ def validate_macro_upload(payload):
     if not isinstance(payload, dict) or set(payload) != required:
         raise AgentPolicyError("Macro upload fields are invalid.")
     filename = payload["filename"]
-    if not isinstance(filename, str) or not O_CODE_FILENAME_PATTERN.fullmatch(Path(filename).name):
-        raise AgentPolicyError("Macro filename must be an approved O-code (O100-O113, no extension).")
+    if not isinstance(filename, str):
+        raise AgentPolicyError("Macro filename must be an approved O-code (O100-O129).")
+    name_match = O_CODE_FILENAME_PATTERN.fullmatch(Path(filename).name)
+    if name_match is None:
+        raise AgentPolicyError("Macro filename must be an approved O-code (O100-O129).")
     if not isinstance(payload["sha256"], str) or len(payload["sha256"]) != 64 or any(character not in "0123456789abcdef" for character in payload["sha256"].lower()):
         raise AgentPolicyError("Macro checksum is invalid.")
     if not isinstance(payload["content"], str):
         raise AgentPolicyError("Macro content must be text.")
     match = O_CODE_DEFINITION_PATTERN.search(payload["content"])
-    expected = Path(filename).stem.upper()
-    if match is None or f"O{match.group(1)}" != expected:
+    if match is None or match.group(1) != name_match.group(1):
         raise AgentPolicyError("Macro content must define the matching O-code subroutine.")
-    return expected
+    return f"{name_match.group(1)}.ngc"
 
 
 def validate_hal_value_request(payload):
@@ -276,6 +282,8 @@ def validate_machine_command(payload):
         "program_start",
         "program_pause_resume",
         "tool_change_ack",
+        "probe_source_setter",
+        "probe_source_probe",
         "mode_manual",
         "mode_auto",
         "home_all",

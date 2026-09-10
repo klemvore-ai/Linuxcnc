@@ -5,9 +5,9 @@ import math
 import re
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                             QLabel, QListWidget, QPlainTextEdit, QMessageBox, 
+                             QLabel, QListWidget, QTableWidget, QTableWidgetItem, QPlainTextEdit, QMessageBox, 
                              QInputDialog, QGraphicsView, QGraphicsScene, QSplitter, QLineEdit)
-from PyQt6.QtCore import Qt, QRectF
+from PyQt6.QtCore import Qt, QRectF, QTimer
 from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath, QSyntaxHighlighter, QTextCharFormat, QFont
 from core.machine_agent import client_from_settings
 
@@ -200,6 +200,13 @@ class MacroEditorTab(QWidget):
         self.settings = settings
         self.current_file = None
         self.init_ui()
+        QTimer.singleShot(0, self.auto_refresh_macro_list)
+
+    def auto_refresh_macro_list(self):
+        """Refresh the managed macro list after the tab has initialized."""
+        if client_from_settings(self.settings) is None:
+            return
+        self.refresh_file_list()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -239,8 +246,11 @@ class MacroEditorTab(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
         # Left: File List
-        self.file_list = QListWidget()
-        self.file_list.itemClicked.connect(self.load_file)
+        self.file_list = QTableWidget(0, 2)
+        self.file_list.setHorizontalHeaderLabels(["Macro", "Description"])
+        self.file_list.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.file_list.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.file_list.cellClicked.connect(lambda row, _column: self.load_file(self.file_list.item(row, 0)))
         splitter.addWidget(self.file_list)
         
         # Middle: Editor
@@ -303,13 +313,20 @@ class MacroEditorTab(QWidget):
         if agent_client is not None:
             try:
                 self.file_list.clear()
+                self.file_list.setRowCount(0)
+                self.file_list.setColumnCount(2)
+                self.file_list.setHorizontalHeaderLabels(["Macro", "Description"])
                 macros = agent_client.list_macros().get("macros", [])
                 for macro in macros:
                     filename = macro.get("filename")
                     if filename:
-                        self.file_list.addItem(filename)
+                        row = self.file_list.rowCount()
+                        self.file_list.insertRow(row)
+                        self.file_list.setItem(row, 0, QTableWidgetItem(filename))
+                        self.file_list.setItem(row, 1, QTableWidgetItem(macro.get("description", "")))
                 if not macros:
-                    self.file_list.addItem("No managed macros installed")
+                    self.file_list.insertRow(0)
+                    self.file_list.setItem(0, 0, QTableWidgetItem("No managed macros installed"))
             except Exception as error:
                 QMessageBox.critical(self, "Error", f"Failed to list secure macros:\n{error}")
             return
@@ -323,6 +340,7 @@ class MacroEditorTab(QWidget):
         cmd = f"cd {remote_dir} && find -L . -type f -name '*.ngc' 2>/dev/null | sed 's|^./||'"
         
         self.file_list.clear()
+        self.file_list.setRowCount(0)
         
         try:
             out = ""
@@ -351,7 +369,10 @@ class MacroEditorTab(QWidget):
                 for line in out.splitlines():
                     filename = line.strip()
                     if filename:
-                        self.file_list.addItem(filename)
+                        row = self.file_list.rowCount()
+                        self.file_list.insertRow(row)
+                        self.file_list.setItem(row, 0, QTableWidgetItem(filename))
+                        self.file_list.setItem(row, 1, QTableWidgetItem(""))
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to list directory:\n{e}")
 
@@ -365,6 +386,14 @@ class MacroEditorTab(QWidget):
                 "O108 (Probe X Edge)", "O109 (Probe Y Edge)",
                 "O110 (Auto Tool Change)", "O111 (Calibrate Setter)",
                 "O112 (Calibrate Spindle Nose)", "O113 (Quick Tool Change)",
+                "O114 (Outside Back-Left Corner)", "O115 (Outside Back Edge)",
+                "O116 (Outside Back-Right Corner)", "O117 (Outside Left Edge)",
+                "O118 (Outside Right Edge)", "O119 (Outside Front-Left Corner)",
+                "O120 (Outside Front Edge)", "O121 (Outside Front-Right Corner)",
+                "O122 (Inside Back-Left Corner)", "O123 (Inside Back Edge)",
+                "O124 (Inside Back-Right Corner)", "O125 (Inside Left Edge)",
+                "O126 (Inside Right Edge)", "O127 (Inside Front-Left Corner)",
+                "O128 (Inside Front Edge)", "O129 (Inside Front-Right Corner)",
             ], 0, False)
             if not ok:
                 return
@@ -485,7 +514,7 @@ class MacroEditorTab(QWidget):
                 
             self.clear_unsaved()
             QMessageBox.information(self, "Success", f"Saved to {remote_path}")
-            if self.file_list.findItems(self.current_file, Qt.MatchFlag.MatchExactly) == []:
+            if not self.file_list.findItems(self.current_file, Qt.MatchFlag.MatchExactly):
                 self.refresh_file_list()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save file:\n{e}")

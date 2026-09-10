@@ -7,7 +7,7 @@ Type=oneshot
 User=root
 WorkingDirectory=/opt/CNCFusion
 Environment=TMPDIR=/var/lib/cncfusion/updates/tmp
-ExecStart=/opt/CNCFusion/.venv/bin/python -m agent.apply_update
+ExecStart=/opt/CNCFusion/.venv/bin/python -m agent.apply_update --archive /var/lib/cncfusion/updates/cncfusion-update.tar.gz --application-root /opt/CNCFusion --status-path /var/lib/cncfusion/updates/last-apply.json
 ExecStartPost=/bin/systemctl restart cncfusion-hal-helper.service cncfusion-agent.service
 NoNewPrivileges=true
 PrivateTmp=true

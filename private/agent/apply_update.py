@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent.archive_transfer import ArchiveError, validate_application_archive
-REQUIRED_APPLICATION_FILES = {"main.py", "requirements.txt", "agent/__init__.py", "agent/__main__.py", "agent/status.py"}
+REQUIRED_BASE_FILES = {"main.py", "requirements.txt", "agent/__init__.py", "agent/__main__.py"}
 LAUNCHER_NAME = "cncfusion-launcher.sh"
 DEFAULT_STATUS_PATH = "/var/lib/cncfusion/updates/last-apply.json"
 
@@ -28,26 +28,38 @@ def _verify_application_contents(archive_path):
     """Reject a staged archive that cannot boot CNCFusion after replacement."""
     with tarfile.open(archive_path, "r:gz") as archive:
         names = {member.name for member in archive.getmembers() if member.isfile()}
-    if not REQUIRED_APPLICATION_FILES.issubset(names):
+    if not REQUIRED_BASE_FILES.issubset(names):
         raise ArchiveError("Application archive is missing required CNCFusion files.")
+    if "agent/status.py" not in names and "private/agent/status.py" not in names:
+        raise ArchiveError("Application archive is missing agent status metadata.")
 
 
-def _release_metadata(replacement):
-    """Read version and capability constants from the validated replacement source tree."""
+def _parse_status_file(status_file):
+    if not status_file.is_file():
+        return {}
     try:
-        module = ast.parse((replacement / "agent" / "status.py").read_text(encoding="utf-8"))
+        module = ast.parse(status_file.read_text(encoding="utf-8"))
         values = {}
         for node in module.body:
             if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
                 if node.targets[0].id in {"AGENT_VERSION", "CAPABILITIES"}:
                     values[node.targets[0].id] = ast.literal_eval(node.value)
-        version = values.get("AGENT_VERSION")
-        capabilities = values.get("CAPABILITIES")
-        if not isinstance(version, str) or not isinstance(capabilities, tuple) or not all(isinstance(item, str) for item in capabilities):
-            raise ValueError("Invalid release metadata.")
-        return {"agent_version": version, "capabilities": list(capabilities)}
-    except (OSError, SyntaxError, ValueError) as error:
-        raise ArchiveError(f"Application archive release metadata is invalid: {error}") from error
+        return values
+    except Exception:
+        return {}
+
+
+def _release_metadata(replacement):
+    """Read version and capability constants from the validated replacement source tree."""
+    values = _parse_status_file(replacement / "private" / "agent" / "status.py")
+    if "AGENT_VERSION" not in values or "CAPABILITIES" not in values:
+        values.update(_parse_status_file(replacement / "agent" / "status.py"))
+
+    version = values.get("AGENT_VERSION")
+    capabilities = values.get("CAPABILITIES")
+    if not isinstance(version, str) or not isinstance(capabilities, (tuple, list)) or not all(isinstance(item, str) for item in capabilities):
+        raise ArchiveError("Application archive release metadata is invalid: Invalid release metadata.")
+    return {"agent_version": version, "capabilities": list(capabilities)}
 
 
 def _write_launcher(application_root):
@@ -143,12 +155,16 @@ def apply_update(archive_path, application_root, status_path=DEFAULT_STATUS_PATH
 def main():
     """Apply the staged update only when run locally by an administrator."""
     parser = argparse.ArgumentParser(description="Apply a staged CNCFusion update")
-    parser.add_argument("--archive", default="/var/lib/cncfusion/updates/cncfusion-update.tar.gz")
-    parser.add_argument("--application-root", default="/opt/CNCFusion")
+    parser.add_argument("--archive", default=None)
+    parser.add_argument("--application-root", default=None)
     parser.add_argument("--status-path", default=DEFAULT_STATUS_PATH)
+    parser.add_argument("--staging-dir", default=None)
+    parser.add_argument("--agent-root", default=None)
     args = parser.parse_args()
+    archive_path = args.archive or (str(Path(args.staging_dir) / "cncfusion-update.tar.gz") if args.staging_dir else "/var/lib/cncfusion/updates/cncfusion-update.tar.gz")
+    application_root = args.application_root or args.agent_root or "/opt/CNCFusion"
     try:
-        apply_update(args.archive, args.application_root, args.status_path)
+        apply_update(archive_path, application_root, args.status_path)
     except Exception as error:
         _write_status(
             args.status_path,

@@ -1,0 +1,29 @@
+Private Machine-Admin License
+
+Copyright (C) 2026 Darrell Drinkwine
+
+This software package contains private, machine-specific admin and deployment code.
+It is not intended for public redistribution or general use outside the authorized
+private deployment context.
+
+By default, all rights are reserved to the copyright holder unless a separate,
+written authorization is granted.
+
+You may not:
+- copy, distribute, publish, or sublicense this code without written permission
+- modify, derive, or redistribute the private machine-admin components for public use
+- republish the private implementation in source or binary form outside the approved deployment environment
+
+You may use this code only for:
+- internal machine administration
+- authorized deployment and recovery workflows
+- private, controlled operation of a licensed CNCFusion installation
+
+This file is separate from the public GPL release. The public GUI and user-facing code
+may be distributed under the license in the public folder, but the private admin,
+agent, deployment, and machine-side control code remains restricted and confidential.
+
+No warranty is provided. The software is provided "AS IS" and the copyright holder
+shall not be liable for any damages arising from use or misuse of the private deployment code.
+
+For licensing questions or a written authorization, contact the copyright holder.

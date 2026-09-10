@@ -290,7 +290,7 @@ class AgentHTTPTests(unittest.TestCase):
         response = self.connection.getresponse()
 
         self.assertEqual(response.status, 202)
-        self.assertEqual(self.runtime.calls[-1][0:2], ("upload_macro", "O100"))
+        self.assertEqual(self.runtime.calls[-1][0:2], ("upload_macro", "100.ngc"))
 
 
 if __name__ == "__main__":

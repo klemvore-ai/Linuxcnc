@@ -1,0 +1,36 @@
+(O119 - Measure Outside Front-Left Corner)
+(O119 probes front Y- then X- and sets the outside corner to X0 Y0)
+
+O119 sub
+    #<probe_vel> = #<_ini[PROBE]VEL>
+    #<search_dist> = #<_ini[PROBE]SEARCH_DIST>
+    #<xy_clear> = #<_ini[PROBE]XY_CLEARANCE>
+    #<z_drop> = #<_ini[PROBE]Z_DROP>
+    #<probe_diam> = #<_ini[PROBE]DIAMETER>
+    #<radius> = [#<probe_diam> / 2.0]
+    #<start_x> = #5420
+    #<start_y> = #5421
+    G90
+    G0 X[#<start_x> - #<xy_clear>]
+    G91
+    G0 Z-#<z_drop>
+    G38.2 Y-#<search_dist> F#<probe_vel>
+    #<y1> = #5062
+    G0 Y#<xy_clear>
+    G0 Z#<z_drop>
+    G90
+    G0 X#<start_x> Y#<start_y>
+    G0 Y[#<start_y> - #<xy_clear>]
+    G91
+    G0 Z-#<z_drop>
+    G38.2 X-#<search_dist> F#<probe_vel>
+    #<x1> = #5061
+    G0 X#<xy_clear>
+    G0 Z#<z_drop>
+    G90
+    G0 X#<start_x> Y#<start_y>
+    G0 X[#<x1> + #<radius>] Y[#<y1> + #<radius>]
+    G10 L20 P0 X[#<x1> + #<radius>]
+    G10 L20 P0 Y[#<y1> + #<radius>]
+O119 endsub
+M2
