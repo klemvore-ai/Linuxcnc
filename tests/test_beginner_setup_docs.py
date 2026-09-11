@@ -23,7 +23,7 @@ class BeginnerSetupDocumentationTests(unittest.TestCase):
         self.assertIn("sudo chown <LINUX_USER>:<LINUX_USER>", guide)
         self.assertIn("OSError: [Errno 99] Cannot assign requested address", guide)
         self.assertIn("hostname -I", guide)
-        self.assertIn("CNCFUSION_AGENT_BIND=192.168.0.160", guide)
+        self.assertIn("CNCFUSION_AGENT_BIND=<MANAGEMENT_IP>", guide)
         self.assertIn("Remote end closed connection without response", guide)
         self.assertIn("state_available: false", guide)
         self.assertIn("rtapi_shmem_new", guide)

@@ -1,4 +1,0 @@
-# --- Custom Post-GUI HAL file for CNCFusion ---
-# This file is loaded after the GUI has started.
-# It is automatically sourced by the POSTGUI_HALFILE entry in the INI.
-# Export your dashboard UI wires from the Logic Designer into this file!

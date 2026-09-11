@@ -636,10 +636,10 @@ Edit the environment file:
 sudo nano /etc/cncfusion/agent.env
 ```
 
-Set `CNCFUSION_AGENT_BIND` to an address shown by `hostname -I`. For example, if `hostname -I` shows `192.168.0.160`, use:
+Set `CNCFUSION_AGENT_BIND` to an address shown by `hostname -I`. For example, if `hostname -I` shows `<MANAGEMENT_IP>`, use:
 
 ```text
-CNCFUSION_AGENT_BIND=192.168.0.160
+CNCFUSION_AGENT_BIND=<MANAGEMENT_IP>
 ```
 
 Do not include angle brackets or quotation marks. If you are unsure which interface is the management interface, temporarily use the address connected to the same network as the Windows development computer, not the address connected to the Mesa board.

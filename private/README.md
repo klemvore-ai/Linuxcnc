@@ -1,8 +1,10 @@
-# Private Machine-Admin Scope
+# Machine-Admin Components
 
-This directory represents the private, machine-specific implementation layer.
+This directory contains public CNCFusion machine-agent and administrative implementation code.
+It is licensed under GPL-3.0-or-later with the rest of CNCFusion; it does not contain
+credentials or machine-specific runtime configuration.
 
-This scope is reserved for:
+This scope includes:
 
 - machine-side agent services
 - mTLS and certificate configuration
@@ -10,6 +12,7 @@ This scope is reserved for:
 - systemd deployment and lifecycle logic
 - firmware and recovery tooling
 - privileged config activation or rollback workflows
-- deployment-specific settings that should not ship in the public project
+- deployment-specific templates and example settings
 
-This layer is intentionally separate from the public CNCFusion GUI and should not be treated as the default runtime path for a generic CNC app.
+Do not commit generated certificates, private keys, enrolled client fingerprints,
+machine addresses, or working environment files. See [Secure Agent Setup](../docs/SECURE_AGENT_SETUP.md).

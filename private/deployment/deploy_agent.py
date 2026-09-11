@@ -14,7 +14,10 @@ FILES = [
 ]
 
 def main():
-    machine = "darrell@192.168.0.160"
+    machine = os.environ.get("CNCFUSION_SSH_TARGET")
+    if not machine:
+        print("ERROR: Set CNCFUSION_SSH_TARGET to user@machine-management-host before deploying.")
+        sys.exit(1)
     
     print("Deploying agent files to machine...")
     

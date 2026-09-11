@@ -8,3 +8,20 @@ __pycache__/
 htmlcov/
 dist/
 build/
+
+# Local machine configuration and credentials. Commit only the matching examples.
+settings.ini
+*.key
+*.pem
+*.p12
+*.pfx
+*.csr
+certs/
+.cncfusion/
+
+# LinuxCNC host deployment state and local recovery artifacts.
+agent.env
+paths.conf
+backups/
+exports/
+Mesa_Oxman.hal

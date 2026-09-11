@@ -8,15 +8,15 @@ For maintainers and contributors, see the [Architecture Guide](docs/ARCHITECTURE
 
 For first-time LinuxCNC machine setup, follow the [Beginner LinuxCNC Setup Guide](docs/LINUXCNC_BEGINNER_SETUP.md). It explains where commands run, how to verify each step, and how to avoid mixing the management network with the Mesa/EtherCAT control network.
 
-## Licensing and Release Boundary
+## License, Safety, and Local Configuration
 
-This project is intentionally split into a public-facing CNCFusion layer and a private machine-admin layer.
+CNCFusion, including the secure machine agent, installer, deployment tooling, and documentation, is released under the GNU General Public License v3.0 or later. See [LICENSE](LICENSE) for the project license.
 
-- The public release is governed by [public/LICENSE](public/LICENSE) and is intended for the end-user GUI and CNC workflow experience.
-- The private release is governed by [private/LICENSE](private/LICENSE) and is reserved for machine-admin, deployment, certificate, recovery, and privileged lifecycle functionality.
-- LinuxCNC remains the runtime owner of machine control and configuration; CNCFusion is the interface and configuration layer around it.
+**CNCFusion is not safety-rated machine-control software.** LinuxCNC, the physical E-stop, limits, interlocks, and other independent safety systems remain responsible for safe machine operation. Review every generated G-code program and O-code macro, test with the machine clear at low speed, and stop immediately when any motion is unexpected. Never rely on CNCFusion as the sole safety control.
 
-This separation is intended to keep the user-facing app open and understandable while preserving private operational controls behind a separate legal and technical boundary.
+Do not commit a working `settings.ini`, certificates, private keys, fingerprints, passwords, machine IP addresses, HAL pin maps, or calibration values. Start from [settings.example.ini](settings.example.ini) and create your own local `settings.ini`; it is intentionally ignored by Git.
+
+The secure agent is public source code. Each installation must generate its own CA, server certificate, and client certificate and enroll the client fingerprint before accepting network requests. Follow [Secure Agent Setup](docs/SECURE_AGENT_SETUP.md) before enabling agent control on a machine.
 
 ---
 
@@ -43,7 +43,7 @@ This separation is intended to keep the user-facing app open and understandable 
 Run the complete installer as root:
 
 ```bash
-sudo python3 installer/install.py --source /path/to/CNCFusion
+sudo python3 private/installer/install.py --source /path/to/CNCFusion
 ```
 
 The installer sets up:
@@ -68,7 +68,7 @@ The installer sets up:
 2. Configure `settings.ini`:
    ```ini
    [AGENT]
-   base_url = https://192.168.0.160:9443
+   base_url = https://<MACHINE_MANAGEMENT_IP>:9443
    ca_file = C:\Users\<user>\.cncfusion\ca.crt
    client_cert = C:\Users\<user>\.cncfusion\client.crt
    client_key = C:\Users\<user>\.cncfusion\client.key

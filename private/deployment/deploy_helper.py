@@ -34,8 +34,8 @@ def main():
     print("     sudo systemctl start cncfusion-apply-update")
     print()
     print("  2. Or use SCP to copy just this file:")
-    print(f"     scp {helper_path} darrell@192.168.0.160:/tmp/hal_helper.py")
-    print("     ssh darrell@192.168.0.160 'sudo cp /tmp/hal_helper.py /opt/CNCFusion/agent/hal_helper.py && sudo systemctl restart cncfusion-hal-helper'")
+    print(f"     scp {helper_path} <USER>@<MACHINE_MANAGEMENT_HOST>:/tmp/hal_helper.py")
+    print("     ssh <USER>@<MACHINE_MANAGEMENT_HOST> 'sudo cp /tmp/hal_helper.py /opt/CNCFusion/agent/hal_helper.py && sudo systemctl restart cncfusion-hal-helper'")
     print()
 
 if __name__ == "__main__":
