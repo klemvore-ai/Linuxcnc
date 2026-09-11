@@ -139,10 +139,11 @@ Dev Workstation (Windows)          CNC Machine (Debian/LinuxCNC)
 ```
 
 ### Security Features
-- **No arbitrary shell commands** — all operations are typed and validated
+- **No arbitrary shell commands** — operations are typed and validated, with the public repo intentionally excluding machine secrets
 - **No MDI injection** — G-code execution uses allowlisted O-code subroutines only
-- **State validation** — Machine must be in correct state (idle, powered) before operations
-- **Certificate rotation** — Client certs can be rotated without machine access
+- **State validation** — the machine must be in the correct safe state before motion commands run
+- **Certificate rotation** — client certs can be rotated without exposing machine credentials
+- **Management-network isolation** — the agent binds only to the approved management interface, not the Mesa/EtherCAT control network
 
 ---
 
@@ -211,7 +212,7 @@ The **🖥️ DASHBOARD** tab is the primary operator interface. It streams live
   - A red **Live Tool Marker** actively traces the path as the physical machine moves.
   - **Double-Click** any line in the 3D drawing to instantly jump the G-Code Editor to that specific coordinate!
   - Click **📸 Save Screenshot** to export the render to a `.png`.
-- **Probing:** The secure Offsets & Probing controls support bounded raw Z probing, touch-plate Z offset, tool-setter positioning, and technician-only setter calibration. Advanced XY edge-finding and geometry-specific routines remain disabled in secure mode until their individual motion and offset contracts are reviewed.
+- **Probing:** The secure Offsets & Probing controls support bounded raw Z probing, touch-plate Z offset, tool-setter positioning, and technician-only setter calibration. The directional XY probing family (`O114`–`O129`) is also supported for machine-specific corner and center routines, with each macro following the configured axis convention and safe retract logic.
 
 ---
 
@@ -260,6 +261,22 @@ CNCFusion includes a complete **O-code subroutine system** for automated machine
 | **O111** | Calibrate Setter | Establish tool setter surface with known reference |
 | **O112** | Calibrate Spindle Nose | Probe bare spindle nose as absolute reference |
 | **O113** | Quick Tool Change | Simplified probe for in-program use after `T# M6` |
+| **O114** | Outside Back-Left Corner | Safe outside-corner routine using machine-specific sign conventions |
+| **O115** | Outside Back Edge | Probe along the rear edge and zero the machine corner |
+| **O116** | Outside Front-Left Corner | Outside-left probing sequence for a front-left reference |
+| **O117** | Outside Front Edge | Front-edge probing routine |
+| **O118** | Outside Front-Right Corner | Outside front-right corner routine |
+| **O119** | Outside Right Edge | Right-edge probing routine |
+| **O120** | Outside Back-Right Corner | Back-right outside corner routine |
+| **O121** | Inside Back-Left Corner | Inside back-left corner routine |
+| **O122** | Inside Back Edge | Inside rear-edge probing routine |
+| **O123** | Inside Front-Left Corner | Front-left inside-corner sequence |
+| **O124** | Inside Front Edge | Inside front-edge routine |
+| **O125** | Inside Front-Right Corner | Front-right inside-corner sequence |
+| **O126** | Inside Right Edge | Right-side inside probing routine |
+| **O127** | Inside Back-Right Corner | Back-right inside-corner probing |
+| **O128** | Boss Center | Four-side boss center estimate, then zero the work offset |
+| **O129** | Hole Center | Four-side hole center estimate, then zero the work offset |
 
 ### Using Macros
 
@@ -293,6 +310,7 @@ Use the **Macros** tab:
 - File must be named `O###.ngc` matching the O-code number
 - Must contain `O### sub` and `O### endsub` markers
 - Content is validated before upload
+- For machine-specific probing routines, the axis sign convention must be checked against the real machine orientation before use
 
 ### Macro Configuration
 
@@ -325,6 +343,7 @@ PARK_Z = 0.0           ; Park position Z
 - Set values in **Settings → Probing & Locations**
 - Click **🔄 Sync Probing to Machine INI**
 - Approve and activate the configuration on the machine
+- Treat the `VEL` and travel settings as a machine-specific safety contract; verify them at low speed before production probing
 
 ---
 
