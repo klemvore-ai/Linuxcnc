@@ -31,7 +31,7 @@ class MachineBasicsPage(QWizardPage):
         self.setSubTitle("Choose the basic LinuxCNC machine structure.")
 
         form = QFormLayout(self)
-        self.name_input = QLineEdit(settings.get_setting("MACHINE_CONFIG", "name", "CNCFusion"))
+        self.name_input = QLineEdit(settings.get_setting("MACHINE_CONFIG", "name", "LinuxCNC"))
         self.kinematics_input = QComboBox()
         self.kinematics_input.addItems([
             "XYZ (3-Axis)",
@@ -455,7 +455,7 @@ class SetupWizard(QWizard):
         """Create the setup wizard backed by the supplied settings manager."""
         super().__init__(parent)
         self.settings = settings
-        self.setWindowTitle("CNCFusion LinuxCNC Setup")
+        self.setWindowTitle("LinuxCNC Setup")
         self.setMinimumSize(640, 480)
         self.basics_page = MachineBasicsPage(settings)
         self.axis_page = AxisLimitsPage(settings)

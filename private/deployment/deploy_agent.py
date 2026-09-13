@@ -14,9 +14,9 @@ FILES = [
 ]
 
 def main():
-    machine = os.environ.get("CNCFUSION_SSH_TARGET")
+    machine = os.environ.get("LINUXCNC_SSH_TARGET")
     if not machine:
-        print("ERROR: Set CNCFUSION_SSH_TARGET to user@machine-management-host before deploying.")
+        print("ERROR: Set LINUXCNC_SSH_TARGET to user@machine-management-host before deploying.")
         sys.exit(1)
     
     print("Deploying agent files to machine...")
@@ -28,7 +28,7 @@ def main():
             
         filename = os.path.basename(local_path)
         remote_tmp = f"/tmp/{filename}"
-        remote_final = f"/opt/CNCFusion/agent/{filename}"
+        remote_final = f"/opt/LinuxCNC/agent/{filename}"
         
         # Copy to /tmp
         print(f"Copying {local_path}...")
@@ -55,8 +55,8 @@ def main():
     
     # Restart services
     print("\nRestarting services...")
-    subprocess.run(["ssh", machine, "sudo systemctl restart cncfusion-hal-helper"])
-    subprocess.run(["ssh", machine, "sudo systemctl restart cncfusion-agent"])
+    subprocess.run(["ssh", machine, "sudo systemctl restart linuxcnc-hal-helper"])
+    subprocess.run(["ssh", machine, "sudo systemctl restart linuxcnc-agent"])
     print("Done!")
 
 if __name__ == "__main__":

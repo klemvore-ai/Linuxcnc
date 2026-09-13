@@ -17,7 +17,7 @@ settings.ini
 *.pfx
 *.csr
 certs/
-.cncfusion/
+.linuxcnc/
 
 # LinuxCNC host deployment state and local recovery artifacts.
 agent.env

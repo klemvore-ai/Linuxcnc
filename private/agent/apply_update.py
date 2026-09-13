@@ -1,4 +1,4 @@
-"""Apply a previously staged CNCFusion update with local administrator approval."""
+"""Apply a previously staged LinuxCNC update with local administrator approval."""
 
 import argparse
 import ast
@@ -12,8 +12,8 @@ from pathlib import Path
 
 from agent.archive_transfer import ArchiveError, validate_application_archive
 REQUIRED_BASE_FILES = {"main.py", "requirements.txt", "agent/__init__.py", "agent/__main__.py"}
-LAUNCHER_NAME = "cncfusion-launcher.sh"
-DEFAULT_STATUS_PATH = "/var/lib/cncfusion/updates/last-apply.json"
+LAUNCHER_NAME = "linuxcnc-launcher.sh"
+DEFAULT_STATUS_PATH = "/var/lib/linuxcnc/updates/last-apply.json"
 
 
 class UpdateApplyError(RuntimeError):
@@ -25,11 +25,11 @@ class UpdateApplyError(RuntimeError):
 
 
 def _verify_application_contents(archive_path):
-    """Reject a staged archive that cannot boot CNCFusion after replacement."""
+    """Reject a staged archive that cannot boot LinuxCNC after replacement."""
     with tarfile.open(archive_path, "r:gz") as archive:
         names = {member.name for member in archive.getmembers() if member.isfile()}
     if not REQUIRED_BASE_FILES.issubset(names):
-        raise ArchiveError("Application archive is missing required CNCFusion files.")
+        raise ArchiveError("Application archive is missing required LinuxCNC files.")
     if "agent/status.py" not in names and "private/agent/status.py" not in names:
         raise ArchiveError("Application archive is missing agent status metadata.")
 
@@ -68,8 +68,8 @@ def _write_launcher(application_root):
     launcher.write_text(
         "#!/bin/sh\n"
         "set -eu\n"
-        "cd /opt/CNCFusion\n"
-        "exec /opt/CNCFusion/.venv/bin/python /opt/CNCFusion/main.py \"$@\"\n",
+        "cd /opt/LinuxCNC\n"
+        "exec /opt/LinuxCNC/.venv/bin/python /opt/LinuxCNC/main.py \"$@\"\n",
         encoding="utf-8",
     )
     launcher.chmod(0o755)
@@ -98,7 +98,7 @@ def apply_update(archive_path, application_root, status_path=DEFAULT_STATUS_PATH
     temporary_archive = validate_application_archive(content, archive_sha256)
     _verify_application_contents(temporary_archive)
     staging_parent = application_root.parent
-    staging = Path(tempfile.mkdtemp(prefix=".cncfusion-update-", dir=staging_parent))
+    staging = Path(tempfile.mkdtemp(prefix=".linuxcnc-update-", dir=staging_parent))
     replacement = staging / application_root.name
     backup = application_root.with_name(f".{application_root.name}.previous")
     virtual_environment = application_root / ".venv"
@@ -154,15 +154,15 @@ def apply_update(archive_path, application_root, status_path=DEFAULT_STATUS_PATH
 
 def main():
     """Apply the staged update only when run locally by an administrator."""
-    parser = argparse.ArgumentParser(description="Apply a staged CNCFusion update")
+    parser = argparse.ArgumentParser(description="Apply a staged LinuxCNC update")
     parser.add_argument("--archive", default=None)
     parser.add_argument("--application-root", default=None)
     parser.add_argument("--status-path", default=DEFAULT_STATUS_PATH)
     parser.add_argument("--staging-dir", default=None)
     parser.add_argument("--agent-root", default=None)
     args = parser.parse_args()
-    archive_path = args.archive or (str(Path(args.staging_dir) / "cncfusion-update.tar.gz") if args.staging_dir else "/var/lib/cncfusion/updates/cncfusion-update.tar.gz")
-    application_root = args.application_root or args.agent_root or "/opt/CNCFusion"
+    archive_path = args.archive or (str(Path(args.staging_dir) / "linuxcnc-update.tar.gz") if args.staging_dir else "/var/lib/linuxcnc/updates/linuxcnc-update.tar.gz")
+    application_root = args.application_root or args.agent_root or "/opt/LinuxCNC"
     try:
         apply_update(archive_path, application_root, args.status_path)
     except Exception as error:

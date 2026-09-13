@@ -1,20 +1,20 @@
 [Unit]
-Description=CNCFusion read-only LinuxCNC HAL helper
+Description=LinuxCNC read-only LinuxCNC HAL helper
 After=network.target
 
 [Service]
 Type=simple
 User=darrell
-Group=cncfusion
-WorkingDirectory=/opt/CNCFusion
-ExecStart=/opt/CNCFusion/.venv/bin/python -m agent.hal_helper --socket /run/cncfusion/hal-helper.sock
+Group=linuxcnc
+WorkingDirectory=/opt/LinuxCNC
+ExecStart=/opt/LinuxCNC/.venv/bin/python -m agent.hal_helper --socket /run/linuxcnc/hal-helper.sock
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
 PrivateTmp=false
 ProtectSystem=full
 ProtectHome=true
-RuntimeDirectory=cncfusion
+RuntimeDirectory=linuxcnc
 RuntimeDirectoryMode=0750
 
 [Install]

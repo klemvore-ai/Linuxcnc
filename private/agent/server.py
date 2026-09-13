@@ -20,15 +20,17 @@ from agent.status import build_status
 
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_UPLOAD_BYTES = 16 * 1024 * 1024
+MAX_GCODE_UPLOAD_BYTES = 256 * 1024 * 1024
+MAX_UPLOAD_REQUEST_BYTES = 350 * 1024 * 1024
 MAX_APPLICATION_BYTES = 32 * 1024 * 1024
 
-logger = logging.getLogger("cncfusion.agent")
+logger = logging.getLogger("linuxcnc.agent")
 
 
 class MachineAgentServer:
     """Expose bounded, policy-checked lifecycle and upload endpoints."""
 
-    def __init__(self, address, tls_context, runtime, allowed_config_roots, gcode_root=None, allowed_client_fingerprints=None, client_roles=None, application_staging_root="/var/lib/cncfusion/updates", peer_certificate_provider=None):
+    def __init__(self, address, tls_context, runtime, allowed_config_roots, gcode_root=None, allowed_client_fingerprints=None, client_roles=None, application_staging_root="/var/lib/linuxcnc/updates", peer_certificate_provider=None):
         """Bind a TLS server to the supplied address and runtime adapter."""
         self.runtime = runtime
         self.allowed_config_roots = allowed_config_roots
@@ -220,14 +222,15 @@ class MachineAgentServer:
                 """Validate and pass one bounded upload to the runtime adapter."""
                 try:
                     length = int(self.headers.get("Content-Length", "-1"))
-                    if length < 0 or length > MAX_UPLOAD_BYTES:
+                    if length < 0 or length > MAX_UPLOAD_REQUEST_BYTES:
                         raise AgentPolicyError("Upload is missing or too large.")
                     payload = json.loads(self.rfile.read(length).decode("utf-8"))
                     kind, destination = validate_upload(payload, allowed_config_roots[0], gcode_root)
                     content = base64.b64decode(payload["content"], validate=True)
-                    if len(content) > MAX_UPLOAD_BYTES:
+                    max_upload_bytes = MAX_GCODE_UPLOAD_BYTES if kind == "gcode" else MAX_UPLOAD_BYTES
+                    if len(content) > max_upload_bytes:
                         raise AgentPolicyError("Upload is too large.")
-                    backup_root = str(destination.parent / ".cncfusion-backups") if kind == "config" else None
+                    backup_root = str(destination.parent / ".linuxcnc-backups") if kind == "config" else None
                     runtime.upload_file(destination, content, payload["sha256"], backup_root)
                     self._send_json(202, {"accepted": True, "kind": kind})
                 except (AgentPolicyError, ValueError, base64.binascii.Error) as error:
@@ -260,7 +263,7 @@ class MachineAgentServer:
                         pending_path, active_path = validate_restart_activation(payload, allowed_config_roots[0])
                     else:
                         pending_path, active_path = validate_activation(payload, allowed_config_roots[0])
-                    backup_root = str(pending_path.parent / ".cncfusion-backups")
+                    backup_root = str(pending_path.parent / ".linuxcnc-backups")
                     if payload["action"] == "activate_and_restart":
                         runtime.activate_and_restart(pending_path, active_path, backup_root)
                     else:

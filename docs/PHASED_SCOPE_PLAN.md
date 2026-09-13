@@ -2,11 +2,11 @@
 
 ## Objective
 
-Keep CNCFusion honest and maintainable by separating the public CNC GUI and LinuxCNC interface from the private machine-admin and deployment layer.
+Keep LinuxCNC honest and maintainable by separating the public CNC GUI and LinuxCNC interface from the private machine-admin and deployment layer.
 
 ## Core Rule
 
-LinuxCNC owns the real machine runtime and configuration. CNCFusion provides the operator-facing interface and configuration assistance around LinuxCNC.
+LinuxCNC owns the real machine runtime and configuration. LinuxCNC provides the operator-facing interface and configuration assistance around LinuxCNC.
 
 Anything that changes system identity, certificate trust, deployment, recovery, update, service lifecycle, or privileged config activation is private/admin scope and should not be part of the default public project path.
 
@@ -49,7 +49,7 @@ The current repo already points to this split:
 ## Phase 1: Boundary Declaration
 
 1. Confirm the public/private split in the main documentation.
-2. Document the rule that LinuxCNC owns runtime config and CNCFusion owns the UI + workflow layer.
+2. Document the rule that LinuxCNC owns runtime config and LinuxCNC owns the UI + workflow layer.
 3. Add scope notes to the root docs and maintainers guide.
 
 ## Phase 2: Isolation

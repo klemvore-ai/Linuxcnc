@@ -185,6 +185,8 @@ class GCodeEditor(QPlainTextEdit):
 
 class ToolpathViewer(QGraphicsView):
     segment_double_clicked = pyqtSignal(int)
+    MAX_PREVIEW_LINES = 100000
+    MAX_PREVIEW_SEGMENTS = 25000
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -202,10 +204,18 @@ class ToolpathViewer(QGraphicsView):
         self.segment_items = {}
         self.active_line = -1
 
-        # Live tool position indicator
-        self.tool_marker = self.scene.addEllipse(-4, -4, 8, 8, QPen(QColor("#ffffff"), 1.5), QBrush(QColor("#ff0000")))
+        # Live tool position indicator. Its geometry is updated to match the path scale.
+        self.tool_marker = self.scene.addEllipse(-1, -1, 2, 2, QPen(QColor("#ffffff"), 1.5), QBrush(QColor("#ff0000")))
         self.tool_marker.setZValue(100) # Always on top
-        self.tool_marker.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
+
+    def _update_tool_marker_size(self, bounds=None):
+        if bounds is None or bounds.isEmpty():
+            diameter = 2.0
+        else:
+            extent = max(bounds.width(), bounds.height())
+            diameter = max(0.5, min(8.0, extent * 0.008))
+        half_diameter = diameter / 2.0
+        self.tool_marker.setRect(-half_diameter, -half_diameter, diameter, diameter)
 
     def drawForeground(self, painter: QPainter, rect: QRectF):
         super().drawForeground(painter, rect)
@@ -278,6 +288,25 @@ class ToolpathViewer(QGraphicsView):
         self.segment_items.clear()
         self.active_line = -1
 
+        if not gcode_text or not str(gcode_text).strip():
+            return
+
+        text = str(gcode_text)
+        lines = text.splitlines()
+        line_count = len(lines)
+        preview_note = None
+
+        if line_count > self.MAX_PREVIEW_LINES:
+            sample_step = max(1, line_count // self.MAX_PREVIEW_SEGMENTS)
+            preview_lines = [(idx, line) for idx, line in enumerate(lines) if idx % sample_step == 0]
+            preview_note = self.scene.addText(
+                f"Preview simplified: {line_count:,} lines sampled to {len(preview_lines):,} moves"
+            )
+            preview_note.setDefaultTextColor(QColor("#ffb347"))
+            preview_note.setPos(10, 10)
+        else:
+            preview_lines = list(enumerate(lines))
+
         cos_a = math.cos(math.radians(30))
         sin_a = math.sin(math.radians(30))
         
@@ -296,7 +325,7 @@ class ToolpathViewer(QGraphicsView):
         rapid_pen = QPen(QColor(150, 150, 150, 100), 1, Qt.PenStyle.DashLine)
         rapid_pen.setCosmetic(True)
 
-        for line_idx, line in enumerate(gcode_text.splitlines()):
+        for line_idx, line in preview_lines:
             clean_line = line.split(';')[0].split('(')[0].strip().upper()
             if not clean_line: continue
 
@@ -396,6 +425,7 @@ class ToolpathViewer(QGraphicsView):
 
         rect = self.scene.itemsBoundingRect()
         if rect.width() > 0 and rect.height() > 0:
+            self._update_tool_marker_size(rect)
             padded_rect = rect.adjusted(-rect.width()*0.05, -rect.height()*0.05, rect.width()*0.05, rect.height()*0.05)
             self.fitInView(padded_rect, Qt.AspectRatioMode.KeepAspectRatio)
 
@@ -861,9 +891,12 @@ IS_SIM = True
 
 class MachineDashboard(QWidget):
     error_signal = pyqtSignal(str)
+    program_sync_state = pyqtSignal(bool)
+
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.error_signal.connect(self.show_error_message)
+        self.program_sync_state.connect(self._set_program_sync_state)
         self.settings = settings
         self.home_buttons = {}
         self.dro_labels = {}
@@ -879,6 +912,7 @@ class MachineDashboard(QWidget):
         self.is_estopped = True
         self.machine_state = "ESTOP"
         self.active_jogs = set()
+        self._program_sync_in_progress = False
         self._tool_change_prompt_active = False
         self._tool_change_last_pocket = -1
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -1192,7 +1226,7 @@ except Exception as e:
                 self,
                 "Tool Setter Calibration Complete",
                 f"Setter reference Z measured as {val:.4f}.\n\n"
-                "The value is saved in CNCFusion settings. Use Settings -> "
+                "The value is saved in LinuxCNC settings. Use Settings -> "
                 "Probing & Locations -> Sync Probing to Machine INI before "
                 "running automatic tool probing.",
             )
@@ -1297,7 +1331,22 @@ except Exception as e:
         mdi_layout = QHBoxLayout()
         self.mdi_input = MDILineEdit()
         self.mdi_input.setPlaceholderText("MDI Command (e.g. M3 S1000) + Enter")
-        self.mdi_input.setStyleSheet("background-color: #111; color: #39FF14; font-family: 'Consolas', 'Courier New', monospace; font-size: 14px; border: 1px solid #555; border-radius: 3px; padding: 4px;")
+        self.mdi_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #111;
+                color: #39FF14;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 14px;
+                border: 1px solid #555;
+                border-radius: 3px;
+                padding: 4px;
+                selection-background-color: #39FF14;
+                selection-color: #111;
+            }
+            QLineEdit:focus {
+                border: 2px solid #39FF14;
+            }
+        """)
         
         self.btn_mdi_exec = QPushButton("Execute")
         self.btn_mdi_exec.setStyleSheet("QPushButton { background-color: #d35400; color: white; padding: 4px 10px; border-radius: 3px; font-weight: bold; } QPushButton:pressed { background-color: #a04000; }")
@@ -1888,7 +1937,7 @@ except Exception as e:
             default_dir = os.path.join(os.getcwd(), "ui_layouts")
             last_dir = self.settings.get_setting("PATHS", "last_ui_dir", default_dir)
             if not os.path.exists(last_dir): last_dir = default_dir
-            path, _ = QFileDialog.getOpenFileName(self, "Load Custom UI", last_dir, "Fusion UI (*.fusionui);;All Files (*)")
+            path, _ = QFileDialog.getOpenFileName(self, "Load Custom UI", last_dir, "LinuxCNC UI (*.linuxcncui);;All Files (*)")
             if not path: return
         
         try:
@@ -2098,7 +2147,7 @@ except Exception as e:
         # Translate virtual UI pins to their real-time command parameters
         if pin_name.startswith("ui."):
             clean_name = pin_name.replace("ui.", "").replace(".", "_").replace("-", "_")
-            target = f"fusion_ui.0.{clean_name}_cmd"
+            target = f"linuxcnc_ui.0.{clean_name}_cmd"
         else:
             target = pin_name
             
@@ -2237,7 +2286,11 @@ except Exception as e:
         """Start the loaded program through a typed command when enrolled."""
         agent_client = client_from_settings(self.settings)
         if agent_client is not None:
+            if self._program_sync_in_progress:
+                self.error_signal.emit("Cycle start is unavailable while the G-code program is still being uploaded.")
+                return
             try:
+                agent_client.open_program("active_program.ngc")
                 agent_client.machine_command("program_start", timeout=15.0)
             except Exception as error:
                 self.error_signal.emit(f"Cycle start failed: {error}")
@@ -2248,6 +2301,10 @@ except Exception as e:
 
     def select_machine_mode(self, mode):
         """Select Manual or Auto through the typed agent when enrolled."""
+        # Ignore mode changes while actively jogging to prevent interruption
+        if self.active_jogs:
+            return
+            
         agent_client = client_from_settings(self.settings)
         if agent_client is not None:
             try:
@@ -2295,10 +2352,7 @@ except Exception as e:
 
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
-        password = self.settings.get_setting("SSH", "password", "")
-        
-        if not ip or not user: return
-            
+
         escaped_mdi_cmd = mdi_cmd.replace("'", "\\'")
         py_code = f"""import linuxcnc, time, sys
 try:
@@ -2349,9 +2403,11 @@ except Exception as e:
     sys.stderr.write(f"An unexpected error occurred: {{e}}")
     sys.exit(1)
 """
-        def send_cmd():
+
+        if ip and user:
             self._send_b64_py_cmd(py_code)
-        threading.Thread(target=send_cmd, daemon=True).start()
+        else:
+            self._send_b64_py_cmd(py_code, urgent=True)
         print(f"[dashboard.py] Executed MDI: {mdi_cmd}")
 
     def run_mdi_from_input(self):
@@ -3122,59 +3178,74 @@ except Exception as e: pass"""
         password = self.settings.get_setting("SSH", "password", "")
         agent_client = client_from_settings(self.settings)
         if agent_client is None and (not ip or not user): return
+
+        self._program_sync_in_progress = True
+        self.program_sync_state.emit(True)
         
         def task():
-            if agent_client is not None:
-                try:
-                    agent_client.upload_content("gcode", "active_program.ngc", content.encode("utf-8"))
-                    agent_client.open_program("active_program.ngc")
-                except Exception as error:
-                    self.error_signal.emit(f"G-code upload failed: {error}")
-                return
+            try:
+                if agent_client is not None:
+                    try:
+                        agent_client.upload_content("gcode", "active_program.ngc", content.encode("utf-8"))
+                        agent_client.open_program("active_program.ngc")
+                    except Exception as error:
+                        self.error_signal.emit(f"G-code upload failed: {error}")
+                    return
 
-            remote_dir = f"/home/{user}/linuxcnc/nc_files"
-            remote_path = f"{remote_dir}/active_program.ngc"
+                remote_dir = f"/home/{user}/linuxcnc/nc_files"
+                remote_path = f"{remote_dir}/active_program.ngc"
             
-            if is_local_ip(ip):
-                try:
-                    os.makedirs(os.path.expanduser("~/linuxcnc/nc_files"), exist_ok=True)
-                    local_dest = os.path.expanduser("~/linuxcnc/nc_files/active_program.ngc")
-                    with open(local_dest, 'w', encoding='utf-8') as f:
-                        f.write(content)
-                    remote_path = local_dest
-                except Exception as error:
-                    self.error_signal.emit(f"G-code upload failed: {error}")
-                    return
-            elif HAS_PARAMIKO:
-                try:
-                    ssh = paramiko.SSHClient()
-                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    ssh.connect(ip, username=user, password=password, timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
-                    ssh.exec_command(f"mkdir -p {remote_dir}")
-                    sftp = ssh.open_sftp()
-                    with sftp.file(remote_path, 'w') as f:
-                        f.write(content.encode('utf-8'))
-                    sftp.close()
-                    ssh.close()
-                except Exception as error:
-                    self.error_signal.emit(f"G-code upload failed: {error}")
-                    return
-            else:
-                try:
-                    subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", f"mkdir -p {remote_dir}"], capture_output=True, timeout=5)
-                    with tempfile.NamedTemporaryFile(delete=False, mode='w', encoding='utf-8') as f:
-                        f.write(content)
-                        temp_path = f.name
-                    subprocess.run(["scp", "-o", "BatchMode=yes", temp_path, f"{user}@{ip}:{remote_path}"], capture_output=True, timeout=10)
-                    os.remove(temp_path)
-                except Exception as error:
-                    self.error_signal.emit(f"G-code upload failed: {error}")
-                    return
-                
-            py_code = f"import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.program_open('{remote_path}')\nexcept: pass"
-            self._send_b64_py_cmd(py_code)
+                if is_local_ip(ip):
+                    try:
+                        os.makedirs(os.path.expanduser("~/linuxcnc/nc_files"), exist_ok=True)
+                        local_dest = os.path.expanduser("~/linuxcnc/nc_files/active_program.ngc")
+                        with open(local_dest, 'w', encoding='utf-8') as f:
+                            f.write(content)
+                        remote_path = local_dest
+                    except Exception as error:
+                        self.error_signal.emit(f"G-code upload failed: {error}")
+                        return
+                elif HAS_PARAMIKO:
+                    try:
+                        ssh = paramiko.SSHClient()
+                        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                        ssh.connect(ip, username=user, password=password, timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
+                        ssh.exec_command(f"mkdir -p {remote_dir}")
+                        sftp = ssh.open_sftp()
+                        with sftp.file(remote_path, 'w') as f:
+                            f.write(content.encode('utf-8'))
+                        sftp.close()
+                        ssh.close()
+                    except Exception as error:
+                        self.error_signal.emit(f"G-code upload failed: {error}")
+                        return
+                else:
+                    try:
+                        subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", f"mkdir -p {remote_dir}"], capture_output=True, timeout=5)
+                        with tempfile.NamedTemporaryFile(delete=False, mode='w', encoding='utf-8') as f:
+                            f.write(content)
+                            temp_path = f.name
+                        subprocess.run(["scp", "-o", "BatchMode=yes", temp_path, f"{user}@{ip}:{remote_path}"], capture_output=True, timeout=10)
+                        os.remove(temp_path)
+                    except Exception as error:
+                        self.error_signal.emit(f"G-code upload failed: {error}")
+                        return
+                    
+                py_code = f"import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.program_open('{remote_path}')\nexcept: pass"
+                self._send_b64_py_cmd(py_code)
+            finally:
+                self.program_sync_state.emit(False)
             
         threading.Thread(target=task, daemon=True).start()
+
+    def _set_program_sync_state(self, in_progress):
+        self._program_sync_in_progress = in_progress
+        if hasattr(self, 'btn_cycle_start'):
+            self.btn_cycle_start.setEnabled(not in_progress)
+            self.btn_cycle_start.setToolTip(
+                "Waiting for the G-code program to finish uploading."
+                if in_progress else "Start the loaded G-code program."
+            )
 
     def _check_tool_change_request(self):
         """Detect a pending manual M6 and offer an automatic tool-length probe."""
@@ -3425,7 +3496,7 @@ except Exception: pass"""
             try: 
                 subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
             except Exception as e:
-                with open('/tmp/fusion_jog_debug.txt', 'a') as f: f.write(f"\\nURGENT SUBPROCESS EXCEPTION:\\n{e}\\n")
+                with open('/tmp/linuxcnc_jog_debug.txt', 'a') as f: f.write(f"\\nURGENT SUBPROCESS EXCEPTION:\\n{e}\\n")
             return
             
         if HAS_PARAMIKO:
@@ -4308,11 +4379,12 @@ except Exception as e:
         velocity *= direction
         
         is_gantry, is_4_axis, is_5_axis, total_joints = self.get_kinematics_info()
-        is_homed = self.mock_coords.get('HOMED_COUNT', 0) >= total_joints
-        
-        if is_gantry and axis == 'Y' and not is_homed:
+        homed_count = self.mock_coords.get('HOMED_COUNT')
+        is_homed = None if homed_count is None else int(homed_count) >= total_joints
+
+        if is_gantry and axis == 'Y' and is_homed is False:
             self.active_jog = None
-            QMessageBox.warning(self, "Homing Required", 
+            QMessageBox.warning(self, "Homing Required",
                                 f"Cannot manually jog the {axis} axis before homing!\n\n"
                                 f"Because your machine is configured as a Gantry (XYYZ), the {axis} axis uses dual independent motors. "
                                 f"Jogging them before the machine has executed its squaring sequence can rack and damage your linear rails.\n\n"
@@ -4350,7 +4422,7 @@ try:
             time.sleep(0.1)
         c.jog(linuxcnc.JOG_CONTINUOUS, True, {joint_idx}, {velocity})
 except Exception as e: 
-    with open('/tmp/fusion_jog_debug.txt', 'a') as f:
+    with open('/tmp/linuxcnc_jog_debug.txt', 'a') as f:
         f.write("JOG PRESS ERR: " + str(e) + "\\n")
 """
 
@@ -4394,7 +4466,7 @@ try:
     else:
         c.jog(linuxcnc.JOG_STOP, True, {joint_idx})
 except Exception as e:
-    with open('/tmp/fusion_jog_debug.txt', 'a') as f:
+    with open('/tmp/linuxcnc_jog_debug.txt', 'a') as f:
         f.write("JOG REL ERR: " + str(e) + "\\n")
 """
 
@@ -4425,6 +4497,12 @@ except Exception as e:
             return
 
         if self.is_estopped:
+            return
+
+        # Allow input fields (MDI, text editors, etc.) to receive keyboard input
+        focused_widget = self.focusWidget()
+        if focused_widget is not None and isinstance(focused_widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            super().keyPressEvent(event)
             return
 
         if client_from_settings(self.settings) is not None:

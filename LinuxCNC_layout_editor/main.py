@@ -20,11 +20,11 @@ from layout_editor_tab import LayoutEditorTab
 class EditorApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CNC Fusion Pro - UI Designer Edition (Mac)")
+        self.setWindowTitle("LinuxCNC Pro - UI Designer Edition (Mac)")
         self.resize(1200, 800)
         
         # Set Application Icon
-        self.setWindowIcon(QIcon("assets/CNCFusionWindowsicon.ico"))
+        self.setWindowIcon(QIcon("assets/LinuxCNCWindowsicon.ico"))
         
         # Initialize the Settings Manager for standalone
         self.settings = SettingsManager("editor_settings.ini")
@@ -113,13 +113,13 @@ class EditorApp(QMainWindow):
         
         help_menu = menu_bar.addMenu("&Help")
         
-        about_action = QAction("About CNC Fusion Pro...", self)
+        about_action = QAction("About LinuxCNC Pro...", self)
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
 
     def show_about_dialog(self):
         QMessageBox.about(self, "About", 
-                          "<h3>CNC Fusion Pro - UI Designer Edition</h3>"
+                          "<h3>LinuxCNC Pro - UI Designer Edition</h3>"
                           "<p>A standalone visual editor for crafting custom LinuxCNC operator panels and generating logic maps.</p>")
                           
     def update_system_monitor(self):
@@ -143,7 +143,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     # Fusion style looks great cross-platform
     app.setStyle("Fusion")
-    app.setWindowIcon(QIcon("assets/CNCFusionWindowsicon.ico"))
+    app.setWindowIcon(QIcon("assets/LinuxCNCWindowsicon.ico"))
     window = EditorApp()
     
     # Close PyInstaller splash screen once the UI is ready

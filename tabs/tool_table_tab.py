@@ -188,7 +188,7 @@ class ToolTableTab(QWidget):
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
         agent_client = client_from_settings(self.settings)
-        mach_name = self.settings.get_setting('MACHINE_CONFIG', 'name', 'CNCFusion')
+        mach_name = self.settings.get_setting('MACHINE_CONFIG', 'name', 'LinuxCNC')
 
         if agent_client is not None:
             try:
@@ -245,7 +245,7 @@ class ToolTableTab(QWidget):
         agent_client = client_from_settings(self.settings)
         if agent_client is None:
             return
-        mach_name = self.settings.get_setting('MACHINE_CONFIG', 'name', 'CNCFusion')
+        mach_name = self.settings.get_setting('MACHINE_CONFIG', 'name', 'LinuxCNC')
         try:
             result = agent_client.read_tool_table(f"{mach_name}/tool.tbl")
             out = result.get("content", "")
@@ -285,7 +285,7 @@ class ToolTableTab(QWidget):
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
         agent_client = client_from_settings(self.settings)
-        mach_name = self.settings.get_setting('MACHINE_CONFIG', 'name', 'CNCFusion')
+        mach_name = self.settings.get_setting('MACHINE_CONFIG', 'name', 'LinuxCNC')
         
         if agent_client is not None:
             remote_path = f"{mach_name}/tool.tbl"
@@ -305,7 +305,7 @@ class ToolTableTab(QWidget):
             
         self.settings.save_setting("PATHS", "last_tool_table_path", remote_path)
         
-        lines = ["; Auto-generated Tool Table from CNC Fusion Pro"]
+        lines = ["; Auto-generated Tool Table from LinuxCNC Pro"]
         for r in range(self.table.rowCount()):
             parts = []
             for col, (field, _) in enumerate(TOOL_COLUMNS):

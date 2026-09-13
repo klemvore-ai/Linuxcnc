@@ -192,7 +192,7 @@ if error_messages:
     result['telemetry']['ERROR'] = '\\n'.join(error_messages)[-4096:]
 print(json.dumps(result, separators=(',', ':')))"""
     result = subprocess.run(
-        ["/opt/CNCFusion/.venv/bin/python", "-c", status_program],
+        ["/opt/LinuxCNC/.venv/bin/python", "-c", status_program],
         capture_output=True,
         text=True,
         timeout=10,
@@ -224,7 +224,7 @@ time.sleep(30)
 print(json.dumps({"accepted": True, "command": "home_all"}, separators=(",", ":")))
 """
         result = subprocess.run(
-            ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+            ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
             capture_output=True,
             text=True,
             timeout=120,
@@ -253,7 +253,7 @@ for joint in range(4):
 print(json.dumps({"accepted": True, "command": "unhome_all"}, separators=(",", ":")))
 """
         result = subprocess.run(
-            ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+            ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
             capture_output=True,
             text=True,
             timeout=60,
@@ -280,7 +280,11 @@ def safe_poll(stat_obj, retries=5, delay=0.1):
     return False
 
 status = linuxcnc.stat()
-safe_poll(status)
+for attempt in range(10):
+    safe_poll(status)
+    if getattr(status, 'file', None):
+        break
+    time.sleep(0.1)
 if not getattr(status, 'file', None):
     raise RuntimeError('Cycle start requires a loaded program.')
 controller.mode(linuxcnc.MODE_AUTO)
@@ -289,7 +293,7 @@ controller.auto(linuxcnc.AUTO_RUN, 0)
 print(json.dumps({"accepted": True, "command": "program_start"}, separators=(",", ":")))
 """
         result = subprocess.run(
-            ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+            ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
             capture_output=True,
             text=True,
             timeout=10,
@@ -326,7 +330,7 @@ else:
 print(json.dumps({"accepted": True, "command": "program_pause_resume"}, separators=(",", ":")))
 """
         result = subprocess.run(
-            ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+            ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
             capture_output=True,
             text=True,
             timeout=10,
@@ -377,7 +381,7 @@ controller = linuxcnc.command()
 print(json.dumps({{"accepted": True, "command": {command!r}}}, separators=(",", ":")))
 """
         result = subprocess.run(
-            ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+            ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
             capture_output=True,
             text=True,
             timeout=5,
@@ -404,7 +408,7 @@ controller = linuxcnc.command()
 controller.wait_complete()
 print(json.dumps({{'accepted': True, 'command': {command!r}}}))"""
     result = subprocess.run(
-        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
         capture_output=True,
         text=True,
         timeout=120 if command in {"home_all", "unhome_all"} else 10,
@@ -432,7 +436,7 @@ controller.wait_complete()
 print(json.dumps({{"accepted": True, "axis": {axis!r}}}, separators=(",", ":")))
 """
     result = subprocess.run(
-        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
         capture_output=True,
         text=True,
         timeout=120,
@@ -483,7 +487,7 @@ controller.wait_complete(2)
 print(json.dumps({{"accepted": True, "action": {action!r}, "axis": {axis!r}}}, separators=(",", ":")))
 """
     result = subprocess.run(
-        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
         capture_output=True,
         text=True,
         timeout=5,
@@ -510,7 +514,7 @@ else:
 print(json.dumps({{"accepted": True, "action": {action!r}, "rpm": {rpm:.4f}}}, separators=(",", ":")))
 """
     result = subprocess.run(
-        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
         capture_output=True,
         text=True,
         timeout=5,
@@ -557,7 +561,7 @@ controller.wait_complete(5)
 print(json.dumps({{"accepted": True, "axis": {axis!r}, "value": {value:.4f}}}, separators=(",", ":")))
 """
     result = subprocess.run(
-        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
         capture_output=True,
         text=True,
         timeout=10,
@@ -582,7 +586,7 @@ if result == -1 or result == linuxcnc.RCS_ERROR:
 print(json.dumps({{"accepted": True, "path": {str(path)!r}}}, separators=(",", ":")))
 """
     result = subprocess.run(
-        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
         capture_output=True,
         text=True,
         timeout=15,
@@ -626,7 +630,7 @@ if controller.wait_complete(45) in (-1, getattr(linuxcnc, "RCS_ERROR", -1)):
 print(json.dumps({{"accepted": True, "operation": "probe_z"}}, separators=(",", ":")))
 """
     result = subprocess.run(
-        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
         capture_output=True,
         text=True,
         timeout=50,
@@ -673,7 +677,7 @@ if controller.wait_complete(45) in (-1, getattr(linuxcnc, "RCS_ERROR", -1)):
 print(json.dumps({{"accepted": True, "operation": "touch_off_z", "plate_thickness": {plate_thickness:.4f}, "retract": {retract:.4f}}}, separators=(",", ":")))
 """
     result = subprocess.run(
-        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
         capture_output=True,
         text=True,
         timeout=50,
@@ -703,7 +707,7 @@ if controller.wait_complete(45) in (-1, getattr(linuxcnc, "RCS_ERROR", -1)):
 print(json.dumps({{"accepted": True, "operation": "move_tool_setter"}}, separators=(",", ":")))
 """
     result = subprocess.run(
-        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
         capture_output=True,
         text=True,
         timeout=50,
@@ -721,7 +725,7 @@ def linuxcnc_run_subroutine(ocode):
 
     """Run one allowlisted O-code subroutine as a fixed MDI call."""
     # Run from the LinuxCNC config directory so SUBROUTINE_PATH resolves correctly
-    linuxcnc_config_dir = "/home/darrell/linuxcnc/configs/CNCFusion"
+    linuxcnc_config_dir = "/home/darrell/linuxcnc/configs/LinuxCNC"
     program = f"""import json, linuxcnc, time, subprocess, sys, os
 
 # Change to LinuxCNC config directory so relative paths work
@@ -785,7 +789,7 @@ if error:
 print(json.dumps({{"accepted": True, "ocode": {ocode!r}}}, separators=(",", ":")))
 """
     result = subprocess.run(
-        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
         capture_output=True,
         text=True,
         timeout=15,
@@ -866,7 +870,7 @@ wait_for_step("final retract")
 print(json.dumps({{"setter_height": setter_height}}, separators=(",", ":")))
 """
     result = subprocess.run(
-        ["/opt/CNCFusion/.venv/bin/python", "-c", program],
+        ["/opt/LinuxCNC/.venv/bin/python", "-c", program],
         capture_output=True,
         text=True,
         timeout=300,
@@ -995,7 +999,7 @@ def _serve_connection(connection):
 
 def main():
     """Start the local helper on the configured Unix-domain socket."""
-    parser = argparse.ArgumentParser(description="CNCFusion read-only HAL helper")
+    parser = argparse.ArgumentParser(description="LinuxCNC read-only HAL helper")
     parser.add_argument("--socket", required=True)
     args = parser.parse_args()
     serve(args.socket)

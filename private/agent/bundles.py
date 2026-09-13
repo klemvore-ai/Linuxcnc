@@ -30,7 +30,7 @@ def bundle_status(config_root, bundle_name):
                 digest = hashlib.sha256(path.read_bytes()).hexdigest()
                 files.append({"name": path.name, "sha256": digest, "size": path.stat().st_size})
     names = {item["name"] for item in files}
-    approval_path = directory / ".cncfusion-approved"
+    approval_path = directory / ".linuxcnc-approved"
     return {
         "bundle": bundle_name,
         "files": files,
@@ -47,7 +47,7 @@ def approve_bundle(config_root, bundle_name):
     if not status["complete"]:
         raise BundleError("A bundle requires at least one INI and one HAL file.")
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / ".cncfusion-approved").write_text(
+    (directory / ".linuxcnc-approved").write_text(
         json.dumps({"bundle": bundle_name, "approved": True}),
         encoding="utf-8",
     )

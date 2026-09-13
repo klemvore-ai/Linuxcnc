@@ -135,7 +135,7 @@ class RemoteLifecycleTests(unittest.TestCase):
         connection = MagicMock()
         connection.__enter__.return_value = connection
         connection.recv.return_value = b'{"output":"pins","error":""}\n'
-        runtime = LinuxCNCRuntime(hal_helper_socket="/run/cncfusion/hal-helper.sock")
+        runtime = LinuxCNCRuntime(hal_helper_socket="/run/linuxcnc/hal-helper.sock")
 
         with (
             patch("agent.linuxcnc_runtime.socket.AF_UNIX", 1, create=True),
@@ -144,14 +144,14 @@ class RemoteLifecycleTests(unittest.TestCase):
             result = runtime.show_hal_pins()
 
         self.assertEqual(result, {"output": "pins", "error": ""})
-        connection.connect.assert_called_once_with("/run/cncfusion/hal-helper.sock")
+        connection.connect.assert_called_once_with("/run/linuxcnc/hal-helper.sock")
         connection.sendall.assert_called_once_with(b"show_hal_pins\n")
 
     def test_hal_component_inspection_uses_local_fixed_operation_helper(self):
         connection = MagicMock()
         connection.__enter__.return_value = connection
         connection.recv.return_value = b'{"output":"components","error":""}\n'
-        runtime = LinuxCNCRuntime(hal_helper_socket="/run/cncfusion/hal-helper.sock")
+        runtime = LinuxCNCRuntime(hal_helper_socket="/run/linuxcnc/hal-helper.sock")
 
         with (
             patch("agent.linuxcnc_runtime.socket.AF_UNIX", 1, create=True),
@@ -302,7 +302,7 @@ class RemoteLifecycleTests(unittest.TestCase):
         connection = MagicMock()
         connection.__enter__.return_value = connection
         connection.recv.return_value = b'{"machine_state":{"running":true,"idle":true},"telemetry":{"X":1.0},"error":""}\n'
-        runtime = LinuxCNCRuntime(hal_helper_socket="/run/cncfusion/hal-helper.sock")
+        runtime = LinuxCNCRuntime(hal_helper_socket="/run/linuxcnc/hal-helper.sock")
 
         with (
             patch("agent.linuxcnc_runtime.socket.AF_UNIX", 1, create=True),
@@ -319,7 +319,7 @@ class RemoteLifecycleTests(unittest.TestCase):
         connection = MagicMock()
         connection.__enter__.return_value = connection
         connection.recv.return_value = b'{"accepted":true,"command":"estop_reset"}\n'
-        runtime = LinuxCNCRuntime(hal_helper_socket="/run/cncfusion/hal-helper.sock")
+        runtime = LinuxCNCRuntime(hal_helper_socket="/run/linuxcnc/hal-helper.sock")
 
         with (
             patch("agent.linuxcnc_runtime.socket.AF_UNIX", 1, create=True),
@@ -355,7 +355,7 @@ class RemoteLifecycleTests(unittest.TestCase):
 
         self.assertEqual(status["machine_state"]["running"], True)
         self.assertEqual(status["telemetry"]["X"], 1.0)
-        self.assertEqual(run.call_args.args[0][:2], ["/opt/CNCFusion/.venv/bin/python", "-c"])
+        self.assertEqual(run.call_args.args[0][:2], ["/opt/LinuxCNC/.venv/bin/python", "-c"])
 
     def test_mesa_identification_uses_structured_request(self):
         client = MachineAgentClient.__new__(MachineAgentClient)

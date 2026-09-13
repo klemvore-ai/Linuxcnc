@@ -1,1 +1,1 @@
-"""Private machine-specific implementation layer for CNCFusion."""
+"""Private machine-specific implementation layer for LinuxCNC."""

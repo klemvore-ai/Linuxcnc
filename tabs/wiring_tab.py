@@ -246,11 +246,11 @@ class WiringTab(QWidget):
             last_dir = default_dir
             os.makedirs(last_dir, exist_ok=True)
             
-        path, _ = QFileDialog.getSaveFileName(self, "Save Project", last_dir, "Fusion Project (*.fusion)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save Project", last_dir, "LinuxCNC Project (*.linuxcnc)")
         if not path: return
         
-        if not path.endswith('.fusion'):
-            path += '.fusion'
+        if not path.endswith('.linuxcnc'):
+            path += '.linuxcnc'
         
         settings.save_setting("PATHS", "last_project_dir", os.path.dirname(path))
         
@@ -270,7 +270,7 @@ class WiringTab(QWidget):
             last_dir = default_dir
             os.makedirs(last_dir, exist_ok=True)
             
-        path, _ = QFileDialog.getOpenFileName(self, "Load Project", last_dir, "Fusion Project (*.fusion);;All Files (*)")
+        path, _ = QFileDialog.getOpenFileName(self, "Load Project", last_dir, "LinuxCNC Project (*.linuxcnc);;All Files (*)")
         if not path: return
         
         settings.save_setting("PATHS", "last_project_dir", os.path.dirname(path))
@@ -300,16 +300,16 @@ class WiringTab(QWidget):
 
     def build_hal_header(self, ui_pins):
         if not ui_pins: return []
-        lines = ["# --- Auto-Generated UI Virtual Pins ---", "loadrt fusion_ui", ""]
+        lines = ["# --- Auto-Generated UI Virtual Pins ---", "loadrt linuxcnc_ui", ""]
         for hal_name in ui_pins:
             clean_name = hal_name.replace("ui.", "").replace(".", "_").replace("-", "_")
-            lines.append(f"alias pin fusion_ui.0.{clean_name} {hal_name}")
+            lines.append(f"alias pin linuxcnc_ui.0.{clean_name} {hal_name}")
         lines.append("")
         return lines
 
     def build_comp_file(self, ui_pins):
         if not ui_pins: return ""
-        lines = ['component fusion_ui "CNC Fusion Virtual UI Pins";', '']
+        lines = ['component linuxcnc_ui "LinuxCNC Virtual UI Pins";', '']
         for hal_name, (is_out, ptype) in ui_pins.items():
             clean_name = hal_name.replace("ui.", "").replace(".", "_").replace("-", "_")
             if is_out:
@@ -372,7 +372,7 @@ class WiringTab(QWidget):
         ui_pins = self.get_ui_pins()
         comp_code = self.build_comp_file(ui_pins)
         if comp_code:
-            comp_path = os.path.join(os.path.dirname(path), "fusion_ui.comp")
+            comp_path = os.path.join(os.path.dirname(path), "linuxcnc_ui.comp")
             try:
                 with open(comp_path, 'w') as f: f.write(comp_code)
                 self.console.append(f"Generated UI dummy component: {comp_path}")
@@ -593,7 +593,7 @@ class WiringTab(QWidget):
     def preview_hal(self):
         ui_pins = self.get_ui_pins()
         processed_wires = set()
-        hal_lines = ["# --- Auto-Generated CNC Fusion HAL Output ---"]
+        hal_lines = ["# --- Auto-Generated LinuxCNC HAL Output ---"]
         hal_lines.extend(self.build_hal_header(ui_pins))
         
         for item in self.canvas.scene.items():
@@ -698,7 +698,7 @@ class WiringTab(QWidget):
 
         ui_pins = self.get_ui_pins()
         processed_wires = set()
-        hal_lines = ["# --- Auto-Generated CNC Fusion HAL Output ---"]
+        hal_lines = ["# --- Auto-Generated LinuxCNC HAL Output ---"]
         hal_lines.extend(self.build_hal_header(ui_pins))
         
         for item in self.canvas.scene.items():
@@ -762,7 +762,7 @@ class WiringTab(QWidget):
         # Re-capture the text in case the user made manual edits in the preview window
         hal_content = preview_text.toPlainText()
         
-        mach_name = settings.get_setting('MACHINE_CONFIG', 'name', 'CNCFusion')
+        mach_name = settings.get_setting('MACHINE_CONFIG', 'name', 'LinuxCNC')
         default_path = settings.get_setting("DEPLOY", "remote_path", f"~/linuxcnc/configs/{mach_name}/custom_postgui.hal")
         
         remote_path, ok = QInputDialog.getText(self, "Deploy to LinuxCNC", 
@@ -774,8 +774,8 @@ class WiringTab(QWidget):
         
         comp_code = self.build_comp_file(ui_pins)
         if comp_code:
-            self.console.append("\n🚀 Compiling fusion_ui dummy component on remote machine...")
-            comp_cmd = f"cat << 'EOF' > /tmp/fusion_ui.comp\n{comp_code}\nEOF\nsudo halcompile --install /tmp/fusion_ui.comp"
+            self.console.append("\n🚀 Compiling linuxcnc_ui dummy component on remote machine...")
+            comp_cmd = f"cat << 'EOF' > /tmp/linuxcnc_ui.comp\n{comp_code}\nEOF\nsudo halcompile --install /tmp/linuxcnc_ui.comp"
             out, err = mesa_tab.execute_remote_command(comp_cmd, use_sudo=True)
             if err and "error" in err.lower():
                 QMessageBox.critical(self, "Compile Error", f"Failed to compile UI component on remote machine:\n{err}")

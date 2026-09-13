@@ -1,6 +1,6 @@
 # Dashboard control safety checklist
 
-This checklist reflects the current LinuxCNC/CNCFusion boundary: LinuxCNC owns the real machine runtime and safety loop, while CNCFusion remains a bounded operator UI and workflow layer.
+This checklist reflects the current LinuxCNC/LinuxCNC boundary: LinuxCNC owns the real machine runtime and safety loop, while LinuxCNC remains a bounded operator UI and workflow layer.
 
 ## Rule of thumb
 

@@ -1,8 +1,8 @@
-# CNCFusion Scope Boundary
+# LinuxCNC Scope Boundary
 
 ## Goal
 
-Keep CNCFusion honest: it is a LinuxCNC frontend and configuration tool, not a full machine operating system or remote-control platform.
+Keep LinuxCNC honest: it is a LinuxCNC frontend and configuration tool, not a full machine operating system or remote-control platform.
 
 ## Boundary
 
@@ -15,9 +15,9 @@ LinuxCNC owns:
 - machine safety and limits
 - the actual runtime control loop
 
-### CNCFusion owns the GUI and workflow layer
+### LinuxCNC owns the GUI and workflow layer
 
-CNCFusion may own:
+LinuxCNC may own:
 
 - the dashboard UI
 - G-code management
@@ -37,4 +37,4 @@ The private layer may own:
 - privileged configuration activation
 - machine-side agent services and helpers
 
-These features should not be treated as normal public CNCFusion functionality and should remain out of the default public release path.
+These features should not be treated as normal public LinuxCNC functionality and should remain out of the default public release path.

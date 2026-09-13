@@ -111,7 +111,7 @@ class LinuxCNCConfigRenderer:
         board = config.hardware.board_model.lower().replace("eu", "e")
         joints = len(config.joints)
         lines = [
-            f"# CNCFusion HAL configuration for {config.name}",
+            f"# LinuxCNC HAL configuration for {config.name}",
             "loadrt [KINS]KINEMATICS",
             f"loadrt [EMCMOT]EMCMOT servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints={joints}",
             "loadrt hostmot2",

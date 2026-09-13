@@ -1,4 +1,4 @@
-# CNCFusion Architecture Guide
+# LinuxCNC Architecture Guide
 
 This document describes where behavior belongs and how the application is intended to evolve. The project is being refactored incrementally; existing Qt screens and LinuxCNC file formats remain supported while services are extracted underneath them.
 
@@ -21,7 +21,7 @@ The LinuxCNC host owns the deterministic loop:
 - E-stop, limits, watchdogs, and fault behavior
 - Motor and axis feedback
 
-CNCFusion communicates over the management interface, which may be Wi-Fi or a second NIC. Management traffic covers monitoring, G-code upload, configuration deployment, diagnostics, and approved runtime-safe tuning. Loss of Wi-Fi must not compromise the local control loop.
+LinuxCNC communicates over the management interface, which may be Wi-Fi or a second NIC. Management traffic covers monitoring, G-code upload, configuration deployment, diagnostics, and approved runtime-safe tuning. Loss of Wi-Fi must not compromise the local control loop.
 
 ## Layers
 
@@ -43,7 +43,7 @@ LinuxCNC local runtime and real-time hardware
 - [tabs/setup_wizard.py](../tabs/setup_wizard.py) contains the additive setup wizard. Its current pages collect machine basics, axis motion limits, Mesa identity, control/management network role, essential I/O/safety signals, and a generated INI/HAL review preview, then save them through the existing settings schema. Future pages will add feedback and deployment.
 - [tabs/mesa_util_tab.py](../tabs/mesa_util_tab.py) contains Mesa discovery and diagnostics. Mesa-specific mapping belongs in a hardware backend, not in the generic machine model.
 - [tabs/wiring_tab.py](../tabs/wiring_tab.py) manages visual HAL components, pins, wires, and project persistence.
-- [tabs/layout_editor_tab.py](../tabs/layout_editor_tab.py) manages operator layouts and `.fusionui` persistence.
+- [tabs/layout_editor_tab.py](../tabs/layout_editor_tab.py) manages operator layouts and `.linuxcncui` persistence.
 - [settings_manager.py](../settings_manager.py) owns INI settings persistence and migration. Credentials must not remain plaintext in this file.
 
 ### Shared lifecycle services
@@ -157,7 +157,7 @@ Backend adapters map these concepts to Mesa pins, EtherCAT PDOs, or another Linu
 
 ## Configuration files
 
-Generated output must remain usable by LinuxCNC without CNCFusion:
+Generated output must remain usable by LinuxCNC without LinuxCNC:
 
 - `.ini` machine configuration
 - `.hal` core and hardware logic
@@ -166,7 +166,7 @@ Generated output must remain usable by LinuxCNC without CNCFusion:
 - `linuxcnc.var`
 - G-code files under `nc_files/`
 
-CNCFusion project metadata may preserve wizard state, but LinuxCNC must not require that metadata to start. Generated and user-maintained content must eventually be tracked separately so regeneration does not overwrite custom HAL logic.
+LinuxCNC project metadata may preserve wizard state, but LinuxCNC must not require that metadata to start. Generated and user-maintained content must eventually be tracked separately so regeneration does not overwrite custom HAL logic.
 
 ## Security rules
 
@@ -204,7 +204,7 @@ The machine agent applies role checks in its request handler. Certificates may b
 
 For the current operator dashboard classification, see [SAFETY_CONTROL_CHECKLIST.md](SAFETY_CONTROL_CHECKLIST.md). It records which controls are safe, which require the secure machine agent, and which remain explicitly unsafe.
 
-The LinuxCNC host deployment template is [agent/cncfusion-agent.service](../agent/cncfusion-agent.service), with deployment variables shown in [agent/agent.env.example](../agent/agent.env.example). The agent should bind to the management interface, while the control NIC remains dedicated to Mesa/EtherCAT real-time traffic. Service hardening and firewall configuration are required before production use.
+The LinuxCNC host deployment template is [agent/linuxcnc-agent.service](../agent/linuxcnc-agent.service), with deployment variables shown in [agent/agent.env.example](../agent/agent.env.example). The agent should bind to the management interface, while the control NIC remains dedicated to Mesa/EtherCAT real-time traffic. Service hardening and firewall configuration are required before production use.
 
 The operator-facing installation walkthrough is [docs/LINUXCNC_BEGINNER_SETUP.md](LINUXCNC_BEGINNER_SETUP.md). It assumes little Linux experience, labels command locations, verifies the project copy before installation, and explains the `requirements.txt` error without requiring users to understand Python packaging internals.
 

@@ -1,6 +1,6 @@
 # Secure Agent Setup
 
-The CNCFusion secure agent is public source code. It uses mutual TLS (mTLS), so every
+The LinuxCNC secure agent is public source code. It uses mutual TLS (mTLS), so every
 machine installation must create and manage its own certificate authority, server
 identity, workstation client identity, and allowed client fingerprint.
 
@@ -20,12 +20,12 @@ Stop and investigate any unexpected motion.
 
 ## Install and Enroll
 
-On the LinuxCNC host, use the installer to create the `cncfusion` service account,
+On the LinuxCNC host, use the installer to create the `linuxcnc` service account,
 local runtime directories, certificate authority, server certificate, client
 certificate, and agent service configuration:
 
 ```bash
-sudo python3 private/installer/install.py --source /path/to/CNCFusion
+sudo python3 private/installer/install.py --source /path/to/LinuxCNC
 ```
 
 The installer prints the SHA-256 fingerprint of the generated client certificate and

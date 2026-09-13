@@ -31,11 +31,11 @@ def main():
     print("The secure agent API doesn't support single-file deployment.")
     print("Options:")
     print("  1. Run full app deployment (Settings -> Deploy), then on machine:")
-    print("     sudo systemctl start cncfusion-apply-update")
+    print("     sudo systemctl start linuxcnc-apply-update")
     print()
     print("  2. Or use SCP to copy just this file:")
     print(f"     scp {helper_path} <USER>@<MACHINE_MANAGEMENT_HOST>:/tmp/hal_helper.py")
-    print("     ssh <USER>@<MACHINE_MANAGEMENT_HOST> 'sudo cp /tmp/hal_helper.py /opt/CNCFusion/agent/hal_helper.py && sudo systemctl restart cncfusion-hal-helper'")
+    print("     ssh <USER>@<MACHINE_MANAGEMENT_HOST> 'sudo cp /tmp/hal_helper.py /opt/LinuxCNC/agent/hal_helper.py && sudo systemctl restart linuxcnc-hal-helper'")
     print()
 
 if __name__ == "__main__":

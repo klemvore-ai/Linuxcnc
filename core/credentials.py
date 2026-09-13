@@ -10,7 +10,7 @@ class CredentialStoreError(RuntimeError):
 class CredentialStore:
     """Store secrets through the operating system's configured keyring."""
 
-    def __init__(self, service_name="CNCFusion", keyring_module=None):
+    def __init__(self, service_name="LinuxCNC", keyring_module=None):
         """Create a store using an injected or optional keyring implementation."""
         self.service_name = service_name
         self.keyring = keyring_module

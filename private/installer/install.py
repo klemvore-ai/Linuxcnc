@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CNCFusion complete installer for LinuxCNC machines.
+"""LinuxCNC complete installer for LinuxCNC machines.
 
 This script sets up:
 - Directories and permissions
@@ -24,8 +24,8 @@ import tempfile
 from pathlib import Path
 
 
-class CNCFusionInstaller:
-    """Complete CNCFusion installation for LinuxCNC machines."""
+class LinuxCNCInstaller:
+    """Complete LinuxCNC installation for LinuxCNC machines."""
 
     def __init__(self, config_path=None, dry_run=False):
         self.dry_run = dry_run
@@ -36,16 +36,16 @@ class CNCFusionInstaller:
     def _load_paths(self, config_path):
         """Load paths from config file or use defaults."""
         default_paths = {
-            "CNCFUSION_CONFIG_ROOT": "/home/operator/linuxcnc/configs",
-            "CNCFUSION_GCODE_ROOT": "/home/operator/linuxcnc/nc_files",
-            "CNCFUSION_AGENT_ROOT": "/opt/CNCFusion",
-            "CNCFUSION_STAGING_DIR": "/var/lib/cncfusion/updates",
-            "CNCFUSION_CERTS_DIR": "/etc/cncfusion",
-            "CNCFUSION_LINUXCNC_USER": "operator",
-            "CNCFUSION_AGENT_USER": "cncfusion",
-            "CNCFUSION_AGENT_GROUP": "cncfusion",
-            "CNCFUSION_AGENT_BIND": "0.0.0.0",
-            "CNCFUSION_AGENT_PORT": "9443",
+            "LINUXCNC_CONFIG_ROOT": "/home/operator/linuxcnc/configs",
+            "LINUXCNC_GCODE_ROOT": "/home/operator/linuxcnc/nc_files",
+            "LINUXCNC_AGENT_ROOT": "/opt/LinuxCNC",
+            "LINUXCNC_STAGING_DIR": "/var/lib/linuxcnc/updates",
+            "LINUXCNC_CERTS_DIR": "/etc/linuxcnc",
+            "LINUXCNC_LINUXCNC_USER": "operator",
+            "LINUXCNC_AGENT_USER": "linuxcnc",
+            "LINUXCNC_AGENT_GROUP": "linuxcnc",
+            "LINUXCNC_AGENT_BIND": "0.0.0.0",
+            "LINUXCNC_AGENT_PORT": "9443",
         }
 
         if config_path and os.path.exists(config_path):
@@ -117,9 +117,9 @@ class CNCFusionInstaller:
         """Create required users and groups."""
         print("\n=== Creating Users and Groups ===")
 
-        agent_user = self.paths["CNCFUSION_AGENT_USER"]
-        agent_group = self.paths["CNCFUSION_AGENT_GROUP"]
-        linuxcnc_user = self.paths["CNCFUSION_LINUXCNC_USER"]
+        agent_user = self.paths["LINUXCNC_AGENT_USER"]
+        agent_group = self.paths["LINUXCNC_AGENT_GROUP"]
+        linuxcnc_user = self.paths["LINUXCNC_LINUXCNC_USER"]
 
         # Create agent group
         self._run(["groupadd", "-f", agent_group])
@@ -145,11 +145,11 @@ class CNCFusionInstaller:
         print("\n=== Creating Directories ===")
 
         dirs = [
-            (self.paths["CNCFUSION_AGENT_ROOT"], 0o755, "root", "root"),
-            (self.paths["CNCFUSION_CERTS_DIR"], 0o700, "root", "root"),
-            (self.paths["CNCFUSION_STAGING_DIR"], 0o755, self.paths["CNCFUSION_AGENT_USER"], self.paths["CNCFUSION_AGENT_GROUP"]),
-            (os.path.join(self.paths["CNCFUSION_STAGING_DIR"], "tmp"), 0o755, self.paths["CNCFUSION_AGENT_USER"], self.paths["CNCFUSION_AGENT_GROUP"]),
-            ("/run/cncfusion", 0o755, self.paths["CNCFUSION_LINUXCNC_USER"], self.paths["CNCFUSION_AGENT_GROUP"]),
+            (self.paths["LINUXCNC_AGENT_ROOT"], 0o755, "root", "root"),
+            (self.paths["LINUXCNC_CERTS_DIR"], 0o700, "root", "root"),
+            (self.paths["LINUXCNC_STAGING_DIR"], 0o755, self.paths["LINUXCNC_AGENT_USER"], self.paths["LINUXCNC_AGENT_GROUP"]),
+            (os.path.join(self.paths["LINUXCNC_STAGING_DIR"], "tmp"), 0o755, self.paths["LINUXCNC_AGENT_USER"], self.paths["LINUXCNC_AGENT_GROUP"]),
+            ("/run/linuxcnc", 0o755, self.paths["LINUXCNC_LINUXCNC_USER"], self.paths["LINUXCNC_AGENT_GROUP"]),
         ]
 
         for path, mode, owner, group in dirs:
@@ -165,7 +165,7 @@ class CNCFusionInstaller:
         """Generate CA and server/client certificates."""
         print("\n=== Generating Certificates ===")
 
-        certs_dir = self.paths["CNCFUSION_CERTS_DIR"]
+        certs_dir = self.paths["LINUXCNC_CERTS_DIR"]
         ca_key = os.path.join(certs_dir, "ca.key")
         ca_crt = os.path.join(certs_dir, "ca.crt")
         server_key = os.path.join(certs_dir, "server.key")
@@ -179,7 +179,7 @@ class CNCFusionInstaller:
             "openssl", "req", "-x509", "-newkey", "rsa:4096",
             "-keyout", ca_key, "-out", ca_crt,
             "-days", "3650", "-nodes",
-            "-subj", f"/CN=CNCFusion-CA-{self.hostname}"
+            "-subj", f"/CN=LinuxCNC-CA-{self.hostname}"
         ])
 
         # Generate server certificate
@@ -202,7 +202,7 @@ class CNCFusionInstaller:
         self._run([
             "openssl", "req", "-newkey", "rsa:2048",
             "-keyout", client_key, "-out", client_csr,
-            "-nodes", "-subj", f"/CN=cncfusion-client-{self.hostname}"
+            "-nodes", "-subj", f"/CN=linuxcnc-client-{self.hostname}"
         ])
         self._run([
             "openssl", "x509", "-req", "-in", client_csr,
@@ -242,7 +242,7 @@ class CNCFusionInstaller:
         """Install the agent application."""
         print("\n=== Installing Agent Application ===")
 
-        agent_root = self.paths["CNCFUSION_AGENT_ROOT"]
+        agent_root = self.paths["LINUXCNC_AGENT_ROOT"]
 
         # Copy agent files
         agent_files = [
@@ -269,7 +269,7 @@ class CNCFusionInstaller:
         # Create __init__.py for agent package
         init_path = os.path.join(agent_root, "agent", "__init__.py")
         if not os.path.exists(init_path):
-            self._write_file(init_path, '"""CNCFusion machine agent package."""\n', mode=0o644, owner="root", group="root")
+            self._write_file(init_path, '"""LinuxCNC machine agent package."""\n', mode=0o644, owner="root", group="root")
 
         print(f"Installed agent to {agent_root}")
 
@@ -279,36 +279,36 @@ class CNCFusionInstaller:
 
         # Agent service
         agent_service = f"""[Unit]
-Description=CNCFusion LinuxCNC Machine Agent
+Description=LinuxCNC Machine Agent
 After=network-online.target
 Wants=network-online.target
-Requires=cncfusion-hal-helper.service
-After=cncfusion-hal-helper.service
+Requires=linuxcnc-hal-helper.service
+After=linuxcnc-hal-helper.service
 
 [Service]
 Type=simple
-User={self.paths["CNCFUSION_AGENT_USER"]}
-Group={self.paths["CNCFUSION_AGENT_GROUP"]}
-WorkingDirectory={self.paths["CNCFUSION_AGENT_ROOT"]}
-EnvironmentFile={self.paths["CNCFUSION_CERTS_DIR"]}/agent.env
-Environment=TMPDIR={self.paths["CNCFUSION_STAGING_DIR"]}/tmp
-ExecStart={self.paths["CNCFUSION_AGENT_ROOT"]}/.venv/bin/python -m agent \\
-    --bind ${{CNCFUSION_AGENT_BIND}} \\
-    --port ${{CNCFUSION_AGENT_PORT}} \\
-    --ca-file {self.paths["CNCFUSION_CERTS_DIR"]}/ca.crt \\
-    --certificate-file {self.paths["CNCFUSION_CERTS_DIR"]}/server.crt \\
-    --private-key-file {self.paths["CNCFUSION_CERTS_DIR"]}/server.key \\
-    --config-root {self.paths["CNCFUSION_CONFIG_ROOT"]} \\
-    --gcode-root {self.paths["CNCFUSION_GCODE_ROOT"]} \\
-    --hal-helper-socket /run/cncfusion/hal-helper.sock \\
-    --client-fingerprint ${{CNCFUSION_CLIENT_FINGERPRINT}}
+User={self.paths["LINUXCNC_AGENT_USER"]}
+Group={self.paths["LINUXCNC_AGENT_GROUP"]}
+WorkingDirectory={self.paths["LINUXCNC_AGENT_ROOT"]}
+EnvironmentFile={self.paths["LINUXCNC_CERTS_DIR"]}/agent.env
+Environment=TMPDIR={self.paths["LINUXCNC_STAGING_DIR"]}/tmp
+ExecStart={self.paths["LINUXCNC_AGENT_ROOT"]}/.venv/bin/python -m agent \\
+    --bind ${{LINUXCNC_AGENT_BIND}} \\
+    --port ${{LINUXCNC_AGENT_PORT}} \\
+    --ca-file {self.paths["LINUXCNC_CERTS_DIR"]}/ca.crt \\
+    --certificate-file {self.paths["LINUXCNC_CERTS_DIR"]}/server.crt \\
+    --private-key-file {self.paths["LINUXCNC_CERTS_DIR"]}/server.key \\
+    --config-root {self.paths["LINUXCNC_CONFIG_ROOT"]} \\
+    --gcode-root {self.paths["LINUXCNC_GCODE_ROOT"]} \\
+    --hal-helper-socket /run/linuxcnc/hal-helper.sock \\
+    --client-fingerprint ${{LINUXCNC_CLIENT_FINGERPRINT}}
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths={self.paths["CNCFUSION_STAGING_DIR"]} {self.paths["CNCFUSION_STAGING_DIR"]}/tmp {self.paths["CNCFUSION_CONFIG_ROOT"]} {self.paths["CNCFUSION_GCODE_ROOT"]}
+ReadWritePaths={self.paths["LINUXCNC_STAGING_DIR"]} {self.paths["LINUXCNC_STAGING_DIR"]}/tmp {self.paths["LINUXCNC_CONFIG_ROOT"]} {self.paths["LINUXCNC_GCODE_ROOT"]}
 
 [Install]
 WantedBy=multi-user.target
@@ -316,22 +316,22 @@ WantedBy=multi-user.target
 
         # Helper service
         helper_service = f"""[Unit]
-Description=CNCFusion HAL Helper
-Before=cncfusion-agent.service
+Description=LinuxCNC HAL Helper
+Before=linuxcnc-agent.service
 
 [Service]
 Type=simple
-User={self.paths["CNCFUSION_LINUXCNC_USER"]}
-Group={self.paths["CNCFUSION_AGENT_GROUP"]}
-WorkingDirectory={self.paths["CNCFUSION_AGENT_ROOT"]}
-ExecStart={self.paths["CNCFUSION_AGENT_ROOT"]}/.venv/bin/python -m agent.hal_helper --socket /run/cncfusion/hal-helper.sock
+User={self.paths["LINUXCNC_LINUXCNC_USER"]}
+Group={self.paths["LINUXCNC_AGENT_GROUP"]}
+WorkingDirectory={self.paths["LINUXCNC_AGENT_ROOT"]}
+ExecStart={self.paths["LINUXCNC_AGENT_ROOT"]}/.venv/bin/python -m agent.hal_helper --socket /run/linuxcnc/hal-helper.sock
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/run/cncfusion
+ReadWritePaths=/run/linuxcnc
 
 [Install]
 WantedBy=multi-user.target
@@ -339,18 +339,18 @@ WantedBy=multi-user.target
 
         # Apply update service
         apply_service = f"""[Unit]
-Description=CNCFusion Application Update Applier
+Description=LinuxCNC Application Update Applier
 After=local-fs.target
 
 [Service]
 Type=oneshot
 User=root
 Group=root
-WorkingDirectory={self.paths["CNCFUSION_AGENT_ROOT"]}
-Environment=TMPDIR={self.paths["CNCFUSION_STAGING_DIR"]}/tmp
-ExecStart={self.paths["CNCFUSION_AGENT_ROOT"]}/.venv/bin/python -m agent.apply_update \\
-    --staging-dir {self.paths["CNCFUSION_STAGING_DIR"]} \\
-    --agent-root {self.paths["CNCFUSION_AGENT_ROOT"]}
+WorkingDirectory={self.paths["LINUXCNC_AGENT_ROOT"]}
+Environment=TMPDIR={self.paths["LINUXCNC_STAGING_DIR"]}/tmp
+ExecStart={self.paths["LINUXCNC_AGENT_ROOT"]}/.venv/bin/python -m agent.apply_update \\
+    --staging-dir {self.paths["LINUXCNC_STAGING_DIR"]} \\
+    --agent-root {self.paths["LINUXCNC_AGENT_ROOT"]}
 TimeoutStartSec=300
 
 [Install]
@@ -358,9 +358,9 @@ WantedBy=multi-user.target
 """
 
         services_dir = "/etc/systemd/system"
-        self._write_file(os.path.join(services_dir, "cncfusion-agent.service"), agent_service, mode=0o644)
-        self._write_file(os.path.join(services_dir, "cncfusion-hal-helper.service"), helper_service, mode=0o644)
-        self._write_file(os.path.join(services_dir, "cncfusion-apply-update.service"), apply_service, mode=0o644)
+        self._write_file(os.path.join(services_dir, "linuxcnc-agent.service"), agent_service, mode=0o644)
+        self._write_file(os.path.join(services_dir, "linuxcnc-hal-helper.service"), helper_service, mode=0o644)
+        self._write_file(os.path.join(services_dir, "linuxcnc-apply-update.service"), apply_service, mode=0o644)
 
         # Reload systemd
         self._run(["systemctl", "daemon-reload"])
@@ -371,20 +371,20 @@ WantedBy=multi-user.target
         """Generate the agent environment file."""
         print("\n=== Generating Agent Configuration ===")
 
-        env_content = f"""# CNCFusion Agent Environment
+        env_content = f"""# LinuxCNC Agent Environment
 # Generated by installer
 
-CNCFUSION_AGENT_BIND={self.paths["CNCFUSION_AGENT_BIND"]}
-CNCFUSION_AGENT_PORT={self.paths["CNCFUSION_AGENT_PORT"]}
-CNCFUSION_CLIENT_FINGERPRINT={fingerprint}
+LINUXCNC_AGENT_BIND={self.paths["LINUXCNC_AGENT_BIND"]}
+LINUXCNC_AGENT_PORT={self.paths["LINUXCNC_AGENT_PORT"]}
+LINUXCNC_CLIENT_FINGERPRINT={fingerprint}
 
 # Paths
-CNCFUSION_CONFIG_ROOT={self.paths["CNCFUSION_CONFIG_ROOT"]}
-CNCFUSION_GCODE_ROOT={self.paths["CNCFUSION_GCODE_ROOT"]}
-CNCFUSION_AGENT_ROOT={self.paths["CNCFUSION_AGENT_ROOT"]}
+LINUXCNC_CONFIG_ROOT={self.paths["LINUXCNC_CONFIG_ROOT"]}
+LINUXCNC_GCODE_ROOT={self.paths["LINUXCNC_GCODE_ROOT"]}
+LINUXCNC_AGENT_ROOT={self.paths["LINUXCNC_AGENT_ROOT"]}
 """
 
-        env_path = os.path.join(self.paths["CNCFUSION_CERTS_DIR"], "agent.env")
+        env_path = os.path.join(self.paths["LINUXCNC_CERTS_DIR"], "agent.env")
         self._write_file(env_path, env_content, mode=0o600, owner="root", group="root")
 
         print(f"Generated: {env_path}")
@@ -394,8 +394,8 @@ CNCFUSION_AGENT_ROOT={self.paths["CNCFUSION_AGENT_ROOT"]}
         print("\n=== Updating LinuxCNC INI ===")
 
         # Find the active INI
-        config_root = self.paths["CNCFUSION_CONFIG_ROOT"]
-        gcode_root = self.paths["CNCFUSION_GCODE_ROOT"]
+        config_root = self.paths["LINUXCNC_CONFIG_ROOT"]
+        gcode_root = self.paths["LINUXCNC_GCODE_ROOT"]
 
         # Look for INI files in config root
         for root, dirs, files in os.walk(config_root):
@@ -427,9 +427,9 @@ CNCFUSION_AGENT_ROOT={self.paths["CNCFUSION_AGENT_ROOT"]}
         """Create the helper socket directory with correct permissions."""
         print("\n=== Setting Up Helper Socket ===")
 
-        socket_dir = "/run/cncfusion"
-        linuxcnc_user = self.paths["CNCFUSION_LINUXCNC_USER"]
-        agent_group = self.paths["CNCFUSION_AGENT_GROUP"]
+        socket_dir = "/run/linuxcnc"
+        linuxcnc_user = self.paths["LINUXCNC_LINUXCNC_USER"]
+        agent_group = self.paths["LINUXCNC_AGENT_GROUP"]
 
         if self.dry_run:
             print(f"[DRY RUN] mkdir -p {socket_dir}, owner={linuxcnc_user}:{agent_group}")
@@ -443,7 +443,7 @@ CNCFUSION_AGENT_ROOT={self.paths["CNCFUSION_AGENT_ROOT"]}
         """Enable and start services."""
         print("\n=== Enabling Services ===")
 
-        services = ["cncfusion-hal-helper", "cncfusion-agent"]
+        services = ["linuxcnc-hal-helper", "linuxcnc-agent"]
         for svc in services:
             self._run(["systemctl", "enable", svc])
             self._run(["systemctl", "start", svc])
@@ -452,18 +452,18 @@ CNCFUSION_AGENT_ROOT={self.paths["CNCFUSION_AGENT_ROOT"]}
     def print_summary(self, fingerprint):
         """Print installation summary."""
         print("\n" + "=" * 60)
-        print("CNCFusion Installation Complete!")
+        print("LinuxCNC Installation Complete!")
         print("=" * 60)
         print()
         print("Machine Information:")
         print(f"  Hostname: {self.hostname}")
         print(f"  IP Address: {self.machine_ip}")
-        print(f"  Agent URL: https://{self.machine_ip}:{self.paths['CNCFUSION_AGENT_PORT']}")
+        print(f"  Agent URL: https://{self.machine_ip}:{self.paths['LINUXCNC_AGENT_PORT']}")
         print()
         print("Certificate Locations:")
-        print(f"  CA Certificate: {self.paths['CNCFUSION_CERTS_DIR']}/ca.crt")
-        print(f"  Client Certificate: {self.paths['CNCFUSION_CERTS_DIR']}/client.crt")
-        print(f"  Client Key: {self.paths['CNCFUSION_CERTS_DIR']}/client.key")
+        print(f"  CA Certificate: {self.paths['LINUXCNC_CERTS_DIR']}/ca.crt")
+        print(f"  Client Certificate: {self.paths['LINUXCNC_CERTS_DIR']}/client.crt")
+        print(f"  Client Key: {self.paths['LINUXCNC_CERTS_DIR']}/client.key")
         print()
         print("Client Fingerprint (save for dev machine):")
         print(f"  {fingerprint}")
@@ -472,19 +472,19 @@ CNCFUSION_AGENT_ROOT={self.paths["CNCFUSION_AGENT_ROOT"]}
         print("  1. Copy ca.crt, client.crt, client.key to your dev machine")
         print("  2. Add to dev machine settings.ini:")
         print(f"     [AGENT]")
-        print(f"     base_url = https://{self.machine_ip}:{self.paths['CNCFUSION_AGENT_PORT']}")
-        print(f"     ca_file = C:\\Users\\<user>\\.cncfusion\\ca.crt")
-        print(f"     client_cert = C:\\Users\\<user>\\.cncfusion\\client.crt")
-        print(f"     client_key = C:\\Users\\<user>\\.cncfusion\\client.key")
+        print(f"     base_url = https://{self.machine_ip}:{self.paths['LINUXCNC_AGENT_PORT']}")
+        print(f"     ca_file = C:\\Users\\<user>\\.linuxcnc\\ca.crt")
+        print(f"     client_cert = C:\\Users\\<user>\\.linuxcnc\\client.crt")
+        print(f"     client_key = C:\\Users\\<user>\\.linuxcnc\\client.key")
         print("  3. Test connection from dev machine")
         print()
 
     def install(self, source_dir):
         """Run the complete installation."""
-        print("CNCFusion Installer")
+        print("LinuxCNC Installer")
         print("=" * 60)
         print(f"Source: {source_dir}")
-        print(f"Target: {self.paths['CNCFUSION_AGENT_ROOT']}")
+        print(f"Target: {self.paths['LINUXCNC_AGENT_ROOT']}")
         print(f"Mode: {'DRY RUN' if self.dry_run else 'LIVE'}")
         print()
 
@@ -513,13 +513,13 @@ CNCFUSION_AGENT_ROOT={self.paths["CNCFUSION_AGENT_ROOT"]}
 
 
 def main():
-    parser = argparse.ArgumentParser(description="CNCFusion LinuxCNC Machine Installer")
+    parser = argparse.ArgumentParser(description="LinuxCNC Machine Installer")
     parser.add_argument("--source", "-s", default=".", help="Source directory containing agent files")
     parser.add_argument("--config", "-c", help="Path to paths.conf configuration file")
     parser.add_argument("--dry-run", "-n", action="store_true", help="Show what would be done without doing it")
     args = parser.parse_args()
 
-    installer = CNCFusionInstaller(config_path=args.config, dry_run=args.dry_run)
+    installer = LinuxCNCInstaller(config_path=args.config, dry_run=args.dry_run)
     installer.install(args.source)
 
 

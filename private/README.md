@@ -1,7 +1,7 @@
 # Machine-Admin Components
 
-This directory contains public CNCFusion machine-agent and administrative implementation code.
-It is licensed under GPL-3.0-or-later with the rest of CNCFusion; it does not contain
+This directory contains public LinuxCNC machine-agent and administrative implementation code.
+It is licensed under GPL-3.0-or-later with the rest of LinuxCNC; it does not contain
 credentials or machine-specific runtime configuration.
 
 This scope includes:

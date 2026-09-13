@@ -1,0 +1,15 @@
+[Unit]
+Description=Apply a staged LinuxCNC application update
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/LinuxCNC
+Environment=TMPDIR=/var/lib/linuxcnc/updates/tmp
+ExecStart=/opt/LinuxCNC/.venv/bin/python -m agent.apply_update
+ExecStartPost=/bin/systemctl restart linuxcnc-hal-helper.service linuxcnc-agent.service
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt /var/lib/linuxcnc/updates /var/lib/linuxcnc/updates/tmp

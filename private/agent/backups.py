@@ -16,7 +16,7 @@ def backup_manifest(kind, config_root, gcode_root):
     files = []
     if root.is_dir():
         for path in sorted(root.rglob("*")):
-            if not path.is_file() or ".cncfusion-backups" in path.parts or path.name == ".cncfusion-approved":
+            if not path.is_file() or ".linuxcnc-backups" in path.parts or path.name == ".linuxcnc-approved":
                 continue
             if len(files) >= 1000:
                 raise BackupError("Backup contains too many files.")

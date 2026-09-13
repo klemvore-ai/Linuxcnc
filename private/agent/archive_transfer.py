@@ -91,8 +91,8 @@ def restore_archive(kind, content, expected_sha256, config_root, gcode_root, run
         raise ArchiveError("LinuxCNC must be stopped before restore.")
     root = root_for_kind(kind, config_root, gcode_root)
     archive_path = validate_archive(content, expected_sha256)
-    staging = Path(tempfile.mkdtemp(prefix="cncfusion-restore-"))
-    backup = root.parent / f".{root.name}.cncfusion-restore-backup"
+    staging = Path(tempfile.mkdtemp(prefix="linuxcnc-restore-"))
+    backup = root.parent / f".{root.name}.linuxcnc-restore-backup"
     try:
         with tarfile.open(archive_path, "r:gz") as archive:
             archive.extractall(staging)
@@ -117,8 +117,8 @@ def restore_archive(kind, content, expected_sha256, config_root, gcode_root, run
 
 
 def _archive_filter(info):
-    """Exclude internal CNCFusion metadata and reject special files."""
-    if ".cncfusion-backups" in Path(info.name).parts or info.name.endswith(".cncfusion-approved"):
+    """Exclude internal LinuxCNC metadata and reject special files."""
+    if ".linuxcnc-backups" in Path(info.name).parts or info.name.endswith(".linuxcnc-approved"):
         return None
     if info.issym() or info.islnk() or info.isdev():
         raise ArchiveError("Special files are not allowed in backups.")

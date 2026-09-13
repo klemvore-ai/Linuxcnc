@@ -1,6 +1,6 @@
-# CNC Fusion Pro - Complete Instruction Manual
+# LinuxCNC Pro - Complete Instruction Manual
 
-Welcome to **CNC Fusion Pro**, the ultimate integrated development environment (IDE) and control center for LinuxCNC and Mesa Electronics hardware. 
+Welcome to **LinuxCNC Pro**, the ultimate integrated development environment (IDE) and control center for LinuxCNC and Mesa Electronics hardware. 
 
 This application bridges the gap between machine configuration, logic wiring, UI design, and live operator control.
 
@@ -10,9 +10,9 @@ For first-time LinuxCNC machine setup, follow the [Beginner LinuxCNC Setup Guide
 
 ## License, Safety, and Local Configuration
 
-CNCFusion, including the secure machine agent, installer, deployment tooling, and documentation, is released under the GNU General Public License v3.0 or later. See [LICENSE](LICENSE) for the project license.
+LinuxCNC, including the secure machine agent, installer, deployment tooling, and documentation, is released under the GNU General Public License v3.0 or later. See [LICENSE](LICENSE) for the project license.
 
-**CNCFusion is not safety-rated machine-control software.** LinuxCNC, the physical E-stop, limits, interlocks, and other independent safety systems remain responsible for safe machine operation. Review every generated G-code program and O-code macro, test with the machine clear at low speed, and stop immediately when any motion is unexpected. Never rely on CNCFusion as the sole safety control.
+**LinuxCNC is not safety-rated machine-control software.** LinuxCNC, the physical E-stop, limits, interlocks, and other independent safety systems remain responsible for safe machine operation. Review every generated G-code program and O-code macro, test with the machine clear at low speed, and stop immediately when any motion is unexpected. Never rely on LinuxCNC as the sole safety control.
 
 Do not commit a working `settings.ini`, certificates, private keys, fingerprints, passwords, machine IP addresses, HAL pin maps, or calibration values. Start from [settings.example.ini](settings.example.ini) and create your own local `settings.ini`; it is intentionally ignored by Git.
 
@@ -43,14 +43,14 @@ The secure agent is public source code. Each installation must generate its own 
 Run the complete installer as root:
 
 ```bash
-sudo python3 private/installer/install.py --source /path/to/CNCFusion
+sudo python3 private/installer/install.py --source /path/to/LinuxCNC
 ```
 
 The installer sets up:
-- **Users & Groups**: `cncfusion` service account with proper permissions
-- **Directories**: `/opt/CNCFusion`, `/etc/cncfusion`, `/var/lib/cncfusion/updates`
+- **Users & Groups**: `linuxcnc` service account with proper permissions
+- **Directories**: `/opt/LinuxCNC`, `/etc/linuxcnc`, `/var/lib/linuxcnc/updates`
 - **TLS Certificates**: CA, server, and client certificates with auto-generated fingerprint
-- **Systemd Services**: `cncfusion-agent`, `cncfusion-hal-helper`, `cncfusion-apply-update`
+- **Systemd Services**: `linuxcnc-agent`, `linuxcnc-hal-helper`, `linuxcnc-apply-update`
 - **Configuration**: Environment files with configurable paths
 - **LinuxCNC Integration**: Updates INI with correct `SUBROUTINE_PATH`
 
@@ -60,31 +60,31 @@ The installer sets up:
 
 1. Copy certificates from the machine:
    ```powershell
-   scp user@machine:/etc/cncfusion/ca.crt $HOME\.cncfusion\
-   scp user@machine:/etc/cncfusion/client.crt $HOME\.cncfusion\
-   scp user@machine:/etc/cncfusion/client.key $HOME\.cncfusion\
+   scp user@machine:/etc/linuxcnc/ca.crt $HOME\.linuxcnc\
+   scp user@machine:/etc/linuxcnc/client.crt $HOME\.linuxcnc\
+   scp user@machine:/etc/linuxcnc/client.key $HOME\.linuxcnc\
    ```
 
 2. Configure `settings.ini`:
    ```ini
    [AGENT]
    base_url = https://<MACHINE_MANAGEMENT_IP>:9443
-   ca_file = C:\Users\<user>\.cncfusion\ca.crt
-   client_cert = C:\Users\<user>\.cncfusion\client.crt
-   client_key = C:\Users\<user>\.cncfusion\client.key
+   ca_file = C:\Users\<user>\.linuxcnc\ca.crt
+   client_cert = C:\Users\<user>\.linuxcnc\client.crt
+   client_key = C:\Users\<user>\.linuxcnc\client.key
    ```
 
-3. Launch CNCFusion — the title bar shows **"DEVELOPER WORKSTATION"**
+3. Launch LinuxCNC — the title bar shows **"DEVELOPER WORKSTATION"**
 
 ### Custom Paths
 
-For non-standard installations, create `/etc/cncfusion/paths.conf`:
+For non-standard installations, create `/etc/linuxcnc/paths.conf`:
 
 ```ini
-CNCFUSION_CONFIG_ROOT=/home/operator/linuxcnc/configs
-CNCFUSION_GCODE_ROOT=/home/operator/linuxcnc/nc_files
-CNCFUSION_AGENT_ROOT=/opt/CNCFusion
-CNCFUSION_LINUXCNC_USER=operator
+LINUXCNC_CONFIG_ROOT=/home/operator/linuxcnc/configs
+LINUXCNC_GCODE_ROOT=/home/operator/linuxcnc/nc_files
+LINUXCNC_AGENT_ROOT=/opt/LinuxCNC
+LINUXCNC_LINUXCNC_USER=operator
 ```
 
 Then run: `sudo python3 installer/setup_paths.py`
@@ -96,8 +96,8 @@ The **⚙️ Settings Tab** is the brains of the operation. It houses the Setup 
 
 ### Mode Indicators
 The window title shows which mode you're running:
-- **"CNC Fusion Pro - DEVELOPER WORKSTATION"** — Windows dev machine
-- **"CNC Fusion Pro - MACHINE CONTROL"** — LinuxCNC machine
+- **"LinuxCNC Pro - DEVELOPER WORKSTATION"** — Windows dev machine
+- **"LinuxCNC Pro - MACHINE CONTROL"** — LinuxCNC machine
 
 ### Recommended Workflow:
 1. **Establish Comms:** Go to the *Mesa Utilities* tab, enter your Linux Machine IP, Username, and Password, and click **Save Credentials**. Click **Test SSH Connection** to ensure it works.
@@ -111,7 +111,7 @@ The window title shows which mode you're running:
 
 ## 2. Secure Agent Architecture
 
-CNCFusion uses a **mutual TLS (mTLS) secure agent** for machine control instead of SSH. This provides:
+LinuxCNC uses a **mutual TLS (mTLS) secure agent** for machine control instead of SSH. This provides:
 - **Encrypted communication** between dev workstation and machine
 - **Certificate-based authentication** (no passwords over the network)
 - **Role-based access control** (monitor, operator, technician, administrator)
@@ -122,7 +122,7 @@ CNCFusion uses a **mutual TLS (mTLS) secure agent** for machine control instead 
 ```
 Dev Workstation (Windows)          CNC Machine (Debian/LinuxCNC)
 ┌─────────────────────┐           ┌─────────────────────────────┐
-│  CNCFusion GUI      │◄─────────►│  cncfusion-agent (HTTPS)    │
+│  LinuxCNC GUI      │◄─────────►│  linuxcnc-agent (HTTPS)    │
 │  - Dashboard        │  mTLS     │  - Port 9443                │
 │  - Settings         │  9443     │  - Policy validation        │
 │  - Macro Editor     │           │  - Role enforcement         │
@@ -131,7 +131,7 @@ Dev Workstation (Windows)          CNC Machine (Debian/LinuxCNC)
                                                 │ Unix Socket
                                                 ▼
                                       ┌─────────────────────────┐
-                                      │  cncfusion-hal-helper   │
+                                      │  linuxcnc-hal-helper   │
                                       │  - Runs as operator     │
                                       │  - LinuxCNC API access  │
                                       │  - HAL pin control      │
@@ -241,7 +241,7 @@ When configuring PID loops or diagnosing faulty limit switches, these tabs are i
 
 ## 9. Macro & Subroutine System
 
-CNCFusion includes a complete **O-code subroutine system** for automated machine operations. All macros run through the secure agent — no arbitrary MDI allowed.
+LinuxCNC includes a complete **O-code subroutine system** for automated machine operations. All macros run through the secure agent — no arbitrary MDI allowed.
 
 ### Available Macros
 
@@ -349,7 +349,7 @@ PARK_Z = 0.0           ; Park position Z
 
 ## 10. Application Updates
 
-CNCFusion supports **secure staged updates** with operator approval.
+LinuxCNC supports **secure staged updates** with operator approval.
 
 ### Update Flow
 
@@ -357,7 +357,7 @@ CNCFusion supports **secure staged updates** with operator approval.
 Dev Workstation                    CNC Machine
 ---------------                    -----------
 Click "Deploy" ──────────────────► Update staged to
-                                   /var/lib/cncfusion/updates/
+                                   /var/lib/linuxcnc/updates/
                                           │
                                           ▼
                               ┌─────────────────────┐
@@ -375,7 +375,7 @@ Click "Deploy" ──────────────────► Update 
                                           │
                                           ▼
                               sudo systemctl start
-                                cncfusion-apply-update
+                                linuxcnc-apply-update
                                           │
                                           ▼
                               Services restarted
@@ -401,25 +401,25 @@ Click **🔎 View Update Status** to see:
 
 ## 11. Path Configuration
 
-CNCFusion supports **configurable paths** for flexible installation.
+LinuxCNC supports **configurable paths** for flexible installation.
 
 ### Configuration Files
 
 | File | Purpose |
 |------|---------|
-| `/etc/cncfusion/paths.conf` | Master path configuration (installer) |
-| `/etc/cncfusion/agent.env` | Agent environment variables |
+| `/etc/linuxcnc/paths.conf` | Master path configuration (installer) |
+| `/etc/linuxcnc/agent.env` | Agent environment variables |
 | `core/paths.py` | Runtime path resolution |
 
 ### Configurable Paths
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `CNCFUSION_CONFIG_ROOT` | `/home/operator/linuxcnc/configs` | LinuxCNC config directory |
-| `CNCFUSION_GCODE_ROOT` | `/home/operator/linuxcnc/nc_files` | G-code/O-code directory |
-| `CNCFUSION_AGENT_ROOT` | `/opt/CNCFusion` | Agent installation directory |
-| `CNCFUSION_LINUXCNC_USER` | `operator` | LinuxCNC user account |
-| `CNCFUSION_AGENT_USER` | `cncfusion` | Agent service account |
+| `LINUXCNC_CONFIG_ROOT` | `/home/operator/linuxcnc/configs` | LinuxCNC config directory |
+| `LINUXCNC_GCODE_ROOT` | `/home/operator/linuxcnc/nc_files` | G-code/O-code directory |
+| `LINUXCNC_AGENT_ROOT` | `/opt/LinuxCNC` | Agent installation directory |
+| `LINUXCNC_LINUXCNC_USER` | `operator` | LinuxCNC user account |
+| `LINUXCNC_AGENT_USER` | `linuxcnc` | Agent service account |
 
 ### Changing Paths
 
@@ -432,8 +432,8 @@ sudo python3 installer/install.py --config /path/to/paths.conf
 ```bash
 sudo python3 installer/setup_paths.py
 sudo systemctl daemon-reload
-sudo systemctl restart cncfusion-hal-helper
-sudo systemctl restart cncfusion-agent
+sudo systemctl restart linuxcnc-hal-helper
+sudo systemctl restart linuxcnc-agent
 ```
 
 ### LinuxCNC INI Integration
@@ -446,4 +446,4 @@ This ensures O-code subroutines are found regardless of where LinuxCNC is launch
 
 ---
 
-*Designed and Built for CNC Fusion Pro.*
+*Designed and Built for LinuxCNC Pro.*

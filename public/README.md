@@ -1,6 +1,6 @@
-# Public CNCFusion Scope
+# Public LinuxCNC Scope
 
-This directory represents the public, user-facing CNCFusion code path.
+This directory represents the public, user-facing LinuxCNC code path.
 
 The public project should stay focused on:
 
@@ -21,4 +21,4 @@ The public scope intentionally excludes:
 - remote administrative control planes
 - machine-side lifecycle management
 
-LinuxCNC remains the runtime owner of the machine configuration and controller state. CNCFusion is the interface and configuration layer around it.
+LinuxCNC remains the runtime owner of the machine configuration and controller state. LinuxCNC is the interface and configuration layer around it.

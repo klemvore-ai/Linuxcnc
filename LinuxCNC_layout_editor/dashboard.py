@@ -348,7 +348,7 @@ class MachineDashboard(QWidget):
         # Top Toolbar for Custom UI Loading
         toolbar = QHBoxLayout()
         
-        self.btn_load_custom = QPushButton("📂 Load Custom UI (.fusionui)")
+        self.btn_load_custom = QPushButton("📂 Load Custom UI (.linuxcncui)")
         self.btn_load_custom.setStyleSheet("QPushButton { background-color: #8e44ad; color: white; font-weight: bold; padding: 6px; } QPushButton:pressed { background-color: #732d91; }")
         self.btn_load_custom.clicked.connect(self.load_custom_ui)
         toolbar.addWidget(self.btn_load_custom)
@@ -480,7 +480,7 @@ class MachineDashboard(QWidget):
     def load_custom_ui(self, path=None):
         if not path:
             last_dir = self.settings.get_setting("PATHS", "last_ui_dir", os.path.join(os.getcwd(), "ui_layouts"))
-            path, _ = QFileDialog.getOpenFileName(self, "Load Custom UI", last_dir, "Fusion UI (*.fusionui)")
+            path, _ = QFileDialog.getOpenFileName(self, "Load Custom UI", last_dir, "LinuxCNC UI (*.linuxcncui)")
             if not path: return
         
         try:

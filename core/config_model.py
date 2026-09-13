@@ -112,7 +112,7 @@ class ProbingConfig:
 class MachineConfig:
     """Complete semantic machine definition consumed by LinuxCNC renderers."""
 
-    name: str = "CNCFusion"
+    name: str = "LinuxCNC"
     units: str = "mm"
     kinematics: str = "trivkins coordinates=xyz"
     hardware: HardwareConfig = field(default_factory=HardwareConfig)
@@ -122,7 +122,7 @@ class MachineConfig:
     axis_feedback: list[AxisFeedbackConfig] = field(default_factory=list)
     io_mappings: list[IOMapping] = field(default_factory=list)
     servo_period_ns: int = 1000000
-    display: str = "./cncfusion_gui.py"
+    display: str = "./linuxcnc_gui.py"
     max_feed_override: float = 2.0
     max_spindle_override: float = 1.2
     min_spindle_override: float = 0.5
@@ -137,7 +137,7 @@ class MachineConfig:
     @classmethod
     def from_settings(cls, settings):
         """Build a machine model from the existing INI settings manager."""
-        name = settings.get_setting("MACHINE_CONFIG", "name", "CNCFusion")
+        name = settings.get_setting("MACHINE_CONFIG", "name", "LinuxCNC")
         units_text = settings.get_setting("MACHINE_CONFIG", "units", "Metric (mm)")
         units = "mm" if "mm" in units_text.lower() or "metric" in units_text.lower() else "inch"
         kinematics_text = settings.get_setting("MACHINE_CONFIG", "kinematics", "XYZ (3-Axis)")
@@ -253,9 +253,9 @@ class MachineConfig:
             )
             for axis in axis_names
         ]
-        display = settings.get_setting("MACHINE_CONFIG", "display_ui", "CNCFusion")
-        if display == "CNCFusion":
-            display = "./cncfusion_gui.py"
+        display = settings.get_setting("MACHINE_CONFIG", "display_ui", "LinuxCNC")
+        if display == "LinuxCNC":
+            display = "./linuxcnc_gui.py"
         return cls(
             name=name,
             units=units,

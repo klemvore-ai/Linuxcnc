@@ -44,7 +44,7 @@ def user_settings_path():
         config_root = os.environ.get("APPDATA", os.path.join(home, "AppData", "Roaming"))
     else:
         config_root = os.environ.get("XDG_CONFIG_HOME", os.path.join(home, ".config"))
-    settings_directory = os.path.join(config_root, "CNCFusion")
+    settings_directory = os.path.join(config_root, "LinuxCNC")
     os.makedirs(settings_directory, exist_ok=True)
     destination = os.path.join(settings_directory, "settings.ini")
     legacy_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.ini")
@@ -139,12 +139,12 @@ class AgentStatusWorker(QThread):
             self.status_complete.emit(False, str(error))
 
 
-class CNCFusionApp(QMainWindow):
+class LinuxCNCApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CNC Fusion Pro - Master Control")
+        self.setWindowTitle("LinuxCNC Pro - Master Control")
         self.resize(1400, 900)
-        self.setWindowIcon(QIcon("assets/CNCFusionWindowsicon.ico"))
+        self.setWindowIcon(QIcon("assets/LinuxCNCWindowsicon.ico"))
 
         self.settings = SettingsManager(user_settings_path())
 
@@ -224,7 +224,7 @@ class CNCFusionApp(QMainWindow):
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
-        remote_path = self.settings.get_setting("PATHS", "last_remote_cncfusion_dir", "~/CNCFusion")
+        remote_path = self.settings.get_setting("PATHS", "last_remote_linuxcnc_dir", "~/LinuxCNC")
 
         if ip and user and not is_local_ip(ip):
             self.sync_worker = SSHSyncWorker(ip, user, password, remote_path)
@@ -278,7 +278,7 @@ class CNCFusionApp(QMainWindow):
     def closeEvent(self, event):
         reply = QMessageBox.question(
             self,
-            "Exit CNC Fusion",
+            "Exit LinuxCNC",
             "Do you want to shut down the LinuxCNC machine as well?\n\n"
             "• 'Yes' will stop the machine and close this app.\n"
             "• 'No' will leave the machine running in the background and close this app.\n"
@@ -300,7 +300,7 @@ class CNCFusionApp(QMainWindow):
             user = self.settings.get_setting("SSH", "username", "")
             password = self.settings.get_setting("SSH", "password", "")
 
-            base_cmd = "if pgrep linuxcnc > /dev/null; then python3 -c 'import linuxcnc; c=linuxcnc.command(); c.exit()' 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do if ! pgrep linuxcnc > /dev/null; then break; fi; sleep 1; done; if pgrep linuxcnc > /dev/null; then killall -TERM linuxcnc linuxcncsvr milltask io 2>/dev/null; sleep 2; fi; if pgrep linuxcnc > /dev/null; then halrun -U 2>/dev/null; killall -9 linuxcnc linuxcncsvr milltask io halrun rtapi_app halcmd 2>/dev/null; rm -rf /tmp/linuxcnc.lock* /tmp/linuxcnc.print /tmp/linuxcnc.error 2>/dev/null; rm -f /dev/shm/linuxcnc* /dev/shm/rtapi* /dev/shm/hal* 2>/dev/null; fi; fi; pkill -TERM -f cncfusion_gui 2>/dev/null"
+            base_cmd = "if pgrep linuxcnc > /dev/null; then python3 -c 'import linuxcnc; c=linuxcnc.command(); c.exit()' 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do if ! pgrep linuxcnc > /dev/null; then break; fi; sleep 1; done; if pgrep linuxcnc > /dev/null; then killall -TERM linuxcnc linuxcncsvr milltask io 2>/dev/null; sleep 2; fi; if pgrep linuxcnc > /dev/null; then halrun -U 2>/dev/null; killall -9 linuxcnc linuxcncsvr milltask io halrun rtapi_app halcmd 2>/dev/null; rm -rf /tmp/linuxcnc.lock* /tmp/linuxcnc.print /tmp/linuxcnc.error 2>/dev/null; rm -f /dev/shm/linuxcnc* /dev/shm/rtapi* /dev/shm/hal* 2>/dev/null; fi; fi; pkill -TERM -f linuxcnc_gui 2>/dev/null"
 
             if is_local_ip(ip):
                 print("Shutting down local LinuxCNC instance...")
@@ -378,13 +378,13 @@ def launch_app():
     app.setStyle("Fusion")
 
     from PyQt6.QtCore import QSharedMemory
-    shared_mem = QSharedMemory("CNCFusionPro_Inst_Lock")
+    shared_mem = QSharedMemory("LinuxCNCPro_Inst_Lock")
     if shared_mem.attach() or not shared_mem.create(1):
-        QMessageBox.warning(None, "Application Already Running", "An instance of CNC Fusion is already running.", QMessageBox.StandardButton.Ok)
+        QMessageBox.warning(None, "Application Already Running", "An instance of LinuxCNC is already running.", QMessageBox.StandardButton.Ok)
         sys.exit(0)
 
-    app.setWindowIcon(QIcon("assets/CNCFusionWindowsicon.ico"))
-    window = CNCFusionApp()
+    app.setWindowIcon(QIcon("assets/LinuxCNCWindowsicon.ico"))
+    window = LinuxCNCApp()
 
     try:
         import pyi_splash

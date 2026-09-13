@@ -10,9 +10,9 @@ class BackupTests(unittest.TestCase):
         root = Path(tempfile.mkdtemp())
         (root / "machine.ini").write_text("[EMC]\n", encoding="utf-8")
         (root / "custom_postgui.hal").write_text("net custom source => target\n", encoding="utf-8")
-        (root / ".cncfusion-approved").write_text("approved", encoding="utf-8")
-        (root / ".cncfusion-backups").mkdir()
-        (root / ".cncfusion-backups" / "old.ini").write_text("old", encoding="utf-8")
+        (root / ".linuxcnc-approved").write_text("approved", encoding="utf-8")
+        (root / ".linuxcnc-backups").mkdir()
+        (root / ".linuxcnc-backups" / "old.ini").write_text("old", encoding="utf-8")
 
         manifest = backup_manifest("config", root, root / "nc_files")
 

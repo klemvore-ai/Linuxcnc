@@ -1,1 +1,1 @@
-"""Private admin and deployment UI modules for CNCFusion."""
+"""Private admin and deployment UI modules for LinuxCNC."""

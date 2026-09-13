@@ -2,21 +2,21 @@
 
 from private.tabs.settings_tab import *  # noqa: F401,F403
 
-cncfusion_gui_content = [
+linuxcnc_gui_content = [
     "#!/usr/bin/env python3",
-    '"""LinuxCNC DISPLAY entry point: launch the CNCFusion Qt dashboard."""',
+    '"""LinuxCNC DISPLAY entry point: launch the LinuxCNC Qt dashboard."""',
     "import os",
     "import subprocess",
     "import sys",
     "",
     "try:",
     "    import hal",
-    "    h = hal.component('cncfusion_gui')",
+    "    h = hal.component('linuxcnc_gui')",
     "    h.ready()",
     "except ImportError:",
     "    h = None",
     "",
-    "APPLICATION_ROOT = '/opt/CNCFusion'",
+    "APPLICATION_ROOT = '/opt/LinuxCNC'",
     "PYTHON_EXECUTABLE = os.path.join(APPLICATION_ROOT, '.venv', 'bin', 'python')",
     "MAIN_SCRIPT = os.path.join(APPLICATION_ROOT, 'main.py')",
     "if not os.path.isfile(PYTHON_EXECUTABLE):",

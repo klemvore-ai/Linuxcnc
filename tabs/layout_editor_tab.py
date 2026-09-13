@@ -698,7 +698,7 @@ class LayoutEditorTab(QWidget):
         if not os.path.exists(last_dir):
             os.makedirs(last_dir, exist_ok=True)
             
-        path, _ = QFileDialog.getOpenFileName(self, "Load UI Layout", last_dir, "Fusion UI (*.fusionui);;All Files (*)")
+        path, _ = QFileDialog.getOpenFileName(self, "Load UI Layout", last_dir, "LinuxCNC UI (*.linuxcncui);;All Files (*)")
         if not path: return
         self.settings.save_setting("PATHS", "last_ui_dir", os.path.dirname(path))
 
@@ -831,11 +831,11 @@ class LayoutEditorTab(QWidget):
         if not os.path.exists(last_dir):
             os.makedirs(last_dir, exist_ok=True)
             
-        path, _ = QFileDialog.getSaveFileName(self, "Save UI Layout", last_dir, "Fusion UI (*.fusionui)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save UI Layout", last_dir, "LinuxCNC UI (*.linuxcncui)")
         if not path: return
         
-        if not path.endswith('.fusionui'):
-            path += '.fusionui'
+        if not path.endswith('.linuxcncui'):
+            path += '.linuxcncui'
             
         self.settings.save_setting("PATHS", "last_ui_dir", os.path.dirname(path))
 
@@ -902,7 +902,7 @@ class LayoutEditorTab(QWidget):
             
         # Clean up recovery file after successful explicit save
         recovery_dir = self.settings.get_setting("PATHS", "recovery_dir", os.path.join(os.getcwd(), "recovery"))
-        recovery_path = os.path.join(recovery_dir, "layout_autosave.fusionui")
+        recovery_path = os.path.join(recovery_dir, "layout_autosave.linuxcncui")
         if os.path.exists(recovery_path):
             try: os.remove(recovery_path)
             except: pass
@@ -941,7 +941,7 @@ class LayoutEditorTab(QWidget):
 
         layout_data = []
         lib_components = {}
-        readme_lines = ["# Exported UI Details\n", "This directory contains an exported UI layout for CNC Fusion Pro.\n", "## Generated Logic Pins:\n"]
+        readme_lines = ["# Exported UI Details\n", "This directory contains an exported UI layout for LinuxCNC Pro.\n", "## Generated Logic Pins:\n"]
 
         for item in self.canvas.scene.items():
             if isinstance(item, UIBlock):
@@ -1012,17 +1012,17 @@ class LayoutEditorTab(QWidget):
 
         timestamp = int(time.time())
         try:
-            with open(os.path.join(export_dir, f"shared_ui_{timestamp}.fusionui"), 'w') as f: json.dump(layout_data, f, indent=4)
+            with open(os.path.join(export_dir, f"shared_ui_{timestamp}.linuxcncui"), 'w') as f: json.dump(layout_data, f, indent=4)
             if lib_components:
                 with open(os.path.join(export_dir, f"shared_ui_{timestamp}.mcomp"), 'w') as f: json.dump(lib_components, f, indent=4)
                 
                 # Generate Readme
                 readme_lines.append("\n## Instructions")
-                readme_lines.append("To use this UI Layout, drag the `.mcomp` file into the Component Library in CNC Fusion to generate the logic blocks. Then load the `.fusionui` file in your dashboard to view it.")
+                readme_lines.append("To use this UI Layout, drag the `.mcomp` file into the Component Library in LinuxCNC to generate the logic blocks. Then load the `.linuxcncui` file in your dashboard to view it.")
                 
                 with open(os.path.join(export_dir, f"README_shared_ui_{timestamp}.md"), 'w') as f: f.write("\n".join(readme_lines))
             
-            msg = f"Exported successfully to:\n{export_dir}\n\nFiles generated:\n- shared_ui_{timestamp}.fusionui" + (f"\n- shared_ui_{timestamp}.mcomp\n- README_shared_ui_{timestamp}.md" if lib_components else "")
+            msg = f"Exported successfully to:\n{export_dir}\n\nFiles generated:\n- shared_ui_{timestamp}.linuxcncui" + (f"\n- shared_ui_{timestamp}.mcomp\n- README_shared_ui_{timestamp}.md" if lib_components else "")
             QMessageBox.information(self, "Export Successful", msg)
             
             open_reply = QMessageBox.question(self, "Open Folder", "Would you like to open the exported folder now?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -1040,7 +1040,7 @@ class LayoutEditorTab(QWidget):
         if not os.path.exists(recovery_dir):
             os.makedirs(recovery_dir, exist_ok=True)
             
-        path = os.path.join(recovery_dir, "layout_autosave.fusionui")
+        path = os.path.join(recovery_dir, "layout_autosave.linuxcncui")
         
         try:
             with open(path, 'w') as f: json.dump(self.get_state(), f, indent=4)
@@ -1050,7 +1050,7 @@ class LayoutEditorTab(QWidget):
             
     def check_recovery(self):
         recovery_dir = self.settings.get_setting("PATHS", "recovery_dir", os.path.join(os.getcwd(), "recovery"))
-        path = os.path.join(recovery_dir, "layout_autosave.fusionui")
+        path = os.path.join(recovery_dir, "layout_autosave.linuxcncui")
         
         if os.path.exists(path):
             reply = QMessageBox.question(self, "Recover Unsaved Layout", 

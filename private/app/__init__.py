@@ -1,1 +1,1 @@
-"""Private machine-admin helpers used by the public CNCFusion UI bootstrap."""
+"""Private machine-admin helpers used by the public LinuxCNC UI bootstrap."""

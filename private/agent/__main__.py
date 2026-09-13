@@ -9,7 +9,7 @@ from private.agent.authorization import parse_role_mapping
 
 def parse_args():
     """Parse TLS, bind-address, and approved-directory configuration."""
-    parser = argparse.ArgumentParser(description="CNCFusion LinuxCNC machine agent")
+    parser = argparse.ArgumentParser(description="LinuxCNC machine agent")
     parser.add_argument("--bind", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=9443)
     parser.add_argument("--ca-file", required=True)

@@ -488,8 +488,8 @@ class LinuxCNCRuntime:
         from agent.archive_transfer import validate_application_archive
         archive_path = validate_application_archive(content, expected_sha256)
         os.makedirs(staging_root, exist_ok=True)
-        staged_path = os.path.join(staging_root, "cncfusion-update.tar.gz")
-        temporary_path = os.path.join(staging_root, ".cncfusion-update.tar.gz.tmp")
+        staged_path = os.path.join(staging_root, "linuxcnc-update.tar.gz")
+        temporary_path = os.path.join(staging_root, ".linuxcnc-update.tar.gz.tmp")
         try:
             shutil.copyfile(archive_path, temporary_path)
             os.replace(temporary_path, staged_path)
@@ -503,7 +503,7 @@ class LinuxCNCRuntime:
     def application_update_status(self, staging_root):
         """Return staged update metadata and the last local apply result without executing code."""
         staging = Path(staging_root)
-        archive = staging / "cncfusion-update.tar.gz"
+        archive = staging / "linuxcnc-update.tar.gz"
         status_file = staging / "last-apply.json"
         result = {"staged": archive.is_file()}
         if archive.is_file():
@@ -518,7 +518,7 @@ class LinuxCNCRuntime:
                 result["last_apply"] = {"status": "unknown"}
         return result
 
-    def deployment_preflight(self, staging_root, application_root="/opt/CNCFusion"):
+    def deployment_preflight(self, staging_root, application_root="/opt/LinuxCNC"):
         """Report read-only deployment prerequisites from the agent service identity."""
         application = Path(application_root)
         staging = Path(staging_root)

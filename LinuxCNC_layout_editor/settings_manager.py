@@ -26,7 +26,7 @@ class SettingsManager:
 
     def _ensure_file_exists(self):
         if not os.path.exists(self.filename):
-            self.config['MACHINE_CONFIG'] = {'name': 'CNCFusion', 'kinematics': 'XYZ (3-Axis)', 'units': 'Metric (mm)', 'drive_type': 'Stepper', 'max_velocity': '250.0', 'max_acceleration': '750.0', 'min_spindle_override': '0.5', 'max_spindle_override': '1.2', 'max_feed_override': '2.0', 'enable_probe': 'True', 'enable_spindle_at_speed': 'True', 'enable_spindle_fault': 'True', 'enable_tool_change': 'True', 'enable_coolant': 'True', 'enable_estop': 'True', 'spindle_closed_loop': 'False'}
+            self.config['MACHINE_CONFIG'] = {'name': 'LinuxCNC', 'kinematics': 'XYZ (3-Axis)', 'units': 'Metric (mm)', 'drive_type': 'Stepper', 'max_velocity': '250.0', 'max_acceleration': '750.0', 'min_spindle_override': '0.5', 'max_spindle_override': '1.2', 'max_feed_override': '2.0', 'enable_probe': 'True', 'enable_spindle_at_speed': 'True', 'enable_spindle_fault': 'True', 'enable_tool_change': 'True', 'enable_coolant': 'True', 'enable_estop': 'True', 'spindle_closed_loop': 'False'}
             self.config['MACHINE_LIMITS'] = {'x_min': '0.0', 'x_max': '500.0', 'y_min': '0.0', 'y_max': '500.0', 'z_min': '-150.0', 'z_max': '0.0'}
             self.config['JOG_SETTINGS'] = {'speed': '100', 'step': '0.1'}
             self.config['UI_PREFERENCES'] = {'theme': 'dark', 'language': 'en', 'auto_save_interval_minutes': '5'}

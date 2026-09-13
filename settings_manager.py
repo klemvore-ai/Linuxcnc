@@ -1,4 +1,4 @@
-"""Public CNCFusion settings manager for user-facing machine configuration.
+"""Public LinuxCNC settings manager for user-facing machine configuration.
 
 This file owns normal INI settings for the GUI and operator workflow.
 Private machine-admin secrets and system-critical credential handling remain
@@ -85,7 +85,7 @@ class SettingsManager:
 
     def _ensure_file_exists(self):
         if not os.path.exists(self.filename):
-            self.config['MACHINE_CONFIG'] = {'name': 'CNCFusion', 'kinematics': 'XYZ (3-Axis)', 'units': 'Metric (mm)', 'drive_type': 'Stepper', 'display_ui': 'CNCFusion', 'min_spindle_override': '0.5', 'max_spindle_override': '1.2', 'max_feed_override': '2.0', 'enable_probe': 'True', 'enable_spindle_at_speed': 'True', 'enable_spindle_fault': 'True', 'enable_tool_change': 'True', 'enable_coolant': 'True', 'enable_estop': 'True', 'spindle_closed_loop': 'False', 'shared_home_min_limit': 'False'}
+            self.config['MACHINE_CONFIG'] = {'name': 'LinuxCNC', 'kinematics': 'XYZ (3-Axis)', 'units': 'Metric (mm)', 'drive_type': 'Stepper', 'display_ui': 'LinuxCNC', 'min_spindle_override': '0.5', 'max_spindle_override': '1.2', 'max_feed_override': '2.0', 'enable_probe': 'True', 'enable_spindle_at_speed': 'True', 'enable_spindle_fault': 'True', 'enable_tool_change': 'True', 'enable_coolant': 'True', 'enable_estop': 'True', 'spindle_closed_loop': 'False', 'shared_home_min_limit': 'False'}
             self.config['GLOBAL_TIMINGS'] = {'steplen': '1000', 'stepspace': '1000', 'dirsetup': '200', 'dirhold': '200', 'ferror': '10.0', 'min_ferror': '1.0', 'spindle_max_rpm': '24000', 'spindle_min_rpm': '100'}
             self.config['AXIS_X'] = {'min': '0.0', 'max': '1298.0', 'vel': '75.0', 'accel': '600.0', 'steps': '1000', 'units': '2.0'}
             self.config['AXIS_Y'] = {'min': '0.0', 'max': '1298.0', 'vel': '75.0', 'accel': '600.0', 'steps': '1000', 'units': '2.0'}

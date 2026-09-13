@@ -1,4 +1,4 @@
-"""Public entry point: launch the CNCFusion GUI bootstrap."""
+"""Public entry point: launch the LinuxCNC GUI bootstrap."""
 
 from private.app.bootstrap import launch_app
 

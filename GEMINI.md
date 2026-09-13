@@ -1,10 +1,10 @@
-# CNCFusion Pro - Gemini Development Context
+# LinuxCNC Pro - Gemini Development Context
 
-This document provides a detailed architectural and functional overview of the CNCFusion Pro project. It serves as a foundational "memory" to ensure accurate and context-aware code assistance.
+This document provides a detailed architectural and functional overview of the LinuxCNC Pro project. It serves as a foundational "memory" to ensure accurate and context-aware code assistance.
 
 ## Project Overview
 
-CNCFusion Pro is a sophisticated desktop application built with Python and PyQt6. It is designed as an all-in-one control center and IDE for LinuxCNC systems, particularly those using Mesa Electronics hardware. It provides a graphical user interface for machine setup, real-time control, diagnostics, and the creation of custom operator panels.
+LinuxCNC Pro is a sophisticated desktop application built with Python and PyQt6. It is designed as an all-in-one control center and IDE for LinuxCNC systems, particularly those using Mesa Electronics hardware. It provides a graphical user interface for machine setup, real-time control, diagnostics, and the creation of custom operator panels.
 
 **Core Purpose:** To simplify and centralize the entire workflow of configuring, operating, and diagnosing a CNC machine by replacing manual configuration file editing and fragmented tools with a unified, visually-driven environment.
 
@@ -54,7 +54,7 @@ The application is architected in a modular, tab-based format managed by the mai
     *   Most actions (jogging, MDI commands, homing) are sent to the remote machine as Base64-encoded Python scripts.
     *   The `_send_b64_py_cmd` function packages the script.
     *   A dedicated `_cmd_worker` thread (`QThread`) processes a queue of these commands, executing them over SSH via `paramiko` to prevent UI freezing.
-*   **UI System:** Features a `QStackedWidget` to switch between a built-in default UI and a dynamically loaded custom UI from a `.fusionui` file.
+*   **UI System:** Features a `QStackedWidget` to switch between a built-in default UI and a dynamically loaded custom UI from a `.linuxcncui` file.
 
 #### `tabs/mesa_util_tab.py`
 *   **Purpose:** A frontend for the `mesaflash` command-line utility.
@@ -69,7 +69,7 @@ The application is architected in a modular, tab-based format managed by the mai
 #### `tabs/layout_editor_tab.py` (UI Designer)
 *   **Purpose:** A drag-and-drop editor for creating custom operator panels.
 *   **Workflow:** Users place and style widgets (Buttons, DROs, LEDs) on a canvas.
-*   **Output:** Saves the layout as a `.fusionui` JSON file. This file is what the `MachineDashboard` loads to render the custom UI. It also generates a corresponding `.mcomp` file, which defines the HAL pins for the custom widgets that can then be used in the Logic Designer.
+*   **Output:** Saves the layout as a `.linuxcncui` JSON file. This file is what the `MachineDashboard` loads to render the custom UI. It also generates a corresponding `.mcomp` file, which defines the HAL pins for the custom widgets that can then be used in the Logic Designer.
 
 ## Development Conventions & Patterns
 

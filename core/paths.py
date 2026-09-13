@@ -1,4 +1,4 @@
-"""Centralized path configuration for CNCFusion installation.
+"""Centralized path configuration for LinuxCNC installation.
 
 This module provides a single source of truth for all file paths,
 allowing the installer or user to configure them in one place.
@@ -9,8 +9,8 @@ import platform
 from pathlib import Path
 
 
-class CNCFusionPaths:
-    """Configurable paths for CNCFusion installation."""
+class LinuxCNCPaths:
+    """Configurable paths for LinuxCNC installation."""
 
     def __init__(self, settings=None):
         """Initialize paths from settings or defaults."""
@@ -26,8 +26,8 @@ class CNCFusionPaths:
 
     @property
     def is_machine(self):
-        """True if running on the CNC machine (Linux with /var/lib/cncfusion)."""
-        return self._is_linux and os.path.exists("/var/lib/cncfusion")
+        """True if running on the CNC machine (Linux with /var/lib/linuxcnc)."""
+        return self._is_linux and os.path.exists("/var/lib/linuxcnc")
 
     @property
     def is_dev(self):
@@ -50,19 +50,19 @@ class CNCFusionPaths:
 
     @property
     def machine_agent_root(self):
-        """CNCFusion agent installation directory."""
-        default = "/opt/CNCFusion" if self._is_linux else "C:\\Program Files\\CNCFusion"
+        """LinuxCNC agent installation directory."""
+        default = "/opt/LinuxCNC" if self._is_linux else "C:\\Program Files\\LinuxCNC"
         return self._get_setting("PATHS", "machine_agent_root", default)
 
     @property
     def machine_staging_dir(self):
         """Update staging directory."""
-        return "/var/lib/cncfusion/updates"
+        return "/var/lib/linuxcnc/updates"
 
     @property
     def machine_certs_dir(self):
         """TLS certificate directory."""
-        return "/etc/cncfusion"
+        return "/etc/linuxcnc"
 
     # === Dev workstation paths (Windows) ===
 
@@ -76,7 +76,7 @@ class CNCFusionPaths:
     @property
     def dev_certs_dir(self):
         """Local certificate directory for dev workstation."""
-        return os.path.expanduser("~/.cncfusion")
+        return os.path.expanduser("~/.linuxcnc")
 
     # === LinuxCNC INI paths (for O-codes) ===
 
@@ -120,5 +120,5 @@ def get_paths(settings=None):
     """Get or create the global paths instance."""
     global _paths
     if _paths is None or settings is not None:
-        _paths = CNCFusionPaths(settings)
+        _paths = LinuxCNCPaths(settings)
     return _paths

@@ -1,0 +1,29 @@
+[Unit]
+Description=LinuxCNC Machine Agent
+After=network-online.target
+Wants=network-online.target
+Requires=linuxcnc-hal-helper.service
+After=linuxcnc-hal-helper.service
+
+[Service]
+Type=simple
+User=linuxcnc
+Group=linuxcnc
+WorkingDirectory=/opt/LinuxCNC
+EnvironmentFile=/etc/linuxcnc/agent.env
+Environment=TMPDIR=/var/lib/linuxcnc/updates/tmp
+# Paths are configurable via environment variables set by installer or admin
+# LINUXCNC_CONFIG_ROOT: LinuxCNC configs directory (default: /home/operator/linuxcnc/configs)
+# LINUXCNC_GCODE_ROOT: G-code/nc_files directory (default: /home/operator/linuxcnc/nc_files)
+# LINUXCNC_AGENT_ROOT: Installation directory (default: /opt/LinuxCNC)
+ExecStart=/opt/LinuxCNC/.venv/bin/python -m agent --bind ${LINUXCNC_AGENT_BIND} --port ${LINUXCNC_AGENT_PORT} --ca-file /etc/linuxcnc/ca.crt --certificate-file /etc/linuxcnc/server.crt --private-key-file /etc/linuxcnc/server.key --config-root ${LINUXCNC_CONFIG_ROOT:-/home/operator/linuxcnc/configs} --gcode-root ${LINUXCNC_GCODE_ROOT:-/home/operator/linuxcnc/nc_files} --hal-helper-socket /run/linuxcnc/hal-helper.sock --client-fingerprint ${LINUXCNC_CLIENT_FINGERPRINT}
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/linuxcnc/updates /var/lib/linuxcnc/updates/tmp ${LINUXCNC_CONFIG_ROOT:-/home/operator/linuxcnc/configs} ${LINUXCNC_GCODE_ROOT:-/home/operator/linuxcnc/nc_files}
+
+[Install]
+WantedBy=multi-user.target

@@ -490,7 +490,7 @@ class MesaUtilTab(QWidget):
         if confirm == QMessageBox.StandardButton.Yes:
             self.set_status("⏳ Shutting down LinuxCNC smoothly... please wait.")
             QApplication.processEvents()
-            cmd = "if pgrep linuxcnc > /dev/null; then python3 -c 'import linuxcnc; c=linuxcnc.command(); c.exit()' 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do if ! pgrep linuxcnc > /dev/null; then break; fi; sleep 1; done; if pgrep linuxcnc > /dev/null; then killall -TERM linuxcnc linuxcncsvr milltask io 2>/dev/null; sleep 2; fi; if pgrep linuxcnc > /dev/null; then halrun -U 2>/dev/null; killall -9 linuxcnc linuxcncsvr milltask io halrun rtapi_app halcmd 2>/dev/null; rm -rf /tmp/linuxcnc.lock* /tmp/linuxcnc.print /tmp/linuxcnc.error 2>/dev/null; rm -f /dev/shm/linuxcnc* /dev/shm/rtapi* /dev/shm/hal* 2>/dev/null; fi; fi; pkill -TERM -f cncfusion_gui 2>/dev/null"
+            cmd = "if pgrep linuxcnc > /dev/null; then python3 -c 'import linuxcnc; c=linuxcnc.command(); c.exit()' 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do if ! pgrep linuxcnc > /dev/null; then break; fi; sleep 1; done; if pgrep linuxcnc > /dev/null; then killall -TERM linuxcnc linuxcncsvr milltask io 2>/dev/null; sleep 2; fi; if pgrep linuxcnc > /dev/null; then halrun -U 2>/dev/null; killall -9 linuxcnc linuxcncsvr milltask io halrun rtapi_app halcmd 2>/dev/null; rm -rf /tmp/linuxcnc.lock* /tmp/linuxcnc.print /tmp/linuxcnc.error 2>/dev/null; rm -f /dev/shm/linuxcnc* /dev/shm/rtapi* /dev/shm/hal* 2>/dev/null; fi; fi; pkill -TERM -f linuxcnc_gui 2>/dev/null"
             ip = self.ip_input.text()
             self.execute_remote_command(cmd, use_sudo=not is_local_ip(ip))
             self.set_status("Ready.")
@@ -1083,7 +1083,7 @@ class MesaUtilTab(QWidget):
 
     def enable_autostart(self):
         confirm = QMessageBox.question(self, "Enable Auto-Start", 
-                                       "This will configure the remote Linux machine to automatically launch CNC Fusion Pro on boot.\n\n(Ensure you have also checked 'Auto-Launch LinuxCNC on Startup' in the Settings tab).\n\nDo you want to proceed?", 
+                                       "This will configure the remote Linux machine to automatically launch LinuxCNC Pro on boot.\n\n(Ensure you have also checked 'Auto-Launch LinuxCNC on Startup' in the Settings tab).\n\nDo you want to proceed?", 
                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if confirm != QMessageBox.StandardButton.Yes:
             return
@@ -1095,21 +1095,21 @@ class MesaUtilTab(QWidget):
             QMessageBox.warning(self, "Missing Credentials", "Please set SSH credentials first.")
             return
 
-        remote_cncfusion = self.settings.get_setting("PATHS", "last_remote_cncfusion_dir", "~/CNCFusion").rstrip('/')
+        remote_linuxcnc = self.settings.get_setting("PATHS", "last_remote_linuxcnc_dir", "~/LinuxCNC").rstrip('/')
         
-        remote_dir, ok = QInputDialog.getText(self, "Auto-Start Setup", "Enter remote CNC Fusion directory path:", text=remote_cncfusion)
+        remote_dir, ok = QInputDialog.getText(self, "Auto-Start Setup", "Enter remote LinuxCNC directory path:", text=remote_linuxcnc)
         if not ok or not remote_dir:
             return
             
         self.set_status("Configuring auto-start on remote machine...")
-        self.console.append("\n--- Setting up CNC Fusion Auto-Start ---")
+        self.console.append("\n--- Setting up LinuxCNC Auto-Start ---")
         
         # Evaluate ~ to $HOME purely for the bash script pathing
         bash_remote_dir = remote_dir.replace("~", "$HOME")
 
         script_content = f"""#!/bin/bash
-exec > $HOME/cncfusion_autostart.log 2>&1
-echo "=== CNCFusion Autostart Initiated at $(date) ==="
+exec > $HOME/linuxcnc_autostart.log 2>&1
+echo "=== LinuxCNC Autostart Initiated at $(date) ==="
 
 # Give the Linux Desktop Environment plenty of time to load before drawing a Window
 sleep 10
@@ -1127,7 +1127,7 @@ python3 -c "import PyQt6" || echo "WARNING: PyQt6 module missing for global pyth
 echo "Starting main.py..."
 python3 main.py
 
-echo "=== CNCFusion Exited with code $? ==="
+echo "=== LinuxCNC Exited with code $? ==="
 """
 
         # Using a regular EOF (not 'EOF') allows bash to evaluate ${remote_dir/#\~/$HOME} correctly during write, 
@@ -1140,7 +1140,7 @@ echo "=== CNCFusion Exited with code $? ==="
         
         cmd = f"""mkdir -p {remote_dir} && echo "{b64_script}" | base64 -d > {remote_dir}/autostart.sh
 chmod +x {remote_dir}/autostart.sh
-mkdir -p ~/.config/autostart && cat << 'EOF' > ~/.config/autostart/cncfusion.desktop
+mkdir -p ~/.config/autostart && cat << 'EOF' > ~/.config/autostart/linuxcnc.desktop
 [Desktop Entry]
 Type=Application
 Exec={desktop_remote_dir}/autostart.sh
@@ -1148,10 +1148,10 @@ Hidden=false
 NoDisplay=false
 Terminal=false
 X-GNOME-Autostart-enabled=true
-Name=CNC Fusion Pro
-Comment=Launch CNC Fusion on boot
+Name=LinuxCNC Pro
+Comment=Launch LinuxCNC on boot
 EOF
-chmod +x ~/.config/autostart/cncfusion.desktop"""
+chmod +x ~/.config/autostart/linuxcnc.desktop"""
         
         out, err = self.execute_remote_command(cmd)
         
@@ -1159,7 +1159,7 @@ chmod +x ~/.config/autostart/cncfusion.desktop"""
             QMessageBox.critical(self, "Failed", f"Failed to setup auto-start:\n{err}")
         else:
             self.console.append("✅ Auto-start configured successfully!")
-            QMessageBox.information(self, "Success", f"CNC Fusion will now start automatically when {ip} boots!")
+            QMessageBox.information(self, "Success", f"LinuxCNC will now start automatically when {ip} boots!")
             
         self.set_status("Ready.")
 

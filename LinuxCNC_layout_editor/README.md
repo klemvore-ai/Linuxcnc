@@ -1,11 +1,11 @@
-# CNC Fusion Pro - UI Designer Edition (Mac)
+# LinuxCNC Pro - UI Designer Edition (Mac)
 
-Welcome to the standalone **CNC Fusion Pro UI Editor**. This application allows you to design custom dashboards and operator interfaces for LinuxCNC without needing the full machine control software installed.
+Welcome to the standalone **LinuxCNC Pro UI Editor**. This application allows you to design custom dashboards and operator interfaces for LinuxCNC without needing the full machine control software installed.
 
 ## 🚀 Getting Started
 
 ### Option A: Running the Standalone Mac App (Recommended)
-If you were provided with a `CNC_Fusion_UI_Editor.app` file:
+If you were provided with a `LinuxCNC_UI_Editor.app` file:
 1. Simply double-click the `.app` file to launch the application.
 2. (Optional) Drag the app to your `Applications` folder.
 
@@ -51,7 +51,7 @@ When you are finished designing your layout, you can easily package it up to sen
 2. Click the **"📤 Export for Sharing"** button in the sidebar.
 3. Select an empty folder on your desktop (e.g., "New_CNC_Dashboard").
 4. The application will automatically save:
-   - The `.fusionui` visual layout file.
+   - The `.linuxcncui` visual layout file.
    - A `.mcomp` logic map file for the engineering team.
    - Copies of any custom images you used.
 5. **ZIP** that folder and send it over!

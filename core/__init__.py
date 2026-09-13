@@ -1,4 +1,4 @@
-"""Core package for CNCFusion public runtime and private machine-admin support."""
+"""Core package for LinuxCNC public runtime and private machine-admin support."""
 
 from pathlib import Path
 

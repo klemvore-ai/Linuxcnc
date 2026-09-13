@@ -1,4 +1,4 @@
-"""HTTPS/mTLS client for structured CNCFusion machine-agent operations."""
+"""HTTPS/mTLS client for structured LinuxCNC machine-agent operations."""
 
 import json
 import ssl
@@ -259,16 +259,18 @@ class MachineAgentClient:
 
     def upload_file(self, kind, relative_path, file_path):
         """Read and upload one bounded file with a generated SHA-256 digest."""
+        max_size = 256 * 1024 * 1024 if kind == "gcode" else 16 * 1024 * 1024
         with open(file_path, "rb") as source_file:
-            content = source_file.read(16 * 1024 * 1024 + 1)
-        if len(content) > 16 * 1024 * 1024:
+            content = source_file.read(max_size + 1)
+        if len(content) > max_size:
             raise MachineAgentError("Upload is too large.")
         return self.upload_content(kind, relative_path, content)
 
     def upload_content(self, kind, relative_path, content):
         """Upload bounded bytes using the structured file endpoint."""
-        if len(content) > 16 * 1024 * 1024:
-            raise MachineAgentError("Upload is too large.")
+        max_size = 256 * 1024 * 1024 if kind == "gcode" else 16 * 1024 * 1024
+        if len(content) > max_size:
+            raise MachineAgentError("G-code upload is too large." if kind == "gcode" else "Upload is too large.")
         payload = {
             "kind": kind,
             "relative_path": relative_path,

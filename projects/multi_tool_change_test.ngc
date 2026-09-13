@@ -1,4 +1,4 @@
-(CNCFusion Multi-Tool Change and Probe Test)
+(LinuxCNC Multi-Tool Change and Probe Test)
 (No cutting motion. Uses the configured tool setter.)
 (Operator must install each requested tool when prompted.)
 (Run Dashboard Tool Setter Calibration and sync REF_Z before this test.)

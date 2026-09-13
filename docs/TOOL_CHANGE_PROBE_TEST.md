@@ -11,7 +11,7 @@ Do this before running the multi-tool program:
 2. In the Dashboard, set the tool setter X/Y location and setter velocity.
 3. Use **Calibrate Tool Setter** in the Tool Setter panel.
 4. Complete the reference-tool/workpiece-zero prompts.
-5. Confirm the measured `REF_Z` value appears in CNCFusion settings.
+5. Confirm the measured `REF_Z` value appears in LinuxCNC settings.
 6. Open Settings -> Probing & Locations and click **Sync Probing to Machine INI**.
 7. Approve and activate the staged configuration, then restart LinuxCNC.
 8. Perform one single-tool probe check before testing multiple tools.

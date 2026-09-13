@@ -1,14 +1,14 @@
 [Unit]
-Description=CNCFusion HAL helper
+Description=LinuxCNC HAL helper
 After=network.target
 
 [Service]
 Type=simple
 User=darrell
-Group=cncfusion
-WorkingDirectory=/opt/CNCFusion
-RuntimeDirectory=cncfusion
-ExecStart=/opt/CNCFusion/.venv/bin/python -m agent.hal_helper
+Group=linuxcnc
+WorkingDirectory=/opt/LinuxCNC
+RuntimeDirectory=linuxcnc
+ExecStart=/opt/LinuxCNC/.venv/bin/python -m agent.hal_helper
 Restart=on-failure
 RestartSec=2
 ProtectSystem=full

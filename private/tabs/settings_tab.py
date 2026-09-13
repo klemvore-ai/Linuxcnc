@@ -139,7 +139,7 @@ class SettingsTab(QWidget):
         
         self.dynamic_widgets = {'Y2': [], 'A': [], 'B': [], 'J3': [], 'J4': []}
         
-        self.mach_name_input = QLineEdit(self.sm.get_setting('MACHINE_CONFIG', 'name', 'CNCFusion'))
+        self.mach_name_input = QLineEdit(self.sm.get_setting('MACHINE_CONFIG', 'name', 'LinuxCNC'))
         
         self.mach_kinematics_cb = NoScrollComboBox()
         self.mach_kinematics_cb.addItems(["XYZ (3-Axis)", "XYYZ (Gantry 3-Axis)", "XYZ A (4-Axis)", "XYZ AB (5-Axis)"])
@@ -154,8 +154,8 @@ class SettingsTab(QWidget):
         self.mach_drive_cb.setCurrentText(self.sm.get_setting('MACHINE_CONFIG', 'drive_type', 'Stepper'))
         
         self.mach_display_cb = NoScrollComboBox()
-        self.mach_display_cb.addItems(["CNCFusion", "axis", "dummy", "gmoccapy", "qtdragon", "qtvcp"])
-        self.mach_display_cb.setCurrentText(self.sm.get_setting('MACHINE_CONFIG', 'display_ui', 'CNCFusion'))
+        self.mach_display_cb.addItems(["LinuxCNC", "axis", "dummy", "gmoccapy", "qtdragon", "qtvcp"])
+        self.mach_display_cb.setCurrentText(self.sm.get_setting('MACHINE_CONFIG', 'display_ui', 'LinuxCNC'))
         
         self.mach_min_spindle_ovr = NoScrollDoubleSpinBox(); self.mach_min_spindle_ovr.setRange(0.0, 5.0); self.mach_min_spindle_ovr.setSingleStep(0.1)
         self.mach_min_spindle_ovr.setValue(float(self.sm.get_setting('MACHINE_CONFIG', 'min_spindle_override', 0.5)))
@@ -687,7 +687,7 @@ class SettingsTab(QWidget):
         ui_mgmt_layout.addWidget(lbl_ui_info)
         
         btn_layout = QHBoxLayout()
-        self.btn_load_custom = QPushButton("📂 Load Custom UI (.fusionui)")
+        self.btn_load_custom = QPushButton("📂 Load Custom UI (.linuxcncui)")
         self.btn_load_custom.setStyleSheet("background-color: #8e44ad; color: white; font-weight: bold; padding: 8px; border-radius: 4px;")
         self.btn_load_custom.clicked.connect(self.load_custom_ui_requested.emit)
         btn_layout.addWidget(self.btn_load_custom)
@@ -890,7 +890,7 @@ class SettingsTab(QWidget):
                 except: pass
 
         # 2. Check for pending LinuxCNC config files
-        mach_name = self.sm.get_setting('MACHINE_CONFIG', 'name', 'CNCFusion')
+        mach_name = self.sm.get_setting('MACHINE_CONFIG', 'name', 'LinuxCNC')
         local_base = os.path.expanduser(self.sm.get_setting("PATHS", "last_remote_config_dir", "~/linuxcnc/configs"))
         local_dir = os.path.join(local_base, mach_name)
         pending_dir = os.path.join(local_dir, "pending_updates")
@@ -1131,10 +1131,10 @@ Z_SAFE = 0.0000
         if not ip or not user:
             QMessageBox.warning(self, "Pull Failed", "SSH credentials are not configured. Please set them in the Mesa Utilities tab.")
             return
-        remote_base = self.sm.get_setting("PATHS", "last_remote_cncfusion_dir", "~/CNCFusion")
-        remote_dir, ok = QInputDialog.getText(self, "Pull Settings", "Enter the path to the CNCFusion folder on the CNC PC:", text=remote_base)
+        remote_base = self.sm.get_setting("PATHS", "last_remote_linuxcnc_dir", "~/LinuxCNC")
+        remote_dir, ok = QInputDialog.getText(self, "Pull Settings", "Enter the path to the LinuxCNC folder on the CNC PC:", text=remote_base)
         if not ok or not remote_dir: return
-        self.sm.save_setting("PATHS", "last_remote_cncfusion_dir", remote_dir)
+        self.sm.save_setting("PATHS", "last_remote_linuxcnc_dir", remote_dir)
         remote_file = f"{remote_dir.rstrip('/')}/settings.ini"
         local_file = os.path.join(os.getcwd(), "settings.ini")
         try:
@@ -1193,10 +1193,10 @@ Z_SAFE = 0.0000
                 QMessageBox.critical(self, "Push Failed", f"Secure settings upload failed:\n{error}")
             return
 
-        remote_base = self.sm.get_setting("PATHS", "last_remote_cncfusion_dir", "~/CNCFusion")
-        remote_dir, ok = QInputDialog.getText(self, "Push Settings", "Enter the path to the CNCFusion folder on the CNC PC:", text=remote_base)
+        remote_base = self.sm.get_setting("PATHS", "last_remote_linuxcnc_dir", "~/LinuxCNC")
+        remote_dir, ok = QInputDialog.getText(self, "Push Settings", "Enter the path to the LinuxCNC folder on the CNC PC:", text=remote_base)
         if not ok or not remote_dir: return
-        self.sm.save_setting("PATHS", "last_remote_cncfusion_dir", remote_dir)
+        self.sm.save_setting("PATHS", "last_remote_linuxcnc_dir", remote_dir)
         remote_file = f"{remote_dir.rstrip('/')}/settings_pending.ini"
         try:
             if HAS_PARAMIKO:
@@ -1297,21 +1297,21 @@ Z_SAFE = 0.0000
         """Update the window title to show Dev vs Machine mode."""
         import platform
         if hasattr(self.window(), 'setWindowTitle'):
-            if platform.system() == "Linux" and os.path.exists("/var/lib/cncfusion"):
-                self.window().setWindowTitle("CNC Fusion Pro - MACHINE CONTROL")
+            if platform.system() == "Linux" and os.path.exists("/var/lib/linuxcnc"):
+                self.window().setWindowTitle("LinuxCNC Pro - MACHINE CONTROL")
             else:
-                self.window().setWindowTitle("CNC Fusion Pro - DEVELOPER WORKSTATION")
+                self.window().setWindowTitle("LinuxCNC Pro - DEVELOPER WORKSTATION")
 
     def check_for_staged_update(self):
         """Check if a staged update exists locally and show the apply button."""
-        # Only show on Linux machine (where /var/lib/cncfusion exists)
+        # Only show on Linux machine (where /var/lib/linuxcnc exists)
         import platform
         if platform.system() != "Linux":
             self.btn_apply_update.setVisible(False)
             return
             
-        staging_dir = "/var/lib/cncfusion/updates"
-        staged_archive = os.path.join(staging_dir, "cncfusion-update.tar.gz")
+        staging_dir = "/var/lib/linuxcnc/updates"
+        staged_archive = os.path.join(staging_dir, "linuxcnc-update.tar.gz")
         if os.path.exists(staged_archive):
             self.btn_apply_update.setVisible(True)
             self.btn_apply_update.setText("⚡ Apply Staged Update (Ready)")
@@ -1325,7 +1325,7 @@ Z_SAFE = 0.0000
         linuxcnc_running = False
         try:
             # Check for common LinuxCNC UI process names
-            for proc_name in ["linuxcnc", "axis", "gmoccapy", "qtdragon", "cncfusion_gui"]:
+            for proc_name in ["linuxcnc", "axis", "gmoccapy", "qtdragon", "linuxcnc_gui"]:
                 result = subprocess.run(["pgrep", "-f", proc_name], capture_output=True, timeout=5)
                 if result.returncode == 0:
                     linuxcnc_running = True
@@ -1351,7 +1351,7 @@ Z_SAFE = 0.0000
             "Confirm Update",
             "Apply the staged application update now?\n\n"
             "This will:\n"
-            "• Replace /opt/CNCFusion with the new version\n"
+            "• Replace /opt/LinuxCNC with the new version\n"
             "• Restart the agent and helper services\n"
             "• Preserve the existing .venv\n\n"
             "LinuxCNC should be stopped during this process.",
@@ -1363,7 +1363,7 @@ Z_SAFE = 0.0000
         try:
             # Run the apply-update service
             result = subprocess.run(
-                ["sudo", "systemctl", "start", "cncfusion-apply-update"],
+                ["sudo", "systemctl", "start", "linuxcnc-apply-update"],
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -1375,7 +1375,7 @@ Z_SAFE = 0.0000
             import time
             time.sleep(2)
             status_result = subprocess.run(
-                ["systemctl", "status", "cncfusion-apply-update", "--no-pager"],
+                ["systemctl", "status", "linuxcnc-apply-update", "--no-pager"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -1413,7 +1413,7 @@ Z_SAFE = 0.0000
             return
             
         reply = QMessageBox.question(self, "Confirm CNC PC Deployment", 
-                                     f"Are you sure you want to package and send the CNC Fusion application to {ip}?\n\nThis will prompt the physical machine operator to accept the installation.", 
+                                     f"Are you sure you want to package and send the LinuxCNC application to {ip}?\n\nThis will prompt the physical machine operator to accept the installation.", 
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -1423,7 +1423,7 @@ Z_SAFE = 0.0000
             QApplication.processEvents()
         
         temp_dir = tempfile.gettempdir()
-        tar_path = os.path.join(temp_dir, "cncfusion_install.tar.gz")
+        tar_path = os.path.join(temp_dir, "linuxcnc_install.tar.gz")
         
         try:
             source_dir = None
@@ -1438,9 +1438,9 @@ Z_SAFE = 0.0000
 
             with tarfile.open(tar_path, "w:gz") as tar:
                 for root, dirs, files in os.walk(source_dir):
-                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['.venv', 'venv', '__pycache__', 'exports', 'backups', 'recovery', 'dist', 'build', 'CNCFusion_layout_editor']]
+                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['.venv', 'venv', '__pycache__', 'exports', 'backups', 'recovery', 'dist', 'build', 'LinuxCNC_layout_editor']]
                     for file in files:
-                        if file.startswith('.') or file.endswith(('.pyc', '.ini', '.hal')) or file == "cncfusion_install.tar.gz": continue
+                        if file.startswith('.') or file.endswith(('.pyc', '.ini', '.hal')) or file == "linuxcnc_install.tar.gz": continue
                         full_path = os.path.join(root, file)
                         arcname = os.path.relpath(full_path, source_dir)
                         tar.add(full_path, arcname=arcname)
@@ -1463,8 +1463,8 @@ Z_SAFE = 0.0000
                     "Application update was securely staged on the LinuxCNC machine.\n\n"
                     f"Staged archive size: {staged_size} bytes\n\n"
                     "To approve and install locally on the LinuxCNC machine, run:\n\n"
-                    "sudo systemctl start cncfusion-apply-update\n\n"
-                    "The installer replaces /opt/CNCFusion transactionally and preserves its .venv.",
+                    "sudo systemctl start linuxcnc-apply-update\n\n"
+                    "The installer replaces /opt/LinuxCNC transactionally and preserves its .venv.",
                 )
             except Exception as error:
                 QMessageBox.critical(self, "Update Failed", f"Secure application staging failed:\n{error}")
@@ -1486,11 +1486,11 @@ Z_SAFE = 0.0000
                 ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
                 
                 sftp = ssh.open_sftp()
-                sftp.put(tar_path, "/tmp/cncfusion_install.tar.gz")
+                sftp.put(tar_path, "/tmp/linuxcnc_install.tar.gz")
                 sftp.close()
                 
                 # Prompt the physical operator using Zenity
-                prompt_cmd = f"export DISPLAY=:0; export WAYLAND_DISPLAY=wayland-0; export XDG_RUNTIME_DIR=/run/user/$(id -u {user}); export XAUTHORITY=/home/{user}/.Xauthority; export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u {user})/bus; zenity --question --title='App Install Request' --text='An installation/update of CNC Fusion Pro was pushed from the Dev machine.\n\nDo you want to authorize and install it now?' --width=400"
+                prompt_cmd = f"export DISPLAY=:0; export WAYLAND_DISPLAY=wayland-0; export XDG_RUNTIME_DIR=/run/user/$(id -u {user}); export XAUTHORITY=/home/{user}/.Xauthority; export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u {user})/bus; zenity --question --title='App Install Request' --text='An installation/update of LinuxCNC Pro was pushed from the Dev machine.\n\nDo you want to authorize and install it now?' --width=400"
                 stdin, stdout, stderr = ssh.exec_command(prompt_cmd)
                 exit_status = stdout.channel.recv_exit_status()
                 err_out = stderr.read().decode().strip()
@@ -1498,7 +1498,7 @@ Z_SAFE = 0.0000
                 if exit_status != 0:
                     if exit_status == 1 and "cannot open display" not in err_out.lower() and "not found" not in err_out.lower() and "wayland" not in err_out.lower() and "gtk" not in err_out.lower():
                         QMessageBox.information(self, "Cancelled", "The remote operator declined the installation.")
-                        ssh.exec_command("rm -f /tmp/cncfusion_install.tar.gz")
+                        ssh.exec_command("rm -f /tmp/linuxcnc_install.tar.gz")
                         ssh.close()
                         if hasattr(self.window(), 'sys_monitor_lbl'): self.window().sys_monitor_lbl.setText("System Diagnostics Active")
                         return
@@ -1507,7 +1507,7 @@ Z_SAFE = 0.0000
                             f"Could not show the popup on the remote screen (it might be asleep or blocking SSH displays).\n\nDetails: {err_out}\n\nDo you want to FORCE the installation anyway?", 
                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                         if fallback != QMessageBox.StandardButton.Yes:
-                            ssh.exec_command("rm -f /tmp/cncfusion_install.tar.gz")
+                            ssh.exec_command("rm -f /tmp/linuxcnc_install.tar.gz")
                             ssh.close()
                             if hasattr(self.window(), 'sys_monitor_lbl'): self.window().sys_monitor_lbl.setText("System Diagnostics Active")
                             return
@@ -1516,7 +1516,7 @@ Z_SAFE = 0.0000
                     self.window().sys_monitor_lbl.setText("⏳ Installing and Creating Shortcuts...")
                     QApplication.processEvents()
                 
-                install_cmd = f"mkdir -p /home/{user}/CNCFusion && tar -xzf /tmp/cncfusion_install.tar.gz -C /home/{user}/CNCFusion && rm -f /tmp/cncfusion_install.tar.gz && mkdir -p /home/{user}/Desktop && cat << 'EOF' > /home/{user}/Desktop/CNCFusion.desktop\n[Desktop Entry]\nType=Application\nExec=python3 /home/{user}/CNCFusion/main.py\nPath=/home/{user}/CNCFusion\nName=CNC Fusion Pro\nIcon=/home/{user}/CNCFusion/assets/CNCFusionDeskTopIcon.png\nTerminal=false\nEOF\nchmod +x /home/{user}/Desktop/CNCFusion.desktop"
+                install_cmd = f"mkdir -p /home/{user}/LinuxCNC && tar -xzf /tmp/linuxcnc_install.tar.gz -C /home/{user}/LinuxCNC && rm -f /tmp/linuxcnc_install.tar.gz && mkdir -p /home/{user}/Desktop && cat << 'EOF' > /home/{user}/Desktop/LinuxCNC.desktop\n[Desktop Entry]\nType=Application\nExec=python3 /home/{user}/LinuxCNC/main.py\nPath=/home/{user}/LinuxCNC\nName=LinuxCNC Pro\nIcon=/home/{user}/LinuxCNC/assets/LinuxCNCDeskTopIcon.png\nTerminal=false\nEOF\nchmod +x /home/{user}/Desktop/LinuxCNC.desktop"
                 ssh.exec_command(install_cmd)
                 ssh.close()
                 
@@ -1633,7 +1633,7 @@ Z_SAFE = 0.0000
 
     def generate_base_configs(self):
         name = self.mach_name_input.text().strip().replace(" ", "_")
-        if not name: name = "CNCFusion"
+        if not name: name = "LinuxCNC"
         
         kinematics = self.mach_kinematics_cb.currentText()
         units = "mm" if "Metric" in self.mach_units_cb.currentText() else "inch"
@@ -1692,7 +1692,7 @@ Z_SAFE = 0.0000
             and2_count += 1
             
         display_sel = self.mach_display_cb.currentText()
-        display_val = "./cncfusion_gui.py" if display_sel == "CNCFusion" else display_sel
+        display_val = "./linuxcnc_gui.py" if display_sel == "LinuxCNC" else display_sel
 
         paths = get_paths(self.sm)
         ini_content = [
@@ -2135,7 +2135,7 @@ Z_SAFE = 0.0000
         ]
         
         tool_tbl = [
-            "; Default Tool Table for CNC Fusion",
+            "; Default Tool Table for LinuxCNC",
             "; T<tool> P<pocket> X<offset> Y<offset> Z<offset> A<offset> B<offset> C<offset> U<offset> V<offset> W<offset> D<diameter> I<frontangle> J<backangle> Q<orientation>",
             "T1 P1 X0 Y0 Z0.0 A0 B0 C0 U0 V0 W0 D0.0 I0 J0 Q0 ; Default Tool",
             ""
@@ -2146,21 +2146,21 @@ Z_SAFE = 0.0000
             ""
         ]
         
-        cncfusion_gui_content = [
+        linuxcnc_gui_content = [
             "#!/usr/bin/env python3",
-            "\"\"\"LinuxCNC DISPLAY entry point: launch the CNCFusion Qt dashboard.\"\"\"",
+            "\"\"\"LinuxCNC DISPLAY entry point: launch the LinuxCNC Qt dashboard.\"\"\"",
             "import os",
             "import subprocess",
             "import sys",
             "",
             "try:",
             "    import hal",
-            "    h = hal.component('cncfusion_gui')",
+            "    h = hal.component('linuxcnc_gui')",
             "    h.ready()",
             "except ImportError:",
             "    h = None",
             "",
-            "APPLICATION_ROOT = '/opt/CNCFusion'",
+            "APPLICATION_ROOT = '/opt/LinuxCNC'",
             "PYTHON_EXECUTABLE = os.path.join(APPLICATION_ROOT, '.venv', 'bin', 'python')",
             "MAIN_SCRIPT = os.path.join(APPLICATION_ROOT, 'main.py')",
             "if not os.path.isfile(PYTHON_EXECUTABLE):",
@@ -2215,7 +2215,7 @@ Z_SAFE = 0.0000
         postgui_path = os.path.join(export_dir, "custom_postgui.hal")
         tool_tbl_path = os.path.join(export_dir, "tool.tbl")
         var_path = os.path.join(export_dir, "linuxcnc.var")
-        gui_path = os.path.join(export_dir, "cncfusion_gui.py")
+        gui_path = os.path.join(export_dir, "linuxcnc_gui.py")
         tool_probe_path = os.path.join(export_dir, "tool_height_probe.ngc")
         
         try:
@@ -2242,7 +2242,7 @@ Z_SAFE = 0.0000
             with open(var_path, 'w', newline='\n') as f:
                 f.write("\n".join(var_content))
             with open(gui_path, 'w', newline='\n') as f:
-                f.write("\n".join(cncfusion_gui_content))
+                f.write("\n".join(linuxcnc_gui_content))
             with open(tool_probe_path, 'w', newline='\n') as f:
                 f.write("\n".join(tool_height_probe_content))
             
@@ -2341,7 +2341,7 @@ Z_SAFE = 0.0000
                         sftp.put(local_file, f"{sftp_dir}/{filename}")
                 
                 sftp.close()
-                ssh.exec_command(f"chmod +x {sftp_dir}/cncfusion_gui.py")
+                ssh.exec_command(f"chmod +x {sftp_dir}/linuxcnc_gui.py")
                 ssh.close()
             else:
                 subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", mkdir_cmd], capture_output=True, timeout=10)
@@ -2349,7 +2349,7 @@ Z_SAFE = 0.0000
                     local_file = os.path.join(local_dir, filename)
                     if os.path.isfile(local_file):
                         subprocess.run(["scp", "-o", "BatchMode=yes", local_file, f"{user}@{ip}:{pending_dir}/{filename}"], capture_output=True, timeout=10)
-                subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", f"chmod +x {pending_dir}/cncfusion_gui.py"], capture_output=True, timeout=10)
+                subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", f"chmod +x {pending_dir}/linuxcnc_gui.py"], capture_output=True, timeout=10)
                         
             QMessageBox.information(self, "Deploy Success", f"Configuration successfully staged to {ip}:{pending_dir}\n\nThe operator will be prompted to approve these updates on the physical machine.")
         except Exception as e:
@@ -2366,7 +2366,7 @@ Z_SAFE = 0.0000
             return
 
         name = self.mach_name_input.text().strip().replace(" ", "_")
-        if not name: name = "CNCFusion"
+        if not name: name = "LinuxCNC"
         
         remote_base = self.sm.get_setting("PATHS", "last_remote_config_dir", "~/linuxcnc/configs")
         default_ini_path = f"{remote_base}/{name}/{name}.ini"
@@ -2421,7 +2421,7 @@ Z_SAFE = 0.0000
                 return
 
         # Auto-kill previous instances to prevent the 'already running' GUI popup trap
-        base_kill_cmd = "if pgrep linuxcnc > /dev/null; then python3 -c 'import linuxcnc; c=linuxcnc.command(); c.exit()' 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do if ! pgrep linuxcnc > /dev/null; then break; fi; sleep 1; done; if pgrep linuxcnc > /dev/null; then killall -TERM linuxcnc linuxcncsvr milltask io 2>/dev/null; sleep 2; fi; if pgrep linuxcnc > /dev/null; then halrun -U 2>/dev/null; killall -9 linuxcnc linuxcncsvr milltask io halrun rtapi_app halcmd 2>/dev/null; rm -rf /tmp/linuxcnc.lock* /tmp/linuxcnc.print /tmp/linuxcnc.error 2>/dev/null; rm -f /dev/shm/linuxcnc* /dev/shm/rtapi* /dev/shm/hal* 2>/dev/null; fi; fi; pkill -TERM -f cncfusion_gui 2>/dev/null;"
+        base_kill_cmd = "if pgrep linuxcnc > /dev/null; then python3 -c 'import linuxcnc; c=linuxcnc.command(); c.exit()' 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do if ! pgrep linuxcnc > /dev/null; then break; fi; sleep 1; done; if pgrep linuxcnc > /dev/null; then killall -TERM linuxcnc linuxcncsvr milltask io 2>/dev/null; sleep 2; fi; if pgrep linuxcnc > /dev/null; then halrun -U 2>/dev/null; killall -9 linuxcnc linuxcncsvr milltask io halrun rtapi_app halcmd 2>/dev/null; rm -rf /tmp/linuxcnc.lock* /tmp/linuxcnc.print /tmp/linuxcnc.error 2>/dev/null; rm -f /dev/shm/linuxcnc* /dev/shm/rtapi* /dev/shm/hal* 2>/dev/null; fi; fi; pkill -TERM -f linuxcnc_gui 2>/dev/null;"
             
         # We use a dedicated bash script to guarantee it inherits the exact environment
         # variables it needs, regardless of whether it's launched locally or remotely over SSH.
@@ -2435,7 +2435,7 @@ export XDG_RUNTIME_DIR=/run/user/$(id -u {user})
 export XAUTHORITY=/home/{user}/.Xauthority
 export PATH=$PATH:/usr/bin:/usr/local/bin:/usr/sbin
 # CRITICAL: Ensure the dummy GUI script is executable, otherwise LinuxCNC instantly crashes on boot!
-chmod +x "$(dirname "{abs_ini_path}")/cncfusion_gui.py" 2>/dev/null
+chmod +x "$(dirname "{abs_ini_path}")/linuxcnc_gui.py" 2>/dev/null
 nohup linuxcnc "{abs_ini_path}" >> /tmp/linuxcnc_launch.log 2>&1 </dev/null &
 sleep 2
 cat /tmp/linuxcnc_launch.log
@@ -2618,7 +2618,7 @@ cat /tmp/linuxcnc_launch.log
                 QMessageBox.critical(self, "Shutdown Failed", f"Machine agent request failed: {error}")
             return
 
-        base_cmd = "if pgrep linuxcnc > /dev/null; then python3 -c 'import linuxcnc; c=linuxcnc.command(); c.exit()' 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do if ! pgrep linuxcnc > /dev/null; then break; fi; sleep 1; done; if pgrep linuxcnc > /dev/null; then killall -TERM linuxcnc linuxcncsvr milltask io 2>/dev/null; sleep 2; fi; if pgrep linuxcnc > /dev/null; then halrun -U 2>/dev/null; killall -9 linuxcnc linuxcncsvr milltask io halrun rtapi_app halcmd 2>/dev/null; rm -rf /tmp/linuxcnc.lock* /tmp/linuxcnc.print /tmp/linuxcnc.error 2>/dev/null; rm -f /dev/shm/linuxcnc* /dev/shm/rtapi* /dev/shm/hal* 2>/dev/null; fi; fi; pkill -TERM -f cncfusion_gui 2>/dev/null"
+        base_cmd = "if pgrep linuxcnc > /dev/null; then python3 -c 'import linuxcnc; c=linuxcnc.command(); c.exit()' 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do if ! pgrep linuxcnc > /dev/null; then break; fi; sleep 1; done; if pgrep linuxcnc > /dev/null; then killall -TERM linuxcnc linuxcncsvr milltask io 2>/dev/null; sleep 2; fi; if pgrep linuxcnc > /dev/null; then halrun -U 2>/dev/null; killall -9 linuxcnc linuxcncsvr milltask io halrun rtapi_app halcmd 2>/dev/null; rm -rf /tmp/linuxcnc.lock* /tmp/linuxcnc.print /tmp/linuxcnc.error 2>/dev/null; rm -f /dev/shm/linuxcnc* /dev/shm/rtapi* /dev/shm/hal* 2>/dev/null; fi; fi; pkill -TERM -f linuxcnc_gui 2>/dev/null"
             
         try:
             if is_local_ip(ip):
