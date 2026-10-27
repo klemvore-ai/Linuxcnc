@@ -460,16 +460,20 @@ class SetupWizard(QWizard):
         self.basics_page = MachineBasicsPage(settings)
         self.axis_page = AxisLimitsPage(settings)
         self.hardware_page = HardwareNetworkPage(settings)
-        self.agent_page = SecureAgentPage(settings)
-        self.enrollment_page = DebianEnrollmentPage(settings)
         self.io_page = IOSafetyPage(settings)
         self.feedback_page = FeedbackPage(settings)
         self.review_page = ReviewPage(settings)
         self.addPage(self.basics_page)
         self.addPage(self.axis_page)
         self.addPage(self.hardware_page)
-        self.addPage(self.agent_page)
-        self.addPage(self.enrollment_page)
+        if not getattr(settings, "local_only", False):
+            self.agent_page = SecureAgentPage(settings)
+            self.enrollment_page = DebianEnrollmentPage(settings)
+            self.addPage(self.agent_page)
+            self.addPage(self.enrollment_page)
+        else:
+            self.agent_page = None
+            self.enrollment_page = None
         self.addPage(self.io_page)
         self.addPage(self.feedback_page)
         self.addPage(self.review_page)

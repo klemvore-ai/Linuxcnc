@@ -11,7 +11,7 @@ LinuxCNC Pro is a sophisticated desktop application built with Python and PyQt6.
 **Key Technologies:**
 *   **Backend & Application Logic:** Python
 *   **GUI Framework:** PyQt6
-*   **Remote Communication:** Paramiko (for SSH to the LinuxCNC machine)
+*   **Remote Communication:** Secure TCP/IP mTLS Machine Agent (`MachineAgentClient`), native in-process LinuxCNC API (`LocalLinuxCNCAPI`), and standard system SSH/SCP (`subprocess`)
 *   **CNC Control System:** LinuxCNC
 *   **Target Hardware:** Mesa Electronics FPGA cards (e.g., 7i76E)
 *   **System Monitoring:** `psutil` (optional)
@@ -53,7 +53,7 @@ The application is architected in a modular, tab-based format managed by the mai
 *   **Command Execution:**
     *   Most actions (jogging, MDI commands, homing) are sent to the remote machine as Base64-encoded Python scripts.
     *   The `_send_b64_py_cmd` function packages the script.
-    *   A dedicated `_cmd_worker` thread (`QThread`) processes a queue of these commands, executing them over SSH via `paramiko` to prevent UI freezing.
+    *   A dedicated `_cmd_worker` thread (`QThread`) processes a queue of these commands, executing them locally or over SSH via subprocess to prevent UI freezing.
 *   **UI System:** Features a `QStackedWidget` to switch between a built-in default UI and a dynamically loaded custom UI from a `.linuxcncui` file.
 
 #### `tabs/mesa_util_tab.py`
@@ -84,5 +84,5 @@ The application is architected in a modular, tab-based format managed by the mai
 *   **GUI:** The UI is built using the PyQt6 framework. The UI is styled with a "Fusion" theme and custom stylesheets to achieve a dark, professional look.
 *   **Modularity:** The application is highly modular, with each primary feature encapsulated within its own "tab" class in the `tabs/` directory. This separation of concerns is a core architectural pattern.
 *   **Configuration:** All machine and application settings are managed through the `SettingsManager` class and persisted in the `settings.ini` file. This is the single source of truth for configuration.
-*   **Remote Operations:** Actions on the remote LinuxCNC machine are performed over SSH using the `paramiko` library. Commands are often executed in background threads (`QThread` or `threading.Thread`) to keep the UI responsive.
+*   **Remote Operations:** Actions on the remote LinuxCNC machine are performed over the secure TCP/IP mTLS Machine Agent (`MachineAgentClient`) or SSH using standard subprocess calls. Commands are executed in background threads (`QThread` or `threading.Thread`) to keep the UI responsive.
 *   **Operator vs. Developer Mode:** The application has a concept of an "Operator Mode" which simplifies the UI to show only the `DASHBOARD` tab. This mode can be toggled with the `Ctrl+Shift+O` shortcut.

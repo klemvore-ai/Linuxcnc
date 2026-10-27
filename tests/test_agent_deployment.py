@@ -1,8 +1,30 @@
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from private.installer.install import LinuxCNCInstaller
 
 
 class AgentDeploymentTests(unittest.TestCase):
+    def test_installer_keeps_debian_linuxcnc_config_directory_traversable(self):
+        installer = LinuxCNCInstaller(dry_run=True)
+        installer.dry_run = False
+        installer.paths.update({
+            "LINUXCNC_AGENT_ROOT": "/opt/LinuxCNC",
+            "LINUXCNC_CERTS_DIR": "/etc/linuxcnc",
+            "LINUXCNC_STAGING_DIR": "/var/lib/linuxcnc/updates",
+            "LINUXCNC_AGENT_USER": "linuxcnc",
+            "LINUXCNC_AGENT_GROUP": "linuxcnc",
+            "LINUXCNC_LINUXCNC_USER": "operator",
+        })
+
+        with patch("private.installer.install.os.makedirs"), patch(
+            "private.installer.install.os.chmod"
+        ) as chmod, patch("private.installer.install.shutil.chown"):
+            installer.create_directories()
+
+        chmod.assert_any_call("/etc/linuxcnc", 0o755)
+
     def test_systemd_template_requires_service_hardening_and_explicit_management_bind(self):
         service = Path("agent/linuxcnc-agent.service").read_text(encoding="utf-8")
         environment = Path("agent/agent.env.example").read_text(encoding="utf-8")

@@ -5,6 +5,7 @@
             "name": "Python: Run main.py",
             "type": "python",
             "request": "launch",
+            "python": "${workspaceFolder}/.venv/bin/python",
             "program": "${workspaceFolder}/main.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",

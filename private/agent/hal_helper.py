@@ -392,7 +392,7 @@ print(json.dumps({{"accepted": True, "command": {command!r}}}, separators=(",", 
         return json.loads(result.stdout.strip().splitlines()[-1])
 
     commands = {
-        "abort": "controller.abort()",
+        "abort": "try:\n    controller.set_feed_hold(0)\nexcept: pass\ncontroller.abort()",
         "override_limits": "controller.override_limits()",
         "mode_manual": "controller.mode(linuxcnc.MODE_MANUAL)",
         "mode_auto": "controller.mode(linuxcnc.MODE_AUTO)",

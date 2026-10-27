@@ -26,7 +26,7 @@ echo "$VERSION" > version.txt
 echo "Starting LinuxCNC Pro UI Editor build process (Version: $VERSION)..."
 
 echo "Installing dependencies..."
-pip3 install pyinstaller PyQt6 paramiko
+pip3 install pyinstaller PyQt6
 
 echo "Clearing previous build cache..."
 rm -rf build dist LinuxCNC_UI_Editor.spec

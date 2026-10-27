@@ -146,7 +146,7 @@ class LinuxCNCInstaller:
 
         dirs = [
             (self.paths["LINUXCNC_AGENT_ROOT"], 0o755, "root", "root"),
-            (self.paths["LINUXCNC_CERTS_DIR"], 0o700, "root", "root"),
+            (self.paths["LINUXCNC_CERTS_DIR"], 0o755, "root", "root"),
             (self.paths["LINUXCNC_STAGING_DIR"], 0o755, self.paths["LINUXCNC_AGENT_USER"], self.paths["LINUXCNC_AGENT_GROUP"]),
             (os.path.join(self.paths["LINUXCNC_STAGING_DIR"], "tmp"), 0o755, self.paths["LINUXCNC_AGENT_USER"], self.paths["LINUXCNC_AGENT_GROUP"]),
             ("/run/linuxcnc", 0o755, self.paths["LINUXCNC_LINUXCNC_USER"], self.paths["LINUXCNC_AGENT_GROUP"]),

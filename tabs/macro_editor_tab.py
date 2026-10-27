@@ -21,13 +21,6 @@ except:
 def is_local_ip(ip):
     return ip in LOCAL_IPS
 
-HAS_PARAMIKO = False
-try:
-    import paramiko
-    HAS_PARAMIKO = True
-except ImportError:
-    pass
-
 class GCodeHighlighter(QSyntaxHighlighter):
     def __init__(self, document):
         super().__init__(document)
@@ -354,13 +347,6 @@ class MacroEditorTab(QWidget):
                                 rel = os.path.relpath(os.path.join(root, f), expanded_dir)
                                 file_list.append(rel.replace('\\', '/'))
                     out = "\n".join(file_list)
-            elif HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
-                stdin, stdout, stderr = ssh.exec_command(cmd)
-                out = stdout.read().decode().strip()
-                ssh.close()
             else:
                 res = subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", cmd], capture_output=True, text=True, timeout=5)
                 out = res.stdout.strip()
@@ -449,13 +435,6 @@ class MacroEditorTab(QWidget):
             if is_local_ip(ip):
                 expanded = os.path.expanduser(remote_path)
                 with open(expanded, 'r') as f: out = f.read()
-            elif HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
-                stdin, stdout, stderr = ssh.exec_command(cmd)
-                out = stdout.read().decode()
-                ssh.close()
             else:
                 res = subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", cmd], capture_output=True, text=True, timeout=5)
                 out = res.stdout
@@ -495,15 +474,6 @@ class MacroEditorTab(QWidget):
                 expanded = os.path.expanduser(remote_path)
                 os.makedirs(os.path.dirname(expanded), exist_ok=True)
                 with open(expanded, 'w') as f: f.write(content)
-            elif HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
-                ssh.exec_command(f"mkdir -p \"{remote_parent}\"")
-                sftp = ssh.open_sftp()
-                with sftp.file(remote_path, 'w') as f: f.write(content.encode('utf-8'))
-                sftp.close()
-                ssh.close()
             else:
                 with tempfile.NamedTemporaryFile(delete=False, mode='w') as f:
                     f.write(content)

@@ -25,3 +25,5 @@ paths.conf
 backups/
 exports/
 Mesa_Oxman.hal
+*.var
+*.var.bak

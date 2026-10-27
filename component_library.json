@@ -1285,6 +1285,54 @@
             true,
             "hm2_7i76e.0.7i76.0.0.input-28-not",
             "Default"
+        ],
+        [
+            "INPUT-00-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-00-not",
+            "Default"
+        ],
+        [
+            "INPUT-20-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-20-not",
+            "Default"
+        ],
+        [
+            "INPUT-01-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-01-not",
+            "Default"
+        ],
+        [
+            "INPUT-02-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-02-not",
+            "Default"
+        ],
+        [
+            "INPUT-12-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-12-not",
+            "Default"
+        ],
+        [
+            "INPUT-22-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-22-not",
+            "Default"
+        ],
+        [
+            "INPUT-05-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-05-not",
+            "Default"
+        ],
+        [
+            "INPUT-06-NOT",
+            true,
+            "hm2_7i76e.0.7i76.0.0.input-06-not",
+            "Default"
         ]
     ],
     "Auto_pid_x": [
@@ -1799,6 +1847,12 @@
             false,
             "spindle.0.index-enable",
             "Signal (Blue)"
+        ],
+        [
+            "AMP-FAULT-IN",
+            false,
+            "spindle.0.amp-fault-in",
+            "Default"
         ]
     ],
     "Auto_Misc_Imported": [

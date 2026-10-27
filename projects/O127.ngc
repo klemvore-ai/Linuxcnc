@@ -1,5 +1,5 @@
 (O127 - Measure Inside Front-Left Corner)
-(O127 probes Y- then X+ and sets the inside corner to X0 Y0)
+(O127 probes Y- then X- and sets the inside corner to X0 Y0)
 
 O127 sub
     #<probe_vel> = #<_ini[PROBE]VEL>
@@ -8,17 +8,28 @@ O127 sub
     #<z_drop> = #<_ini[PROBE]Z_DROP>
     #<probe_diam> = #<_ini[PROBE]DIAMETER>
     #<radius> = [#<probe_diam> / 2.0]
-    G90
-    G91
-    G0 Z-#<z_drop>
+
+    #<start_x> = #5420
+    #<start_y> = #5421
+    #<start_z> = #5422
+
+    G91 G38.3 Z-#<z_drop> F#<probe_vel>
     G38.2 Y-#<search_dist> F#<probe_vel>
     #<y1> = #5062
     G0 Y#<xy_clear>
-    G38.2 X#<search_dist> F#<probe_vel>
+    G90 G0 Z#<start_z>
+    G0 Y#<start_y>
+
+    G91 G38.3 Z-#<z_drop> F#<probe_vel>
+    G38.2 X-#<search_dist> F#<probe_vel>
     #<x1> = #5061
-    G0 X-#<xy_clear>
+    G0 X#<xy_clear>
+    G90 G0 Z#<start_z>
+    G0 X#<start_x>
+
     G90
-    G10 L20 P0 X[#<x1> - #<radius>]
+    G10 L20 P0 X[#<x1> + #<radius>]
     G10 L20 P0 Y[#<y1> + #<radius>]
+    G0 X0 Y0 Z#<start_z>
 O127 endsub
 M2

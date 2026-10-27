@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QInputDialog)
 from PyQt6.QtCore import Qt, QTimer
 from core.machine_agent import client_from_settings
+from core.linuxcnc_api import LocalLinuxCNCAPI
 
 LOCAL_IPS = ['localhost', '127.0.0.1']
 try:
@@ -15,13 +16,6 @@ except:
 
 def is_local_ip(ip):
     return ip in LOCAL_IPS
-
-HAS_PARAMIKO = False
-try:
-    import paramiko
-    HAS_PARAMIKO = True
-except ImportError:
-    pass
 
 TOOL_COLUMNS = [
     ("T", "Tool #"),
@@ -201,6 +195,22 @@ class ToolTableTab(QWidget):
             except Exception as error:
                 QMessageBox.critical(self, "Load Failed", f"Secure tool-table load failed:\n{error}")
                 return
+
+        if getattr(self.settings, "local_only", False):
+            local_path = os.path.expanduser(
+                self.settings.get_setting(
+                    "PATHS",
+                    "last_tool_table_path",
+                    f"~/linuxcnc/configs/{mach_name}/tool.tbl",
+                )
+            )
+            try:
+                with open(local_path, "r", encoding="utf-8") as tool_table:
+                    self._populate_table(tool_table.read())
+                self.settings.save_setting("PATHS", "last_tool_table_path", local_path)
+            except Exception as error:
+                QMessageBox.critical(self, "Load Failed", f"Could not read local tool table {local_path}:\n{error}")
+            return
         
         if not ip or not user:
             QMessageBox.warning(self, "Missing Credentials", "Please set SSH credentials in Settings.")
@@ -220,13 +230,6 @@ class ToolTableTab(QWidget):
             if is_local_ip(ip):
                 res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
                 out = res.stdout
-            elif HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                stdin, stdout, stderr = ssh.exec_command(cmd)
-                out = stdout.read().decode()
-                ssh.close()
             else:
                 res = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", cmd], capture_output=True, text=True, timeout=10)
                 out = res.stdout
@@ -286,19 +289,22 @@ class ToolTableTab(QWidget):
         password = self.settings.get_setting("SSH", "password", "")
         agent_client = client_from_settings(self.settings)
         mach_name = self.settings.get_setting('MACHINE_CONFIG', 'name', 'LinuxCNC')
+        local_only = getattr(self.settings, "local_only", False)
         
         if agent_client is not None:
             remote_path = f"{mach_name}/tool.tbl"
         else:
             remote_path = ""
         
-        if agent_client is None and (not ip or not user):
+        if agent_client is None and not local_only and (not ip or not user):
             QMessageBox.warning(self, "Missing Credentials", "Please set SSH credentials in Settings.")
             return
 
         default_path = self.settings.get_setting("PATHS", "last_tool_table_path", f"~/linuxcnc/configs/{mach_name}/tool.tbl")
-        
-        if agent_client is None:
+
+        if local_only:
+            remote_path = os.path.expanduser(default_path)
+        elif agent_client is None:
             remote_path, ok = QInputDialog.getText(self, "Save Tool Table", "Enter remote tool.tbl path:", text=default_path)
             if not ok or not remote_path:
                 return
@@ -332,25 +338,16 @@ class ToolTableTab(QWidget):
                 self.clear_unsaved()
                 QMessageBox.information(self, "Success", "Tool table securely staged on the machine.")
                 return
+            if local_only:
+                with open(remote_path, "w", encoding="utf-8", newline="\n") as tool_table:
+                    tool_table.write(content.replace("\\n", "\n"))
+                self._reload_linuxcnc_tool_table(ip, user, password)
+                self.clear_unsaved()
+                QMessageBox.information(self, "Success", f"Tool table saved locally to {remote_path}")
+                return
             if is_local_ip(ip):
                 with open(os.path.expanduser(remote_path), 'w') as f:
                     f.write(content.replace("\\n", "\n"))
-                self._reload_linuxcnc_tool_table(ip, user, password)
-                self.clear_unsaved()
-                QMessageBox.information(self, "Success", f"Tool table successfully saved to {remote_path}")
-            elif HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                sftp = ssh.open_sftp()
-                
-                sftp_path = remote_path.replace("~/", f"/home/{user}/", 1) if remote_path.startswith("~/") else remote_path
-                
-                with sftp.file(sftp_path, 'w') as f:
-                    f.write(content.replace("\\n", "\n").encode('utf-8'))
-                    
-                sftp.close()
-                ssh.close()
                 self._reload_linuxcnc_tool_table(ip, user, password)
                 self.clear_unsaved()
                 QMessageBox.information(self, "Success", f"Tool table successfully saved to {remote_path}")
@@ -372,18 +369,18 @@ class ToolTableTab(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to save tool table:\n{e}")
 
     def _reload_linuxcnc_tool_table(self, ip, user, password):
+        if getattr(self.settings, "local_only", False):
+            try:
+                LocalLinuxCNCAPI().command().load_tool_table()
+            except Exception as error:
+                QMessageBox.warning(self, "Tool Table Reload Failed", str(error))
+            return
         import threading
         cmd = "python3 -c \"import linuxcnc; c=linuxcnc.command(); c.load_tool_table()\""
         def run():
             try:
                 if is_local_ip(ip):
                     subprocess.run(cmd, shell=True, capture_output=True)
-                elif HAS_PARAMIKO:
-                    ssh = paramiko.SSHClient()
-                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    ssh.connect(ip, username=user, password=password, timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
-                    ssh.exec_command(cmd)
-                    ssh.close()
                 else:
                     subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", cmd], capture_output=True)
             except Exception as e:
@@ -408,7 +405,8 @@ class ToolTableTab(QWidget):
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
 
-        if agent_client is None and (not ip or not user):
+        local_only = getattr(self.settings, "local_only", False)
+        if agent_client is None and not local_only and (not ip or not user):
             QMessageBox.warning(self, "Missing Credentials", "Please set SSH credentials in Settings.")
             return
             
@@ -416,16 +414,17 @@ class ToolTableTab(QWidget):
         
         try:
             if agent_client is None:
-                if is_local_ip(ip):
+                if local_only:
+                    out = str(self.settings.get_setting("MACHINE_CONFIG", "active_tool", "0"))
+                    try:
+                        out = str(LocalLinuxCNCAPI().get_hal_value("iocontrol.0.tool-number"))
+                    except Exception:
+                        status = LocalLinuxCNCAPI().status()
+                        status.poll()
+                        out = str(status.tool_in_spindle)
+                elif is_local_ip(ip):
                     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
                     out = res.stdout.strip()
-                elif HAS_PARAMIKO:
-                    ssh = paramiko.SSHClient()
-                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                    stdin, stdout, stderr = ssh.exec_command(cmd)
-                    out = stdout.read().decode().strip()
-                    ssh.close()
                 else:
                     res = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", cmd], capture_output=True, text=True, timeout=10)
                     out = res.stdout.strip()

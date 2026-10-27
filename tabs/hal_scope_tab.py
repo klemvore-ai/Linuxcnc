@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor, QPen, QPainter, QBrush, QPainterPath
 
 from core.machine_agent import client_from_settings
+from core.linuxcnc_api import LocalLinuxCNCAPI
 
 LOCAL_IPS = ['localhost', '127.0.0.1']
 try:
@@ -21,23 +22,17 @@ except:
 def is_local_ip(ip):
     return ip in LOCAL_IPS
 
-HAS_PARAMIKO = False
-try:
-    import paramiko
-    HAS_PARAMIKO = True
-except ImportError:
-    pass
-
 class ScopeFetcherThread(QThread):
     data_fetched = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, ip, user, password, pins):
+    def __init__(self, ip, user, password, pins, local_api=None):
         super().__init__()
         self.ip = ip
         self.user = user
         self.password = password
         self.pins = pins
+        self.local_api = local_api
         self.running = False
         
         cmd_str = " ; ".join([f"halcmd getp {p}" for p in self.pins])
@@ -56,6 +51,24 @@ while True:
 
     def run(self):
         if not self.pins:
+            return
+
+        if self.local_api is not None:
+            self.running = True
+            while self.running:
+                try:
+                    values = {}
+                    for pin_name in self.pins:
+                        value = self.local_api.get_hal_value(pin_name)
+                        if isinstance(value, bool):
+                            values[pin_name] = float(value)
+                        else:
+                            values[pin_name] = float(value)
+                    self.data_fetched.emit(values)
+                except Exception as error:
+                    self.error_occurred.emit(f"HAL scope read failed: {error}")
+                    return
+                self.msleep(100)
             return
             
         if is_local_ip(self.ip):
@@ -85,23 +98,21 @@ while True:
                     self.msleep(100)
             return
 
-        if not HAS_PARAMIKO:
-            self.error_occurred.emit("Paramiko is required for live remote monitoring. Please install it.")
+        if not self.ip or not self.user:
+            self.error_occurred.emit("Remote credentials are required for live monitoring.")
             return
             
         self.running = True
         while self.running:
             try:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(self.ip, username=self.user, password=self.password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(self.password), allow_agent=not bool(self.password))
-                
-                stdin, stdout, stderr = ssh.exec_command(self.cmd)
-                stdout.channel.settimeout(1.0)
-                
-                while self.running:
+                proc = subprocess.Popen(
+                    ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{self.user}@{self.ip}", self.cmd],
+                    stdout=subprocess.PIPE,
+                    text=True,
+                )
+                while self.running and proc.poll() is None:
                     try:
-                        line = stdout.readline()
+                        line = proc.stdout.readline()
                         if not line: break
                         line = line.strip()
                         if line:
@@ -119,7 +130,7 @@ while True:
                                 self.data_fetched.emit(vals)
                     except Exception:
                         pass
-                ssh.close()
+                proc.terminate()
             except Exception as e:
                 pass
             
@@ -422,6 +433,17 @@ class HalScopeTab(QWidget):
             agent_client = client_from_settings(self.settings)
             if agent_client is not None:
                 self.fetcher = AgentScopeFetcherThread(agent_client, list(self.active_pins.keys()))
+                self.fetcher.data_fetched.connect(self.handle_new_data)
+                self.fetcher.error_occurred.connect(self.handle_error)
+                self.fetcher.start()
+                self.btn_run.setText("⏹ Stop Scope")
+                self.btn_run.setStyleSheet("background-color: #c0392b;")
+                return
+
+            if getattr(self.settings, "local_only", False):
+                self.fetcher = ScopeFetcherThread(
+                    "127.0.0.1", "", "", list(self.active_pins.keys()), LocalLinuxCNCAPI()
+                )
                 self.fetcher.data_fetched.connect(self.handle_new_data)
                 self.fetcher.error_occurred.connect(self.handle_error)
                 self.fetcher.start()

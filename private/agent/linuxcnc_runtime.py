@@ -129,6 +129,8 @@ class LinuxCNCRuntime:
             "DTG_X": distance_to_go[0] if len(distance_to_go) > 0 else 0.0,
             "DTG_Y": distance_to_go[1] if len(distance_to_go) > 1 else 0.0,
             "DTG_Z": distance_to_go[2] if len(distance_to_go) > 2 else 0.0,
+            "PROBE_VAL": getattr(status, "probe_val", 0),
+            "probe_tripped": bool(getattr(status, "probe_tripped", False)),
         }
 
     def show_hal_pins(self):
@@ -537,6 +539,10 @@ class LinuxCNCRuntime:
         controller = linuxcnc.command()
         state = self.machine_state()
         if command == "abort":
+            try:
+                controller.set_feed_hold(0)
+            except Exception:
+                pass
             controller.abort()
         elif command == "power_on":
             if state.get("machine_on"):

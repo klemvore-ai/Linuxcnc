@@ -1,6 +1,8 @@
 # LinuxCNC Machine Setup
 
-This guide prepares a LinuxCNC machine to receive updates and administration requests from LinuxCNC over the management network.
+> Legacy remote-agent guide: this workspace now runs the Debian 13 local-controller edition. It does not use a Windows development workstation, SSH deployment, or a remote mTLS agent. For the active workflow, see the Debian local-edition instructions in the [main README](../README.md).
+
+This guide is retained for installations that still use the older remote management workflow.
 
 The development computer may be Windows. LinuxCNC does not need to be installed on the development computer.
 

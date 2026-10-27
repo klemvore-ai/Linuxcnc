@@ -17,44 +17,71 @@ O107 sub
     G40
     G49
 
+    (Record starting position above hole)
+    #<start_x> = #5420
+    #<start_y> = #5421
+    #<start_z> = #5422
+
+    (=== 1. Probe X+ Side ===)
     (Drop to probe height)
-    G91
-    G0 Z-#<z_drop>
-
-    (Probe X- side)
-    G38.2 X-#<search_dist> F#<probe_vel>
-    #<x1> = #5061
-    G0 X#<xy_clear>
-
-    (Probe X+ side)
+    G91 G38.3 Z-#<z_drop> F#<probe_vel>
+    (Probe right towards inside hole wall)
     G38.2 X#<search_dist> F#<probe_vel>
+    #<x1> = #5061
+    (Return directly to start X)
+    G90 G0 X#<start_x>
+    (Raise to starting Z height)
+    G0 Z#<start_z>
+
+    (=== 2. Probe X- Side ===)
+    (Drop to probe height)
+    G91 G38.3 Z-#<z_drop> F#<probe_vel>
+    (Probe left towards inside hole wall)
+    G38.2 X-#<search_dist> F#<probe_vel>
     #<x2> = #5061
-    G0 X-#<xy_clear>
+    (Return directly to start X)
+    G90 G0 X#<start_x>
+    (Raise to starting Z height)
+    G0 Z#<start_z>
 
-    (Probe Y- side)
-    G38.2 Y-#<search_dist> F#<probe_vel>
-    #<y1> = #5062
-    G0 Y#<xy_clear>
-
-    (Probe Y+ side)
-    G38.2 Y#<search_dist> F#<probe_vel>
-    #<y2> = #5062
-    G0 Y-#<xy_clear>
-
-    (Retract Z)
-    G0 Z#<z_drop>
-
-    (Calculate center)
+    (Calculate X Center)
     #<center_x> = [[#<x1> + #<x2>] / 2.0]
-    #<center_y> = [[#<y1> + #<y2>] / 2.0]
-
-    (Move to the calculated center in work coordinates, then zero it)
-    G90
-    G0 X#<center_x> Y#<center_y>
+    G90 G0 X#<center_x>
     G10 L20 P0 X0
+
+    (=== 3. Probe Y+ Side ===)
+    (Move to start Y with true X center)
+    G90 G0 Y#<start_y>
+    (Drop to probe height)
+    G91 G38.3 Z-#<z_drop> F#<probe_vel>
+    (Probe up/+Y towards inside hole wall)
+    G38.2 Y#<search_dist> F#<probe_vel>
+    #<y1> = #5062
+    (Return directly to start Y)
+    G90 G0 Y#<start_y>
+    (Raise to starting Z height)
+    G0 Z#<start_z>
+
+    (=== 4. Probe Y- Side ===)
+    (Drop to probe height)
+    G91 G38.3 Z-#<z_drop> F#<probe_vel>
+    (Probe down/-Y towards inside hole wall)
+    G38.2 Y-#<search_dist> F#<probe_vel>
+    #<y2> = #5062
+    (Return directly to start Y)
+    G90 G0 Y#<start_y>
+    (Raise to starting Z height)
+    G0 Z#<start_z>
+
+    (Calculate Y Center)
+    #<center_y> = [[#<y1> + #<y2>] / 2.0]
+    G90 G0 Y#<center_y>
     G10 L20 P0 Y0
 
-    (MSG, Hole center: X#<center_x> Y#<center_y>)
+    (Move to final center at safe starting Z height)
+    G90 G0 X0 Y0 Z#<start_z>
+    (MSG, Hole center found and set to X0 Y0)
 
 O107 endsub
 M2
+

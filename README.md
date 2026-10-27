@@ -4,6 +4,20 @@ Welcome to **LinuxCNC Pro**, the ultimate integrated development environment (ID
 
 This application bridges the gap between machine configuration, logic wiring, UI design, and live operator control.
 
+## Current Edition: Debian 13 Local Controller
+
+The active edition in this workspace is developed in VS Code on Debian 13 RT amd64 and targets the Debian-packaged LinuxCNC 2.9.4 stable release. The app runs as LinuxCNC's local `DISPLAY` program and uses the standard LinuxCNC Python/HAL interfaces; it does not depend on 2.10 prerelease internals. Linux launches use local-only settings: saved Windows/remote SSH and mTLS agent endpoints are ignored, remote connection controls are hidden, and LinuxCNC commands run on this PC. Mesa control-network traffic remains available for the physical Mesa board; it is not a workstation-to-workstation connection.
+
+Run the existing VS Code launch configuration, or start the application directly:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python main.py
+```
+
+Run tests with `.venv/bin/python -m unittest discover -s tests`. The Windows development-client and remote-agent instructions later in this manual describe the legacy workflow and do not apply to this Debian local edition.
+
 For maintainers and contributors, see the [Architecture Guide](docs/ARCHITECTURE.md) for the service boundaries, security model, lifecycle rules, and future Mesa/EtherCAT extension path.
 
 For first-time LinuxCNC machine setup, follow the [Beginner LinuxCNC Setup Guide](docs/LINUXCNC_BEGINNER_SETUP.md). It explains where commands run, how to verify each step, and how to avoid mixing the management network with the Mesa/EtherCAT control network.
@@ -16,7 +30,7 @@ LinuxCNC, including the secure machine agent, installer, deployment tooling, and
 
 Do not commit a working `settings.ini`, certificates, private keys, fingerprints, passwords, machine IP addresses, HAL pin maps, or calibration values. Start from [settings.example.ini](settings.example.ini) and create your own local `settings.ini`; it is intentionally ignored by Git.
 
-The secure agent is public source code. Each installation must generate its own CA, server certificate, and client certificate and enroll the client fingerprint before accepting network requests. Follow [Secure Agent Setup](docs/SECURE_AGENT_SETUP.md) before enabling agent control on a machine.
+The secure agent remains in the source tree for the legacy remote edition. It is disabled by the Debian local-only profile.
 
 ---
 
@@ -36,7 +50,9 @@ The secure agent is public source code. Each installation must generate its own 
 
 ---
 
-## Quick Start Installation
+## Legacy Remote Installation
+
+The following Windows workstation and remote-agent steps are retained for reference only. They are not part of the active Debian local-controller edition.
 
 ### Machine-Side (Debian/LinuxCNC)
 
@@ -56,7 +72,7 @@ The installer sets up:
 
 **Output includes the client certificate fingerprint** — save this for the dev machine.
 
-### Dev Workstation (Windows)
+### Legacy Dev Workstation (Windows)
 
 1. Copy certificates from the machine:
    ```powershell
@@ -91,25 +107,25 @@ Then run: `sudo python3 installer/setup_paths.py`
 
 ---
 
-## 1. Initial Machine Setup (The Wizard)
+## 1. Local Machine Setup
 The **⚙️ Settings Tab** is the brains of the operation. It houses the Setup Wizard which automatically generates complete `INI` and `HAL` files.
 
 ### Mode Indicators
 The window title shows which mode you're running:
-- **"LinuxCNC Pro - DEVELOPER WORKSTATION"** — Windows dev machine
-- **"LinuxCNC Pro - MACHINE CONTROL"** — LinuxCNC machine
+- **"LinuxCNC Pro - MACHINE CONTROL"** — LinuxCNC is installed on this Linux PC
+- **"Local CNC PC Mode"** — remote workstation and agent settings are disabled
 
 ### Recommended Workflow:
-1. **Establish Comms:** Go to the *Mesa Utilities* tab, enter your Linux Machine IP, Username, and Password, and click **Save Credentials**. Click **Test SSH Connection** to ensure it works.
-2. **Configure Limits:** In the Settings tab, set your Machine Name, Kinematics (e.g., 3-Axis vs Gantry), Max Velocities, and X/Y/Z physical limits.
-3. **Map Hardware I/O:** In the *Hardware I/O Pin Mapping* section, assign your physical Mesa pins to the machine logic (e.g., Home Switches, Limits, E-Stop). 
+1. Start the intended LinuxCNC configuration locally and verify the physical E-stop and machine interlocks.
+2. Configure the Machine Name, Kinematics, motion limits, and Mesa control address for this controller.
+3. Map the local machine's physical Mesa pins to its logic (for example, home switches, limits, and E-stop).
    - *Tip: Use the "Invert" checkbox for normally-closed safety switches.*
 4. **Generate:** Click **✨ Generate Base INI & HAL Files**. The app will compile your settings into standard LinuxCNC config files and generate a visual logic `blueprint.hal`.
-5. **Deploy & Launch:** Click "Yes" when prompted to deploy the files to the remote machine via SSH. Then click **🚀 Launch LinuxCNC Remotely** to spin up the actual machine!
+5. Review generated files before installing them into the active LinuxCNC configuration. Launch and stop LinuxCNC through the local controls; do not use remote deployment in this edition.
 
 ---
 
-## 2. Secure Agent Architecture
+## Legacy: Secure Agent Architecture
 
 LinuxCNC uses a **mutual TLS (mTLS) secure agent** for machine control instead of SSH. This provides:
 - **Encrypted communication** between dev workstation and machine

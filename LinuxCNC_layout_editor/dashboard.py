@@ -1,9 +1,10 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
                              QLabel, QPushButton, QGroupBox, QSlider, QLineEdit, 
-                             QSizePolicy, QScrollArea, QMessageBox, QStackedWidget, QFileDialog, QTextEdit, QInputDialog, QGraphicsDropShadowEffect, QTabWidget)
+                             QSizePolicy, QScrollArea, QMessageBox, QStackedWidget, QFileDialog, QTextEdit, QInputDialog, QGraphicsDropShadowEffect, QTabWidget, QApplication)
 from PyQt6.QtCore import Qt, QTimer, QProcess, QThread, pyqtSignal, QFileSystemWatcher, QRect, QSize
 from PyQt6.QtGui import QColor, QPainter, QFont, QSyntaxHighlighter, QTextCharFormat
 import platform
+import shutil
 import threading
 import subprocess
 import json
@@ -24,12 +25,6 @@ except:
 def is_local_ip(ip):
     return ip in LOCAL_IPS
 
-HAS_PARAMIKO = False
-try:
-    import paramiko
-    HAS_PARAMIKO = True
-except ImportError:
-    pass
 
 class MDILineEdit(QLineEdit):
     def __init__(self, *args, **kwargs):
@@ -191,19 +186,20 @@ class PositionFetcherThread(QThread):
         self.running = False
 
     def run(self):
-        if not HAS_PARAMIKO:
+        if not self.ip or not self.user:
             return
             
         try:
             self.running = True
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(self.ip, username=self.user, password=self.password, timeout=3)
-            
             while self.running:
                 # Fetch positional feedback from HALUI
-                stdin, stdout, stderr = ssh.exec_command("halcmd show pin halui")
-                out = stdout.read().decode()
+                res = subprocess.run(
+                    ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{self.user}@{self.ip}", "halcmd show pin halui"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                out = res.stdout
                 
                 coords = {}
                 for line in out.splitlines():
@@ -220,7 +216,6 @@ class PositionFetcherThread(QThread):
                                 coords['FEED_OVR'] = val
                             elif 'halui.spindle-override.value' in name:
                                 coords['SPINDLE_OVR'] = val
-                                
                         except ValueError:
                             pass
                 
@@ -230,8 +225,6 @@ class PositionFetcherThread(QThread):
                 for _ in range(5):  # 500ms loop for quick exit
                     if not self.running: break
                     self.msleep(100)
-                    
-            ssh.close()
         except Exception:
             pass
         finally:
@@ -631,7 +624,7 @@ class MachineDashboard(QWidget):
                 btn_load.clicked.connect(lambda _, t=txt: self.load_gcode(t))
                 btn_save.clicked.connect(lambda _, t=txt: self.save_gcode(t))
                 btn_sync.clicked.connect(lambda _, t=txt: self.sync_gcode_to_machine(t.toPlainText()))
-                btn_clear.clicked.connect(txt.clear)
+                btn_clear.clicked.connect(lambda _, t=txt: self.clear_gcode(t))
                 widget_obj = container
             elif "3D" in w_type:
                 lbl = QLabel(f"{display_title}\n(3D Toolpath Viewer)" if show_text else "", self.custom_ui_widget)
@@ -671,21 +664,24 @@ class MachineDashboard(QWidget):
             password = self.settings.get_setting("SSH", "password", "")
             if not ip or not user: continue
             
-            if HAS_PARAMIKO:
-                try:
-                    if not self.ssh_client or not self.ssh_client.get_transport() or not self.ssh_client.get_transport().is_active():
-                        self.ssh_client = paramiko.SSHClient()
-                        self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                        self.ssh_client.connect(ip, username=user, password=password, timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
-                    self.ssh_client.exec_command(cmd)
-                except Exception:
-                    self.ssh_client = None
-            else:
-                try:
-                    subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", cmd], 
-                                   capture_output=True, timeout=5)
-                except:
-                    pass
+            try:
+                subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", cmd], 
+                               capture_output=True, timeout=5)
+            except:
+                pass
+
+    def get_nc_files_dir(self):
+        default_dir = os.path.expanduser("~/linuxcnc/nc_files")
+        nc_dir = ""
+        if hasattr(self, "settings") and self.settings is not None:
+            nc_dir = self.settings.get_setting("PATHS", "machine_gcode_root", "")
+            if not nc_dir:
+                nc_dir = self.settings.get_setting("PATHS", "nc_files_dir", default_dir)
+        if not nc_dir:
+            nc_dir = default_dir
+        nc_dir = os.path.expanduser(nc_dir)
+        os.makedirs(nc_dir, exist_ok=True)
+        return nc_dir
 
     def sync_gcode_to_machine(self, content):
         if not content.strip(): return
@@ -700,23 +696,11 @@ class MachineDashboard(QWidget):
             
             if is_local_ip(ip):
                 try:
-                    os.makedirs(os.path.expanduser("~/linuxcnc/nc_files"), exist_ok=True)
-                    local_dest = os.path.expanduser("~/linuxcnc/nc_files/active_program.ngc")
+                    local_dir = self.get_nc_files_dir()
+                    local_dest = os.path.join(local_dir, "active_program.ngc")
                     with open(local_dest, 'w', encoding='utf-8') as f:
                         f.write(content)
                     remote_path = local_dest
-                except: pass
-            elif HAS_PARAMIKO:
-                try:
-                    ssh = paramiko.SSHClient()
-                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    ssh.connect(ip, username=user, password=password, timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
-                    ssh.exec_command(f"mkdir -p {remote_dir}")
-                    sftp = ssh.open_sftp()
-                    with sftp.file(remote_path, 'w') as f:
-                        f.write(content.encode('utf-8'))
-                    sftp.close()
-                    ssh.close()
                 except: pass
             else:
                 try:
@@ -734,18 +718,88 @@ class MachineDashboard(QWidget):
         threading.Thread(target=task, daemon=True).start()
 
     def load_gcode(self, text_widget):
-        last_dir = self.settings.get_setting("PATHS", "last_local_gcode_dir", os.path.expanduser("~"))
+        default_dir = os.path.expanduser("~")
+        last_dir = default_dir
+        if hasattr(self, "settings") and self.settings is not None:
+            last_dir = self.settings.get_setting("PATHS", "last_local_gcode_dir", default_dir)
+        if not os.path.exists(last_dir): last_dir = default_dir
         path, _ = QFileDialog.getOpenFileName(self, "Load G-Code", last_dir, "G-Code Files (*.ngc *.gcode *.nc);;All Files (*)")
         if not path: return
-        self.settings.save_setting("PATHS", "last_local_gcode_dir", os.path.dirname(path))
+        if hasattr(self, "settings") and self.settings is not None:
+            self.settings.save_setting("PATHS", "last_local_gcode_dir", os.path.dirname(path))
         
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            nc_dir = self.get_nc_files_dir()
+            filename = os.path.basename(path)
+            local_target = os.path.join(nc_dir, filename)
+
+            is_same = False
+            try:
+                if os.path.exists(local_target):
+                    is_same = os.path.samefile(path, local_target)
+            except Exception:
+                is_same = (os.path.abspath(path) == os.path.abspath(local_target))
+
+            if not is_same:
+                shutil.copy2(path, local_target)
+
+            with open(local_target, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
             text_widget.setPlainText(content)
             self.sync_gcode_to_machine(content)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load G-Code:\n{e}")
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def clear_gcode(self, text_widget=None):
+        """Clear the G-code editor, 3D toolpath preview, and unload the active program from LinuxCNC."""
+        if text_widget is not None:
+            text_widget.clear()
+
+        try:
+            nc_dir = self.get_nc_files_dir()
+            active_dest = os.path.join(nc_dir, "active_program.ngc")
+            if os.path.exists(active_dest):
+                try:
+                    os.remove(active_dest)
+                except Exception:
+                    with open(active_dest, 'w', encoding='utf-8') as f:
+                        f.write("")
+        except Exception:
+            pass
+
+        ip = self.settings.get_setting("SSH", "ip_address", "") if hasattr(self, 'settings') and self.settings else ""
+        user = self.settings.get_setting("SSH", "username", "") if hasattr(self, 'settings') and self.settings else ""
+
+        if not is_local_ip(ip) and ip and user:
+            remote_dir = f"/home/{user}/linuxcnc/nc_files"
+            remote_path = f"{remote_dir}/active_program.ngc"
+            try:
+                subprocess.run(
+                    ["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", f"rm -f {remote_path}"],
+                    capture_output=True,
+                    timeout=5,
+                )
+            except Exception:
+                pass
+
+        py_code = (
+            "import linuxcnc\n"
+            "try:\n"
+            "    c = linuxcnc.command()\n"
+            "    try: c.set_feed_hold(0)\n"
+            "    except: pass\n"
+            "    c.abort()\n"
+            "    c.wait_complete(1.0)\n"
+            "    c.mode(linuxcnc.MODE_MANUAL)\n"
+            "    c.wait_complete(1.0)\n"
+            "    try: c.reset_interpreter()\n"
+            "    except: pass\n"
+            "except Exception: pass"
+        )
+        self._send_b64_py_cmd(py_code, urgent=True)
 
     def save_gcode(self, text_widget):
         default_path = self.settings.get_setting("PATHS", "last_gcode_file", "~/linuxcnc/nc_files/program.ngc")
@@ -760,21 +814,7 @@ class MachineDashboard(QWidget):
         
         if not ip or not user: return
             
-        if HAS_PARAMIKO:
-            try:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=5)
-                sftp = ssh.open_sftp()
-                with sftp.file(remote_path, 'w') as f:
-                    f.write(content.encode('utf-8'))
-                sftp.close()
-                ssh.close()
-                QMessageBox.information(self, "Saved", f"G-Code successfully saved to:\n{remote_path}")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to save G-Code:\n{e}")
-        else:
-            with tempfile.NamedTemporaryFile(delete=False, mode='w') as f:
+        with tempfile.NamedTemporaryFile(delete=False, mode='w') as f:
                 f.write(content)
                 temp_path = f.name
             
@@ -940,7 +980,7 @@ class MachineDashboard(QWidget):
         
         if not ip or not user: return
             
-        if HAS_PARAMIKO and not self.pos_fetcher:
+        if not self.pos_fetcher:
             self.pos_fetcher = PositionFetcherThread(ip, user, password)
             self.pos_fetcher.position_fetched.connect(self.update_real_coords)
             self.pos_fetcher.start()

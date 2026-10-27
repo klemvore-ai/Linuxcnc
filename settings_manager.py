@@ -8,18 +8,21 @@ isolated behind the credential store boundary used by the private layer.
 import configparser
 import os
 import json
+import getpass
 from core.credentials import CredentialStore, CredentialStoreError
 
 
 class SettingsManager:
-    def __init__(self, filename="settings.ini", credential_store=None):
+    def __init__(self, filename="settings.ini", credential_store=None, local_only=False):
         self.filename = os.fspath(filename)
         self.credential_store = credential_store
+        self.local_only = local_only
         self.config = configparser.ConfigParser()
         self._migrate_from_json()
         self._ensure_file_exists()
         self.config.read(self.filename)
-        self._migrate_legacy_ssh_password()
+        if not self.local_only:
+            self._migrate_legacy_ssh_password()
 
     @staticmethod
     def _secret_account(section, key):
@@ -162,6 +165,19 @@ class SettingsManager:
                 self.config.write(f)
 
     def get_setting(self, section, key, default=None):
+        if self.local_only:
+            normalized_section = section.upper()
+            normalized_key = key.lower()
+            if normalized_section == "AGENT":
+                return default
+            if normalized_section == "SSH":
+                local_settings = {
+                    "ip_address": "127.0.0.1",
+                    "username": getpass.getuser(),
+                    "password": "",
+                }
+                if normalized_key in local_settings:
+                    return local_settings[normalized_key]
         if section.upper() == "SSH" and key.lower() == "password":
             try:
                 secret = self._get_credential_store().get(self._secret_account(section, key))
@@ -175,6 +191,8 @@ class SettingsManager:
             return default
 
     def save_setting(self, section, key, value):
+        if self.local_only and section.upper() in {"SSH", "AGENT"}:
+            raise RuntimeError("Remote connection settings are disabled in local-only mode.")
         if section.upper() == "SSH" and key.lower() == "password":
             try:
                 self._get_credential_store().save(self._secret_account(section, key), str(value))

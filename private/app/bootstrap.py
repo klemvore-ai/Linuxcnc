@@ -2,25 +2,21 @@ import sys
 import os
 import shutil
 import threading
+from importlib import import_module
 from PyQt6.QtWidgets import QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QLabel, QMessageBox
 from PyQt6.QtCore import QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QShortcut, QKeySequence, QIcon
 
 
 APPLICATION_DIRECTORY = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if APPLICATION_DIRECTORY not in sys.path:
+    sys.path.insert(0, APPLICATION_DIRECTORY)
 os.chdir(APPLICATION_DIRECTORY)
 
 HAS_PSUTIL = False
 try:
     import psutil
     HAS_PSUTIL = True
-except ImportError:
-    pass
-
-HAS_PARAMIKO = False
-try:
-    import paramiko
-    HAS_PARAMIKO = True
 except ImportError:
     pass
 
@@ -58,7 +54,9 @@ from core.lifecycle import LinuxCNCLifecycle
 from core.local_lifecycle import LocalLinuxCNCBackend
 from core.machine_agent import client_from_settings
 from core.remote_lifecycle import RemoteLinuxCNCBackend
-from tabs.dashboard import MachineDashboard
+from tabs.dashboard import MachineDashboard, has_local_linuxcnc, is_local_controller
+from tabs.probing_tab import ProbingTab
+from tabs.tool_change_tab import ToolChangeTab
 from tabs.settings_tab import SettingsTab
 from tabs.library_tab import LibraryTab
 from tabs.wiring_tab import WiringTab
@@ -93,20 +91,10 @@ class SSHSyncWorker(QThread):
         local_config.read(local_file)
 
         try:
-            if HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(self.ip, username=self.user, password=self.password, timeout=3, look_for_keys=not bool(self.password), allow_agent=not bool(self.password))
-                sftp = ssh.open_sftp()
-                sftp_file = remote_file.replace("~/", f"/home/{self.user}/", 1) if remote_file.startswith("~/") else remote_file
-                sftp.get(sftp_file, local_file)
-                sftp.close()
-                ssh.close()
-            else:
-                res = subprocess.run(["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{self.user}@{self.ip}:{remote_file}", local_file], capture_output=True, timeout=5)
-                if res.returncode != 0:
-                    self.sync_complete.emit(False, "SCP error")
-                    return
+            res = subprocess.run(["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{self.user}@{self.ip}:{remote_file}", local_file], capture_output=True, timeout=5)
+            if res.returncode != 0:
+                self.sync_complete.emit(False, "SCP error")
+                return
 
             temp_config = configparser.ConfigParser()
             temp_config.read(local_file)
@@ -146,7 +134,10 @@ class LinuxCNCApp(QMainWindow):
         self.resize(1400, 900)
         self.setWindowIcon(QIcon("assets/LinuxCNCWindowsicon.ico"))
 
-        self.settings = SettingsManager(user_settings_path())
+        self.settings = SettingsManager(
+            user_settings_path(),
+            local_only=sys.platform.startswith("linux"),
+        )
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -171,6 +162,9 @@ class LinuxCNCApp(QMainWindow):
 
         self.library_tab = LibraryTab(self)
         self.dashboard_tab = MachineDashboard(self.settings)
+        self.dashboard_tab.parent_app = self
+        self.probing_tab = ProbingTab(self.settings, dashboard=self.dashboard_tab, parent=self)
+        self.tool_change_tab = ToolChangeTab(self.settings, dashboard=self.dashboard_tab, parent=self)
         self.wiring_tab = WiringTab(self.library_tab)
         self.layout_editor_tab = LayoutEditorTab(self)
         self.mesa_util_tab = MesaUtilTab(self.library_tab)
@@ -188,6 +182,8 @@ class LinuxCNCApp(QMainWindow):
 
         self.all_tabs = [
             (self.dashboard_tab, "🖥️ DASHBOARD"),
+            (self.probing_tab, "📐 PROBING"),
+            (self.tool_change_tab, "🔄 TOOL CHANGE"),
             (self.tool_table_tab, "🧰 TOOL TABLE"),
             (self.macro_editor_tab, "📝 MACROS"),
             (self.library_tab, "📚 COMPONENT LIBRARY"),
@@ -231,8 +227,10 @@ class LinuxCNCApp(QMainWindow):
             self.sync_worker.sync_complete.connect(self.on_auto_sync_complete)
             self.sync_worker.start()
         else:
-            self.sync_status_lbl.setText("Development PC Mode")
-            self.sync_status_lbl.setStyleSheet("color: #3498db; font-weight: bold; padding-left: 15px;")
+            local_controller = has_local_linuxcnc()
+            self.sync_status_lbl.setText("Local CNC PC Mode" if local_controller else "Development PC Mode")
+            status_color = "#27ae60" if local_controller else "#3498db"
+            self.sync_status_lbl.setStyleSheet(f"color: {status_color}; font-weight: bold; padding-left: 15px;")
 
     def on_auto_sync_complete(self, success, msg):
         if success:
@@ -264,6 +262,7 @@ class LinuxCNCApp(QMainWindow):
         self.tabs.clear()
         if self.op_mode:
             self.tabs.addTab(self.all_tabs[0][0], self.all_tabs[0][1])
+            self.tabs.addTab(self.all_tabs[1][0], self.all_tabs[1][1])
         else:
             for widget, title in self.all_tabs:
                 self.tabs.addTab(widget, title)
@@ -302,7 +301,7 @@ class LinuxCNCApp(QMainWindow):
 
             base_cmd = "if pgrep linuxcnc > /dev/null; then python3 -c 'import linuxcnc; c=linuxcnc.command(); c.exit()' 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do if ! pgrep linuxcnc > /dev/null; then break; fi; sleep 1; done; if pgrep linuxcnc > /dev/null; then killall -TERM linuxcnc linuxcncsvr milltask io 2>/dev/null; sleep 2; fi; if pgrep linuxcnc > /dev/null; then halrun -U 2>/dev/null; killall -9 linuxcnc linuxcncsvr milltask io halrun rtapi_app halcmd 2>/dev/null; rm -rf /tmp/linuxcnc.lock* /tmp/linuxcnc.print /tmp/linuxcnc.error 2>/dev/null; rm -f /dev/shm/linuxcnc* /dev/shm/rtapi* /dev/shm/hal* 2>/dev/null; fi; fi; pkill -TERM -f linuxcnc_gui 2>/dev/null"
 
-            if is_local_ip(ip):
+            if is_local_controller(ip):
                 print("Shutting down local LinuxCNC instance...")
                 try:
                     lifecycle = LinuxCNCLifecycle(LocalLinuxCNCBackend())
@@ -319,20 +318,16 @@ class LinuxCNCApp(QMainWindow):
                     print(result.message)
                 except Exception as e:
                     print(f"Failed to shutdown through the machine agent: {e}")
-            elif HAS_PARAMIKO and ip and user:
+            elif ip and user:
                 print(f"Shutting down remote LinuxCNC instance at {ip}...")
 
                 def kill_remote():
                     try:
-                        ssh = paramiko.SSHClient()
-                        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                        ssh.connect(ip, username=user, password=password, timeout=3, banner_timeout=5, auth_timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
                         if password:
                             cmd = f"echo '{password}' | sudo -S bash -c \"{base_cmd}\""
                         else:
                             cmd = f"sudo bash -c \"{base_cmd}\""
-                        ssh.exec_command(cmd)
-                        ssh.close()
+                        subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", cmd], capture_output=True, timeout=3)
                     except Exception as e:
                         print(f"Failed to shutdown remote LinuxCNC: {e}")
 
@@ -387,7 +382,7 @@ def launch_app():
     window = LinuxCNCApp()
 
     try:
-        import pyi_splash
+        import_module("pyi_splash")
         pyi_splash.close()
     except ImportError:
         pass

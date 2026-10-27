@@ -1,5 +1,6 @@
 import unittest
 import tempfile
+import getpass
 from pathlib import Path
 
 from core.credentials import CredentialStore, CredentialStoreError
@@ -61,6 +62,32 @@ class CredentialStoreTests(unittest.TestCase):
 
             self.assertEqual(settings.get_setting("SSH", "password"), "new-secret")
             self.assertNotIn("new-secret", settings_path.read_text(encoding="utf-8"))
+
+    def test_local_only_settings_uses_loopback_and_ignores_remote_endpoints(self):
+        with tempfile.TemporaryDirectory() as directory:
+            settings_path = Path(directory) / "settings.ini"
+            settings_path.write_text(
+                "[SSH]\nip_address = 192.0.2.10\nusername = remote-user\npassword = secret\n"
+                "[AGENT]\nbase_url = https://192.0.2.10:9443\n",
+                encoding="utf-8",
+            )
+
+            settings = SettingsManager(settings_path, local_only=True)
+
+            self.assertEqual(settings.get_setting("SSH", "ip_address"), "127.0.0.1")
+            self.assertEqual(settings.get_setting("SSH", "username"), getpass.getuser())
+            self.assertEqual(settings.get_setting("SSH", "password"), "")
+            self.assertEqual(settings.get_setting("AGENT", "base_url", ""), "")
+            self.assertEqual(settings.get_setting("MESA", "ip_address", "10.10.10.10"), "10.10.10.10")
+
+    def test_local_only_settings_reject_remote_connection_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            settings = SettingsManager(Path(directory) / "settings.ini", local_only=True)
+
+            with self.assertRaisesRegex(RuntimeError, "disabled in local-only mode"):
+                settings.save_setting("SSH", "ip_address", "192.0.2.10")
+            with self.assertRaisesRegex(RuntimeError, "disabled in local-only mode"):
+                settings.save_setting("AGENT", "base_url", "https://192.0.2.10:9443")
 
 
 if __name__ == "__main__":

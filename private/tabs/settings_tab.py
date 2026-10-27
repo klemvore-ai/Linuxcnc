@@ -29,13 +29,6 @@ except:
 def is_local_ip(ip):
     return ip in LOCAL_IPS
 
-HAS_PARAMIKO = False
-try:
-    import paramiko
-    HAS_PARAMIKO = True
-except ImportError:
-    pass
-
 class NoScrollComboBox(QComboBox):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1089,6 +1082,19 @@ Z_SAFE = 0.0000
 
     def apply_secure_mode_restrictions(self):
         """Disable Settings actions that only have a legacy SSH/VNC implementation."""
+        if getattr(self.sm, "local_only", False):
+            for control in [
+                self.btn_pull_settings,
+                self.btn_push_settings,
+                self.btn_activate_settings,
+                self.btn_secure_deploy,
+                self.btn_install_remote,
+                self.btn_update_status,
+                self.btn_vnc,
+                self.btn_pull_log,
+            ]:
+                control.hide()
+            return
         if client_from_settings(self.sm) is None:
             return
         message = "This action requires legacy SSH or VNC access and is unavailable in secure agent mode."
@@ -1134,21 +1140,10 @@ Z_SAFE = 0.0000
         remote_base = self.sm.get_setting("PATHS", "last_remote_linuxcnc_dir", "~/LinuxCNC")
         remote_dir, ok = QInputDialog.getText(self, "Pull Settings", "Enter the path to the LinuxCNC folder on the CNC PC:", text=remote_base)
         if not ok or not remote_dir: return
-        self.sm.save_setting("PATHS", "last_remote_linuxcnc_dir", remote_dir)
         remote_file = f"{remote_dir.rstrip('/')}/settings.ini"
         local_file = os.path.join(os.getcwd(), "settings.ini")
         try:
-            if HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                sftp = ssh.open_sftp()
-                sftp_file = remote_file.replace("~/", f"/home/{user}/", 1) if remote_file.startswith("~/") else remote_file
-                sftp.get(sftp_file, local_file)
-                sftp.close()
-                ssh.close()
-            else:
-                subprocess.run(["scp", "-o", "BatchMode=yes", f"{user}@{ip}:{remote_file}", local_file], capture_output=True, timeout=10)
+            subprocess.run(["scp", "-o", "BatchMode=yes", f"{user}@{ip}:{remote_file}", local_file], capture_output=True, timeout=10)
                 
             # Restore the local SSH credentials so the dev machine doesn't lock itself out!
             self.sm.save_setting("SSH", "ip_address", ip)
@@ -1199,17 +1194,7 @@ Z_SAFE = 0.0000
         self.sm.save_setting("PATHS", "last_remote_linuxcnc_dir", remote_dir)
         remote_file = f"{remote_dir.rstrip('/')}/settings_pending.ini"
         try:
-            if HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                sftp = ssh.open_sftp()
-                sftp_file = remote_file.replace("~/", f"/home/{user}/", 1) if remote_file.startswith("~/") else remote_file
-                sftp.put(local_file, sftp_file)
-                sftp.close()
-                ssh.close()
-            else:
-                subprocess.run(["scp", "-o", "BatchMode=yes", local_file, f"{user}@{ip}:{remote_file}"], capture_output=True, timeout=10)
+            subprocess.run(["scp", "-o", "BatchMode=yes", local_file, f"{user}@{ip}:{remote_file}"], capture_output=True, timeout=10)
             QMessageBox.information(self, "Sync Success", "Settings successfully pushed and staged on the CNC PC!\n\nThe CNC PC operator will be prompted to approve the update.")
         except Exception as e:
             QMessageBox.critical(self, "Sync Error", f"Failed to push settings.ini:\n{e}")
@@ -1297,7 +1282,7 @@ Z_SAFE = 0.0000
         """Update the window title to show Dev vs Machine mode."""
         import platform
         if hasattr(self.window(), 'setWindowTitle'):
-            if platform.system() == "Linux" and os.path.exists("/var/lib/linuxcnc"):
+            if platform.system() == "Linux" and shutil.which("linuxcnc"):
                 self.window().setWindowTitle("LinuxCNC Pro - MACHINE CONTROL")
             else:
                 self.window().setWindowTitle("LinuxCNC Pro - DEVELOPER WORKSTATION")
@@ -1480,49 +1465,37 @@ Z_SAFE = 0.0000
             QApplication.processEvents()
         
         try:
-            if HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
+            res = subprocess.run(["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", tar_path, f"{user}@{ip}:/tmp/linuxcnc_install.tar.gz"], capture_output=True, timeout=30)
+            if res.returncode != 0:
+                raise RuntimeError(res.stderr.decode() if isinstance(res.stderr, bytes) else str(res.stderr))
                 
-                sftp = ssh.open_sftp()
-                sftp.put(tar_path, "/tmp/linuxcnc_install.tar.gz")
-                sftp.close()
-                
-                # Prompt the physical operator using Zenity
-                prompt_cmd = f"export DISPLAY=:0; export WAYLAND_DISPLAY=wayland-0; export XDG_RUNTIME_DIR=/run/user/$(id -u {user}); export XAUTHORITY=/home/{user}/.Xauthority; export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u {user})/bus; zenity --question --title='App Install Request' --text='An installation/update of LinuxCNC Pro was pushed from the Dev machine.\n\nDo you want to authorize and install it now?' --width=400"
-                stdin, stdout, stderr = ssh.exec_command(prompt_cmd)
-                exit_status = stdout.channel.recv_exit_status()
-                err_out = stderr.read().decode().strip()
-                
-                if exit_status != 0:
-                    if exit_status == 1 and "cannot open display" not in err_out.lower() and "not found" not in err_out.lower() and "wayland" not in err_out.lower() and "gtk" not in err_out.lower():
-                        QMessageBox.information(self, "Cancelled", "The remote operator declined the installation.")
-                        ssh.exec_command("rm -f /tmp/linuxcnc_install.tar.gz")
-                        ssh.close()
+            prompt_cmd = f"export DISPLAY=:0; export WAYLAND_DISPLAY=wayland-0; export XDG_RUNTIME_DIR=/run/user/$(id -u {user}); export XAUTHORITY=/home/{user}/.Xauthority; export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u {user})/bus; zenity --question --title='App Install Request' --text='An installation/update of LinuxCNC Pro was pushed from the Dev machine.\n\nDo you want to authorize and install it now?' --width=400"
+            res_prompt = subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", prompt_cmd], capture_output=True, timeout=30)
+            err_out = res_prompt.stderr.decode() if isinstance(res_prompt.stderr, bytes) else str(res_prompt.stderr)
+            
+            if res_prompt.returncode != 0:
+                if res_prompt.returncode == 1 and "cannot open display" not in err_out.lower() and "not found" not in err_out.lower() and "wayland" not in err_out.lower() and "gtk" not in err_out.lower():
+                    QMessageBox.information(self, "Cancelled", "The remote operator declined the installation.")
+                    subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", "rm -f /tmp/linuxcnc_install.tar.gz"], capture_output=True)
+                    if hasattr(self.window(), 'sys_monitor_lbl'): self.window().sys_monitor_lbl.setText("System Diagnostics Active")
+                    return
+                else:
+                    fallback = QMessageBox.question(self, "Remote Prompt Failed", 
+                        f"Could not show the popup on the remote screen (it might be asleep or blocking SSH displays).\n\nDetails: {err_out}\n\nDo you want to FORCE the installation anyway?", 
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                    if fallback != QMessageBox.StandardButton.Yes:
+                        subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", "rm -f /tmp/linuxcnc_install.tar.gz"], capture_output=True)
                         if hasattr(self.window(), 'sys_monitor_lbl'): self.window().sys_monitor_lbl.setText("System Diagnostics Active")
                         return
-                    else:
-                        fallback = QMessageBox.question(self, "Remote Prompt Failed", 
-                            f"Could not show the popup on the remote screen (it might be asleep or blocking SSH displays).\n\nDetails: {err_out}\n\nDo you want to FORCE the installation anyway?", 
-                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-                        if fallback != QMessageBox.StandardButton.Yes:
-                            ssh.exec_command("rm -f /tmp/linuxcnc_install.tar.gz")
-                            ssh.close()
-                            if hasattr(self.window(), 'sys_monitor_lbl'): self.window().sys_monitor_lbl.setText("System Diagnostics Active")
-                            return
-                    
-                if hasattr(self.window(), 'sys_monitor_lbl'):
-                    self.window().sys_monitor_lbl.setText("⏳ Installing and Creating Shortcuts...")
-                    QApplication.processEvents()
                 
-                install_cmd = f"mkdir -p /home/{user}/LinuxCNC && tar -xzf /tmp/linuxcnc_install.tar.gz -C /home/{user}/LinuxCNC && rm -f /tmp/linuxcnc_install.tar.gz && mkdir -p /home/{user}/Desktop && cat << 'EOF' > /home/{user}/Desktop/LinuxCNC.desktop\n[Desktop Entry]\nType=Application\nExec=python3 /home/{user}/LinuxCNC/main.py\nPath=/home/{user}/LinuxCNC\nName=LinuxCNC Pro\nIcon=/home/{user}/LinuxCNC/assets/LinuxCNCDeskTopIcon.png\nTerminal=false\nEOF\nchmod +x /home/{user}/Desktop/LinuxCNC.desktop"
-                ssh.exec_command(install_cmd)
-                ssh.close()
-                
-                QMessageBox.information(self, "Success", "App successfully installed!\n\nA shortcut has been generated on the CNC PC desktop.")
-            else:
-                QMessageBox.critical(self, "Failed", "Paramiko is required to deploy the app. Please install it (pip install paramiko).")
+            if hasattr(self.window(), 'sys_monitor_lbl'):
+                self.window().sys_monitor_lbl.setText("⏳ Installing and Creating Shortcuts...")
+                QApplication.processEvents()
+            
+            install_cmd = f"mkdir -p /home/{user}/LinuxCNC && tar -xzf /tmp/linuxcnc_install.tar.gz -C /home/{user}/LinuxCNC && rm -f /tmp/linuxcnc_install.tar.gz && mkdir -p /home/{user}/Desktop && cat << 'EOF' > /home/{user}/Desktop/LinuxCNC.desktop\n[Desktop Entry]\nType=Application\nExec=python3 /home/{user}/LinuxCNC/main.py\nPath=/home/{user}/LinuxCNC\nName=LinuxCNC Pro\nIcon=/home/{user}/LinuxCNC/assets/LinuxCNCDeskTopIcon.png\nTerminal=false\nEOF\nchmod +x /home/{user}/Desktop/LinuxCNC.desktop"
+            subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", install_cmd], capture_output=True, timeout=30)
+            
+            QMessageBox.information(self, "Success", "App successfully installed!\n\nA shortcut has been generated on the CNC PC desktop.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Deployment failed:\n{e}")
         finally:
@@ -1630,6 +1603,15 @@ Z_SAFE = 0.0000
                 "PID Partially Applied",
                 f"Applied fields: {', '.join(applied) or '(none)'}\n\n{error}",
             )
+
+    def get_probe_plate_thickness(self):
+        value = self.sm.get_setting("PROBING", "plate_thickness", None)
+        if value is None or not str(value).strip():
+            value = self.sm.get_setting("Calibration", "probe_plate_thickness", None)
+        try:
+            return float(value) if value is not None and str(value).strip() else 5.0
+        except (TypeError, ValueError):
+            return 5.0
 
     def generate_base_configs(self):
         name = self.mach_name_input.text().strip().replace(" ", "_")
@@ -1847,6 +1829,8 @@ Z_SAFE = 0.0000
             hal_content.append(f"loadrt and2 count={and2_count}")
             
         hal_content.extend([
+            f"setp hm2_{board_model}.0.packet-read-timeout 95",
+            f"setp hm2_{board_model}.0.packet-error-limit 10",
             f"setp hm2_{board_model}.0.watchdog.timeout_ns 25000000",
             f"addf hm2_{board_model}.0.read servo-thread",
             f"addf motion-command-handler servo-thread",
@@ -2146,32 +2130,61 @@ Z_SAFE = 0.0000
             ""
         ]
         
-        linuxcnc_gui_content = [
-            "#!/usr/bin/env python3",
-            "\"\"\"LinuxCNC DISPLAY entry point: launch the LinuxCNC Qt dashboard.\"\"\"",
-            "import os",
-            "import subprocess",
-            "import sys",
-            "",
-            "try:",
-            "    import hal",
-            "    h = hal.component('linuxcnc_gui')",
-            "    h.ready()",
-            "except ImportError:",
-            "    h = None",
-            "",
-            "APPLICATION_ROOT = '/opt/LinuxCNC'",
-            "PYTHON_EXECUTABLE = os.path.join(APPLICATION_ROOT, '.venv', 'bin', 'python')",
-            "MAIN_SCRIPT = os.path.join(APPLICATION_ROOT, 'main.py')",
-            "if not os.path.isfile(PYTHON_EXECUTABLE):",
-            "    PYTHON_EXECUTABLE = sys.executable",
-            "",
-            "try:",
-            "    subprocess.run([PYTHON_EXECUTABLE, MAIN_SCRIPT], cwd=APPLICATION_ROOT)",
-            "finally:",
-            "    if h is not None:",
-            "        del h"
-        ]
+        application_root = Path(__file__).resolve().parents[2]
+        if getattr(self.sm, "local_only", False):
+            linuxcnc_gui_content = [
+                "#!/usr/bin/env python3",
+                "\"\"\"LinuxCNC 2.9 DISPLAY entry point for the local Qt dashboard.\"\"\"",
+                "import os",
+                "import runpy",
+                "import sys",
+                "",
+                f"APPLICATION_ROOT = {str(application_root)!r}",
+                "VENV_SITE_PACKAGES = os.path.join(",
+                "    APPLICATION_ROOT, '.venv', 'lib',",
+                "    f'python{sys.version_info.major}.{sys.version_info.minor}', 'site-packages',",
+                ")",
+                "if not os.path.isdir(VENV_SITE_PACKAGES):",
+                "    raise RuntimeError(f'Application dependencies not found: {VENV_SITE_PACKAGES}')",
+                "sys.path.insert(0, VENV_SITE_PACKAGES)",
+                "os.chdir(APPLICATION_ROOT)",
+                "import linuxcnc",
+                "import hal",
+                "h = hal.component('linuxcnc_gui')",
+                "h.ready()",
+                "sys.argv[0] = os.path.join(APPLICATION_ROOT, 'main.py')",
+                "try:",
+                "    runpy.run_path(sys.argv[0], run_name='__main__')",
+                "finally:",
+                "    del h",
+            ]
+        else:
+            linuxcnc_gui_content = [
+                "#!/usr/bin/env python3",
+                "\"\"\"LinuxCNC DISPLAY entry point: launch the LinuxCNC Qt dashboard.\"\"\"",
+                "import os",
+                "import subprocess",
+                "import sys",
+                "",
+                "try:",
+                "    import hal",
+                "    h = hal.component('linuxcnc_gui')",
+                "    h.ready()",
+                "except ImportError:",
+                "    h = None",
+                "",
+                f"APPLICATION_ROOT = {str(application_root)!r}",
+                "PYTHON_EXECUTABLE = os.path.join(APPLICATION_ROOT, '.venv', 'bin', 'python')",
+                "MAIN_SCRIPT = os.path.join(APPLICATION_ROOT, 'main.py')",
+                "if not os.path.isfile(PYTHON_EXECUTABLE):",
+                "    PYTHON_EXECUTABLE = sys.executable",
+                "",
+                "try:",
+                "    subprocess.run([PYTHON_EXECUTABLE, MAIN_SCRIPT], cwd=APPLICATION_ROOT)",
+                "finally:",
+                "    if h is not None:",
+                "        del h"
+            ]
         
         hal_content = self.align_hal_lines(hal_content)
         blueprint_hal = self.align_hal_lines(blueprint_hal)
@@ -2243,6 +2256,7 @@ Z_SAFE = 0.0000
                 f.write("\n".join(var_content))
             with open(gui_path, 'w', newline='\n') as f:
                 f.write("\n".join(linuxcnc_gui_content))
+            os.chmod(gui_path, 0o755)
             with open(tool_probe_path, 'w', newline='\n') as f:
                 f.write("\n".join(tool_height_probe_content))
             
@@ -2255,8 +2269,13 @@ Z_SAFE = 0.0000
                 app.wiring_tab.import_hal(blueprint_path, auto_layout=True)
                 app.tabs.setCurrentWidget(app.wiring_tab)
             
-            reply = QMessageBox.question(self, "Success", 
-                                         f"Base INI and HAL files successfully generated for '{name}'!\n\nThey have been saved to:\n{export_dir}\n\nWould you like to deploy these to your LinuxCNC machine now?", 
+            deploy_prompt = (
+                f"Copy these files to ~/linuxcnc/configs/{name} now?"
+                if getattr(self.sm, "local_only", False)
+                else "Would you like to deploy these to your LinuxCNC machine now?"
+            )
+            reply = QMessageBox.question(self, "Success",
+                                         f"Base INI and HAL files successfully generated for '{name}'!\n\nThey have been saved to:\n{export_dir}\n\n{deploy_prompt}",
                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.Yes:
                 self.deploy_configs(export_dir, name)
@@ -2265,6 +2284,33 @@ Z_SAFE = 0.0000
             QMessageBox.critical(self, "Error", f"Failed to generate files:\n{e}")
 
     def deploy_configs(self, local_dir, mach_name):
+        if getattr(self.sm, "local_only", False):
+            local_config_dir = Path.home() / "linuxcnc" / "configs" / mach_name
+            try:
+                local_config_dir.mkdir(parents=True, exist_ok=True)
+                copied = []
+                preserved = []
+                for filename in sorted(os.listdir(local_dir)):
+                    source = os.path.join(local_dir, filename)
+                    destination = local_config_dir / filename
+                    if not os.path.isfile(source):
+                        continue
+                    if filename == "custom_postgui.hal" and destination.exists():
+                        preserved.append(filename)
+                        continue
+                    shutil.copy2(source, destination)
+                    copied.append(filename)
+                QMessageBox.information(
+                    self,
+                    "Local Configuration Copy Complete",
+                    f"Copied to {local_config_dir}:\n" + "\n".join(copied)
+                    + ("\n\nPreserved existing user file: " + ", ".join(preserved) if preserved else "")
+                    + "\n\nReview the configuration before launching LinuxCNC.",
+                )
+            except Exception as error:
+                QMessageBox.critical(self, "Local Copy Failed", f"Failed to copy configuration files:\n{error}")
+            return
+
         ip = self.sm.get_setting("SSH", "ip_address", "")
         user = self.sm.get_setting("SSH", "username", "")
         password = self.sm.get_setting("SSH", "password", "")
@@ -2323,33 +2369,12 @@ Z_SAFE = 0.0000
         mkdir_cmd = f"mkdir -p {pending_dir}"
         
         try:
-            if HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                
-                # Wait for the directory creation to finish before uploading
-                stdin, stdout, stderr = ssh.exec_command(mkdir_cmd)
-                stdout.channel.recv_exit_status() 
-                
-                sftp_dir = pending_dir.replace("~/", f"/home/{user}/", 1) if pending_dir.startswith("~/") else pending_dir
-                
-                sftp = ssh.open_sftp()
-                for filename in os.listdir(local_dir):
-                    local_file = os.path.join(local_dir, filename)
-                    if os.path.isfile(local_file):
-                        sftp.put(local_file, f"{sftp_dir}/{filename}")
-                
-                sftp.close()
-                ssh.exec_command(f"chmod +x {sftp_dir}/linuxcnc_gui.py")
-                ssh.close()
-            else:
-                subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", mkdir_cmd], capture_output=True, timeout=10)
-                for filename in os.listdir(local_dir):
-                    local_file = os.path.join(local_dir, filename)
-                    if os.path.isfile(local_file):
-                        subprocess.run(["scp", "-o", "BatchMode=yes", local_file, f"{user}@{ip}:{pending_dir}/{filename}"], capture_output=True, timeout=10)
-                subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", f"chmod +x {pending_dir}/linuxcnc_gui.py"], capture_output=True, timeout=10)
+            subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", mkdir_cmd], capture_output=True, timeout=10)
+            for filename in os.listdir(local_dir):
+                local_file = os.path.join(local_dir, filename)
+                if os.path.isfile(local_file):
+                    subprocess.run(["scp", "-o", "BatchMode=yes", local_file, f"{user}@{ip}:{pending_dir}/{filename}"], capture_output=True, timeout=10)
+            subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", f"chmod +x {pending_dir}/linuxcnc_gui.py"], capture_output=True, timeout=10)
                         
             QMessageBox.information(self, "Deploy Success", f"Configuration successfully staged to {ip}:{pending_dir}\n\nThe operator will be prompted to approve these updates on the physical machine.")
         except Exception as e:
@@ -2398,13 +2423,6 @@ Z_SAFE = 0.0000
             if is_local_ip(ip):
                 res = subprocess.run(check_cmd, shell=True, capture_output=True)
                 is_running = (res.returncode == 0)
-            elif HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
-                stdin, stdout, stderr = ssh.exec_command(check_cmd)
-                is_running = bool(stdout.read().decode().strip())
-                ssh.close()
             else:
                 res = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", check_cmd], capture_output=True)
                 is_running = (res.returncode == 0)
@@ -2459,21 +2477,9 @@ cat /tmp/linuxcnc_launch.log
             b64_script = base64.b64encode(script_content.encode()).decode()
             cmd = f"echo {b64_script} | base64 -d > /tmp/launch_lcnc.sh && chmod +x /tmp/launch_lcnc.sh && bash /tmp/launch_lcnc.sh"
 
-            out = ""
-            err = ""
-            if HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                stdin, stdout, stderr = ssh.exec_command(cmd)
-                stdout.channel.settimeout(20.0) # Increase timeout to survive the base_kill_cmd 10-sec loop!
-                out = stdout.read().decode()
-                err = stderr.read().decode()
-                ssh.close()
-            else:
-                res = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", cmd], capture_output=True, text=True, timeout=25)
-                out = res.stdout
-                err = res.stderr
+            res = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", cmd], capture_output=True, text=True, timeout=25)
+            out = res.stdout
+            err = res.stderr
                 
             full_log = (out.strip() + "\n" + err.strip()).strip()
             
@@ -2560,20 +2566,9 @@ cat /tmp/linuxcnc_launch.log
                 return
 
             cmd = f"cat {log_path}"
-            out = ""
-            err = ""
-            if HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                stdin, stdout, stderr = ssh.exec_command(cmd)
-                out = stdout.read().decode()
-                err = stderr.read().decode()
-                ssh.close()
-            else:
-                res = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", cmd], capture_output=True, text=True, timeout=10)
-                out = res.stdout
-                err = res.stderr
+            res = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", cmd], capture_output=True, text=True, timeout=10)
+            out = res.stdout
+            err = res.stderr
                 
             full_log = (out.strip() + "\n" + err.strip()).strip()
             
@@ -2623,18 +2618,6 @@ cat /tmp/linuxcnc_launch.log
         try:
             if is_local_ip(ip):
                 subprocess.run(base_cmd, shell=True, capture_output=True)
-            elif HAS_PARAMIKO:
-                if password:
-                    cmd = f"echo '{password}' | sudo -S bash -c \"{base_cmd}\""
-                else:
-                    cmd = f"sudo bash -c \"{base_cmd}\""
-                    
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                stdin, stdout, stderr = ssh.exec_command(cmd)
-                stdout.channel.recv_exit_status()
-                ssh.close()
             else:
                 if password:
                     cmd = f"echo '{password}' | sudo -S bash -c \"{base_cmd}\""
@@ -2666,12 +2649,6 @@ cat /tmp/linuxcnc_launch.log
         try:
             if is_local_ip(ip):
                 subprocess.Popen(cmd, shell=True, start_new_session=True)
-            elif HAS_PARAMIKO:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                ssh.exec_command(cmd)
-                ssh.close()
             else:
                 subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", cmd], capture_output=True, timeout=10)
                 

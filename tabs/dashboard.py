@@ -1,20 +1,24 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
                              QLabel, QPushButton, QGroupBox, QSlider, QLineEdit, 
-                             QSizePolicy, QScrollArea, QMessageBox, QStackedWidget, QFileDialog, QTextEdit, QInputDialog, QGraphicsDropShadowEffect, QTabWidget, QGraphicsView, QGraphicsScene, QComboBox, QGraphicsItem, QProgressBar, QAbstractButton)
-from PyQt6.QtCore import Qt, QTimer, QProcess, QThread, pyqtSignal, QRectF, QRect, QSize, QFileSystemWatcher
-from PyQt6.QtGui import QColor, QPainterPath, QPen, QPainter, QTextCursor, QTextFormat, QBrush, QFont, QSyntaxHighlighter, QTextCharFormat
+                             QSizePolicy, QScrollArea, QMessageBox, QStackedWidget, QFileDialog, QTextEdit, QInputDialog, QGraphicsDropShadowEffect, QTabWidget, QGraphicsView, QGraphicsScene, QComboBox, QGraphicsItem, QProgressBar, QAbstractButton, QApplication)
+from PyQt6.QtCore import Qt, QTimer, QProcess, QThread, pyqtSignal, QRectF, QRect, QSize, QFileSystemWatcher, QPointF
+from PyQt6.QtGui import QColor, QPainterPath, QPen, QPainter, QTextCursor, QTextFormat, QBrush, QFont, QSyntaxHighlighter, QTextCharFormat, QPolygonF
+from core.linuxcnc_api import LocalLinuxCNCAPI
 import platform
 import threading
 import subprocess
 import base64
 import json
 import os
+import shutil
+import sys
 import tempfile
 import math
 import queue
 import time
 import socket
 import re
+import collections
 from core.machine_agent import client_from_settings
 
 LOCAL_IPS = ['localhost', '127.0.0.1']
@@ -27,12 +31,129 @@ except:
 def is_local_ip(ip):
     return ip in LOCAL_IPS
 
-HAS_PARAMIKO = False
-try:
-    import paramiko
-    HAS_PARAMIKO = True
-except ImportError:
-    pass
+
+def has_local_linuxcnc():
+    return platform.system() == "Linux" and shutil.which("linuxcnc") is not None
+
+
+def is_local_linuxcnc_running():
+    if not has_local_linuxcnc():
+        return False
+    try:
+        result = subprocess.run(
+            ["pgrep", "-x", "linuxcnc"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
+def is_local_controller(ip):
+    return is_local_ip(ip) or (not ip and has_local_linuxcnc())
+
+
+def linuxcnc_status_snapshot(linuxcnc_module, status, error_channel):
+    status.poll()
+    error_messages = []
+    while True:
+        error = error_channel.poll()
+        if not error:
+            break
+        error_messages.append(str(error[1]))
+
+    joints = int(getattr(status, "joints", getattr(status, "axes", 3)))
+    z_joint = 3 if joints >= 4 else 2
+    actual_position = getattr(status, "actual_position", ())
+
+    def work_position(axis_index, joint_index):
+        try:
+            if status.homed[joint_index]:
+                offsets = (
+                    getattr(status, "g5x_offset", (0.0,) * 9)[axis_index]
+                    + getattr(status, "g92_offset", (0.0,) * 9)[axis_index]
+                    + getattr(status, "tool_offset", (0.0,) * 9)[axis_index]
+                )
+                return actual_position[axis_index] - offsets
+            return status.joint[joint_index]["input"]
+        except (AttributeError, IndexError, KeyError, TypeError):
+            return actual_position[axis_index] if len(actual_position) > axis_index else 0.0
+
+    spindle_rpm = getattr(status, "spindle_speed", 0.0)
+    try:
+        spindle = status.spindle[0]
+        if isinstance(spindle, dict):
+            spindle_rpm = spindle.get("commanded_speed", spindle.get("speed", spindle_rpm))
+    except (AttributeError, IndexError, TypeError):
+        pass
+
+    interp_state = getattr(status, "interp_state", 1)
+    if interp_state == getattr(linuxcnc_module, "INTERP_IDLE", 1):
+        machine_status = "IDLE"
+        is_paused = False
+    elif (
+        interp_state == getattr(linuxcnc_module, "INTERP_PAUSED", 2)
+        or getattr(status, "paused", False)
+        or getattr(status, "task_paused", False)
+    ):
+        machine_status = "PAUSED"
+        is_paused = True
+    else:
+        machine_status = "RUNNING"
+        is_paused = False
+
+    task_mode = getattr(status, "task_mode", 0)
+    if task_mode == linuxcnc_module.MODE_MANUAL:
+        mode = "MANUAL"
+    elif task_mode == linuxcnc_module.MODE_AUTO:
+        mode = "AUTO"
+    elif task_mode == linuxcnc_module.MODE_MDI:
+        mode = "MDI"
+    else:
+        mode = "UNKNOWN"
+
+    snapshot = {
+        "X": work_position(0, 0),
+        "Y": work_position(1, 1),
+        "Z": work_position(2, z_joint),
+        "FEED": getattr(status, "current_vel", 0.0) * 60.0,
+        "RPM": abs(float(spindle_rpm)),
+        "FEED_OVR": getattr(status, "feedrate", 1.0),
+        "SPINDLE_OVR": getattr(status, "spindle_scale", 1.0),
+        "HOMED_COUNT": sum(1 for homed in getattr(status, "homed", ()) if homed),
+        "JOINTS": joints,
+        "MACHINE_ON": status.task_state == linuxcnc_module.STATE_ON,
+        "ESTOP_ACTIVATED": status.task_state == linuxcnc_module.STATE_ESTOP,
+        "STATUS": machine_status,
+        "IS_PAUSED": is_paused,
+        "MODE": mode,
+        "LINE": getattr(status, "motion_line", 0),
+        "AXIS_MASK": int(getattr(status, "axis_mask", 7)),
+        "UNITS": "inch" if status.linear_units == 1.0 else "mm",
+        "TOOL_IN_SPINDLE": int(getattr(status, "tool_in_spindle", 0)),
+        "POCKET_PREPPED": int(getattr(status, "pocket_prepped", -1)),
+        "TASK_BLOCKED": getattr(status, "exec_state", 2) not in (1, 2),
+        "PROBE_VAL": getattr(status, "probe_val", 0),
+        "probe_tripped": bool(getattr(status, "probe_tripped", False)),
+    }
+    dtg = getattr(status, "dtg", ())
+    for axis_index, axis in enumerate(("X", "Y", "Z")):
+        snapshot[f"ABSOLUTE_{axis}"] = actual_position[axis_index] if len(actual_position) > axis_index else 0.0
+        snapshot[f"DTG_{axis}"] = dtg[axis_index] if len(dtg) > axis_index else 0.0
+    if error_messages:
+        snapshot["ERROR"] = "\n".join(error_messages)
+    active_limits = []
+    for joint_index, joint in enumerate(getattr(status, "joint", ())):
+        if joint.get("min_hard_limit"):
+            active_limits.append(f"joint {joint_index} negative")
+        if joint.get("max_hard_limit"):
+            active_limits.append(f"joint {joint_index} positive")
+    snapshot["ACTIVE_LIMITS"] = active_limits
+    snapshot["LIMITS_ACTIVE"] = bool(active_limits)
+    return snapshot
+
 
 class MDILineEdit(QLineEdit):
     def __init__(self, *args, **kwargs):
@@ -183,305 +304,679 @@ class GCodeEditor(QPlainTextEdit):
         cursor = self.cursorForPosition(event.pos())
         self.line_double_clicked.emit(cursor.blockNumber())
 
-class ToolpathViewer(QGraphicsView):
+class _CompatItem:
+    def __init__(self, line_idx=None, is_rapid=False):
+        self._data = {0: line_idx}
+        self.is_rapid = is_rapid
+        self.pen = None
+        self.z_value = 0
+    def data(self, key):
+        return self._data.get(key)
+    def setData(self, key, val):
+        self._data[key] = val
+    def setPen(self, pen):
+        self.pen = pen
+    def setZValue(self, z):
+        self.z_value = z
+
+class _CompatScene:
+    def __init__(self, viewer):
+        self._viewer = viewer
+        self._extra_items = []
+        
+    def items(self, *args, **kwargs):
+        res = [v['item'] for v in self._viewer.segment_items.values() if isinstance(v, dict) and 'item' in v]
+        if not res and self._viewer.segments:
+            res = [1] * len(self._viewer.segments)
+        return res + self._extra_items
+        
+    def addText(self, text):
+        class _TextItem:
+            def __init__(self, text):
+                self.text = text
+                self.color = None
+                self.pos = (0, 0)
+            def setDefaultTextColor(self, color): self.color = color
+            def setPos(self, x, y): self.pos = (x, y)
+        t = _TextItem(text)
+        self._extra_items.append(t)
+        return t
+        
+    def addEllipse(self, *args, **kwargs):
+        class _EllipseItem:
+            def __init__(self):
+                self.z = 0
+                self.pos = (0, 0)
+                self.rect = (0, 0, 0, 0)
+            def setZValue(self, z): self.z = z
+            def setPos(self, x, y): self.pos = (x, y)
+            def setRect(self, *rect): self.rect = rect
+        item = _EllipseItem()
+        self._extra_items.append(item)
+        return item
+        
+    def removeItem(self, item):
+        if item in self._extra_items:
+            self._extra_items.remove(item)
+            
+    def clear(self):
+        self._extra_items.clear()
+        
+    def itemsBoundingRect(self):
+        return QRectF(0, 0, 100, 100)
+
+class ToolpathViewer(QWidget):
     segment_double_clicked = pyqtSignal(int)
     MAX_PREVIEW_LINES = 100000
     MAX_PREVIEW_SEGMENTS = 25000
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.scene = QGraphicsScene(self)
-        self.setScene(self.scene)
-        self.setStyleSheet("background-color: #111; border: 2px solid #444; border-radius: 4px;")
-        self.machine_units = "mm"  # The units the machine is currently operating in
-        self.display_units = "mm"  # The units the user wants to see
-        self.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Enable drag-to-pan and zoom-to-mouse
-        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
-        
-        self.segment_items = {}
-        self.active_line = -1
+        self.setStyleSheet("background-color: #111111; border: 2px solid #444444; border-radius: 4px;")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.machine_units = "mm"
+        self.display_units = "mm"
+        self.preview_enabled = True
+        self.last_gcode_text = ""
+        self.last_file_path = None
 
-        # Live tool position indicator. Its geometry is updated to match the path scale.
-        self.tool_marker = self.scene.addEllipse(-1, -1, 2, 2, QPen(QColor("#ffffff"), 1.5), QBrush(QColor("#ff0000")))
-        self.tool_marker.setZValue(100) # Always on top
+        # 3D Camera State
+        self.azimuth = -45.0
+        self.elevation = 30.0
+        self.zoom = 1.0
+        self.pan_x = 0.0
+        self.pan_y = 0.0
+        self.target_center = [0.0, 0.0, 0.0]
+
+        # Machine Limits
+        self.machine_limits = {
+            'min_x': -5.0, 'max_x': 1275.0,
+            'min_y': -5.0, 'max_y': 1275.0,
+            'min_z': -134.0, 'max_z': 5.0
+        }
+        self.tool_pos = (0.0, 0.0, 0.0)
+        self.active_line = -1
+        self.preview_note = None
+
+        self.segments = []
+        self.segment_items = {}
+
+        self._drag_mode = None
+        self._last_mouse_pos = None
+        self._mouse_press_pos = None
+
+        self.scene = _CompatScene(self)
+        self.tool_marker = self.scene.addEllipse(-1, -1, 2, 2)
 
     def _update_tool_marker_size(self, bounds=None):
-        if bounds is None or bounds.isEmpty():
-            diameter = 2.0
-        else:
-            extent = max(bounds.width(), bounds.height())
-            diameter = max(0.5, min(8.0, extent * 0.008))
-        half_diameter = diameter / 2.0
-        self.tool_marker.setRect(-half_diameter, -half_diameter, diameter, diameter)
+        pass
 
-    def drawForeground(self, painter: QPainter, rect: QRectF):
-        super().drawForeground(painter, rect)
-        painter.save()
-        painter.resetTransform()
+    def set_machine_limits(self, min_x, max_x, min_y, max_y, min_z, max_z):
+        self.machine_limits = {
+            'min_x': float(min_x), 'max_x': float(max_x),
+            'min_y': float(min_y), 'max_y': float(max_y),
+            'min_z': float(min_z), 'max_z': float(max_z)
+        }
+        self.update()
 
-        view_rect = self.viewport().rect()
-        margin_x = 40
-        margin_y = 60
-        length = 40
+    def get_camera_basis(self):
+        a = math.radians(self.azimuth)
+        b = math.radians(self.elevation)
+        cos_a, sin_a = math.cos(a), math.sin(a)
+        cos_b, sin_b = math.cos(b), math.sin(b)
+        rx = cos_a
+        ry = sin_a
+        rz = 0.0
+        ux = -sin_a * sin_b
+        uy = cos_a * sin_b
+        uz = cos_b
+        return (rx, ry, rz), (ux, uy, uz)
 
-        # Anchor visually at Bottom-Right natively for CNC!
-        ox = view_rect.right() - 80
-        oy = view_rect.bottom() - 40
+    def project_3d(self, x, y, z):
+        (rx, ry, rz), (ux, uy, uz) = self.get_camera_basis()
+        dx = x - self.target_center[0]
+        dy = y - self.target_center[1]
+        dz = z - self.target_center[2]
+        sx = dx * rx + dy * ry + dz * rz
+        sy = dx * ux + dy * uy + dz * uz
+        w = max(100, self.width())
+        h = max(100, self.height())
+        px = w / 2.0 + self.pan_x + sx * self.zoom
+        py = h / 2.0 + self.pan_y - sy * self.zoom
+        return px, py
 
-        font = QFont("Arial", 10, QFont.Weight.Bold)
-        painter.setFont(font)
-
+    def to_iso(self, px, py, pz):
         cos_a = math.cos(math.radians(30))
         sin_a = math.sin(math.radians(30))
+        sx = (px - py) * cos_a
+        sy = -(px + py) * sin_a - pz
+        return sx, sy
 
-        # CAD Standard right-handed ISO mapping:
-        # X: Right and Up on screen
-        # Y: Left and Up on screen
-        # Z: Straight Up
-        def to_iso(px, py, pz):
-            sx = (px - py) * cos_a
-            sy = -(px + py) * sin_a - pz
-            return int(ox + sx), int(oy + sy)
+    def drawForeground(self, painter=None, rect=None):
+        pass
 
-        # Z-axis (Blue) straight UP
-        zx, zy = to_iso(0, 0, length * 0.8)
-        painter.setPen(QPen(QColor(50, 150, 255, 200), 3))
-        painter.drawLine(int(ox), int(oy), zx, zy)
-        painter.setPen(QColor(50, 150, 255, 200))
-        painter.drawText(zx - 15, zy - 5, "Z")
+    def set_view_iso(self):
+        self.azimuth = -45.0
+        self.elevation = 30.0
+        self.fit_view()
 
-        # X-axis (Red) Right-Up
-        hx, hy = to_iso(length, 0, 0)
-        painter.setPen(QPen(QColor(255, 50, 50, 200), 3))
-        painter.drawLine(int(ox), int(oy), hx, hy)
-        painter.setPen(QColor(255, 50, 50, 200))
-        painter.drawText(hx + 8, hy + 5, "X")
+    def set_view_top(self):
+        self.azimuth = 0.0
+        self.elevation = 90.0
+        self.fit_view()
 
-        # Y-axis (Green) Left-Up
-        yx, yy = to_iso(0, length, 0)
-        painter.setPen(QPen(QColor(50, 255, 50, 200), 3))
-        painter.drawLine(int(ox), int(oy), yx, yy)
-        painter.setPen(QColor(50, 255, 50, 200))
-        painter.drawText(yx - 20, yy + 5, "Y")
+    def set_view_front(self):
+        self.azimuth = 0.0
+        self.elevation = 0.0
+        self.fit_view()
 
-        # Origin dot
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(255, 255, 255, 200))
-        painter.drawEllipse(int(ox) - 3, int(oy) - 3, 6, 6)
-        painter.restore()
+    def set_view_side(self):
+        self.azimuth = 90.0
+        self.elevation = 0.0
+        self.fit_view()
+
+    def fit_view(self):
+        if self.segments:
+            min_x = min(min(s['p0'][0], s['p1'][0]) for s in self.segments)
+            max_x = max(max(s['p0'][0], s['p1'][0]) for s in self.segments)
+            min_y = min(min(s['p0'][1], s['p1'][1]) for s in self.segments)
+            max_y = max(max(s['p0'][1], s['p1'][1]) for s in self.segments)
+            min_z = min(min(s['p0'][2], s['p1'][2]) for s in self.segments)
+            max_z = max(max(s['p0'][2], s['p1'][2]) for s in self.segments)
+        else:
+            min_x, max_x = self.machine_limits['min_x'], self.machine_limits['max_x']
+            min_y, max_y = self.machine_limits['min_y'], self.machine_limits['max_y']
+            min_z, max_z = self.machine_limits['min_z'], self.machine_limits['max_z']
+
+        self.target_center = [(min_x + max_x) / 2.0, (min_y + max_y) / 2.0, (min_z + max_z) / 2.0]
+        self.pan_x = 0.0
+        self.pan_y = 0.0
+
+        corners = [
+            (min_x, min_y, min_z), (max_x, min_y, min_z),
+            (max_x, max_y, min_z), (min_x, max_y, min_z),
+            (min_x, min_y, max_z), (max_x, min_y, max_z),
+            (max_x, max_y, max_z), (min_x, max_y, max_z),
+        ]
+        (rx, ry, rz), (ux, uy, uz) = self.get_camera_basis()
+        proj_x = [(c[0]-self.target_center[0])*rx + (c[1]-self.target_center[1])*ry + (c[2]-self.target_center[2])*rz for c in corners]
+        proj_y = [(c[0]-self.target_center[0])*ux + (c[1]-self.target_center[1])*uy + (c[2]-self.target_center[2])*uz for c in corners]
+        span_x = max(max(proj_x) - min(proj_x), 10.0)
+        span_y = max(max(proj_y) - min(proj_y), 10.0)
+
+        w = max(100, self.width())
+        h = max(100, self.height())
+        self.zoom = min((w * 0.8) / span_x, (h * 0.8) / span_y)
+        self.update()
+
+    def fitInView(self, rect=None, mode=None):
+        self.fit_view()
+
+    def scale(self, sx, sy=None):
+        self.zoom *= sx
+        self.update()
+
+    def _clear_preview_scene(self):
+        self.segments.clear()
+        self.segment_items.clear()
+        self.active_line = -1
+        self.preview_note = None
+        self.scene.clear()
+
+    def set_preview_enabled(self, enabled: bool, gcode_text=None, file_path=None):
+        self.preview_enabled = bool(enabled)
+        if self.preview_enabled:
+            target_path = file_path or getattr(self, 'last_file_path', None)
+            text = gcode_text if gcode_text is not None else getattr(self, 'last_gcode_text', '')
+            if target_path or text:
+                self.update_path(text, file_path=target_path)
+            else:
+                self._clear_preview_scene()
+                self.update()
+        else:
+            if gcode_text is not None:
+                self.last_gcode_text = gcode_text
+            if file_path is not None:
+                self.last_file_path = file_path
+            self._clear_preview_scene()
+            self.scene.addText("3D Toolpath Preview is disabled.\nClick 'Enable Preview' to parse and display.")
+            self.update()
+
+    def update_path(self, gcode_text, file_path=None):
+        self.last_gcode_text = gcode_text if gcode_text else ""
+        self.last_file_path = file_path
+        self._clear_preview_scene()
+
+        if not getattr(self, 'preview_enabled', True):
+            self.scene.addText("3D Toolpath Preview is disabled.\nClick 'Enable Preview' to parse and display.")
+            self.update()
+            return
+
+        preview_lines = []
+        if file_path and os.path.exists(file_path):
+            try:
+                file_size = os.path.getsize(file_path)
+                if file_size > 2 * 1024 * 1024:
+                    with open(file_path, 'rb') as bf:
+                        line_count = sum(chunk.count(b'\n') for chunk in iter(lambda: bf.read(1024*1024), b''))
+                    sample_step = max(1, line_count // self.MAX_PREVIEW_SEGMENTS)
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        for idx, line in enumerate(f):
+                            if idx % sample_step == 0:
+                                preview_lines.append((idx, line))
+                    self.preview_note = f"Preview simplified: {line_count:,} lines sampled to {len(preview_lines):,} moves"
+                    self.scene.addText(self.preview_note)
+                else:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()
+                    line_count = len(lines)
+                    if line_count > self.MAX_PREVIEW_LINES:
+                        sample_step = max(1, line_count // self.MAX_PREVIEW_SEGMENTS)
+                        preview_lines = [(idx, line) for idx, line in enumerate(lines) if idx % sample_step == 0]
+                        self.preview_note = f"Preview simplified: {line_count:,} lines sampled to {len(preview_lines):,} moves"
+                        self.scene.addText(self.preview_note)
+                    else:
+                        preview_lines = list(enumerate(lines))
+            except Exception:
+                preview_lines = []
+        elif gcode_text and str(gcode_text).strip():
+            text = str(gcode_text)
+            lines = text.splitlines()
+            line_count = len(lines)
+            if line_count > self.MAX_PREVIEW_LINES:
+                sample_step = max(1, line_count // self.MAX_PREVIEW_SEGMENTS)
+                preview_lines = [(idx, line) for idx, line in enumerate(lines) if idx % sample_step == 0]
+                self.preview_note = f"Preview simplified: {line_count:,} lines sampled to {len(preview_lines):,} moves"
+                self.scene.addText(self.preview_note)
+            else:
+                preview_lines = list(enumerate(lines))
+        else:
+            self.update()
+            return
+
+        cx, cy, cz = 0.0, 0.0, 0.0
+        mode = 'G1'
+        distance_mode = 'G90'
+        plane = 'G17'
+        unit_scale = 1.0
+
+        for line_idx, raw_line in preview_lines:
+            clean = raw_line.split(';')[0].split('(')[0].strip().upper()
+            if not clean:
+                continue
+
+            tokens = re.findall(r'[A-Z][-+]?[^A-Z\s]*', clean)
+            for t in tokens:
+                if t in ('G0', 'G00'): mode = 'G0'
+                elif t in ('G1', 'G01'): mode = 'G1'
+                elif t in ('G2', 'G02'): mode = 'G2'
+                elif t in ('G3', 'G03'): mode = 'G3'
+                elif t in ('G90', 'G90.0'): distance_mode = 'G90'
+                elif t in ('G91', 'G91.0'): distance_mode = 'G91'
+                elif t in ('G17', 'G17.0'): plane = 'G17'
+                elif t in ('G18', 'G18.0'): plane = 'G18'
+                elif t in ('G19', 'G19.0'): plane = 'G19'
+                elif t in ('G20', 'G20.0'): unit_scale = 25.4
+                elif t in ('G21', 'G21.0'): unit_scale = 1.0
+
+            mv = {}
+            i, j, k, r_val = 0.0, 0.0, 0.0, None
+            has_move = False
+            for t in tokens:
+                code = t[0]
+                val_str = t[1:]
+                try:
+                    v = float(val_str)
+                    if code == 'X': mv['X'] = v * unit_scale; has_move = True
+                    elif code == 'Y': mv['Y'] = v * unit_scale; has_move = True
+                    elif code == 'Z': mv['Z'] = v * unit_scale; has_move = True
+                    elif code == 'I': i = v * unit_scale
+                    elif code == 'J': j = v * unit_scale
+                    elif code == 'K': k = v * unit_scale
+                    elif code == 'R': r_val = v * unit_scale
+                except ValueError:
+                    pass
+
+            if has_move:
+                if distance_mode == 'G91':
+                    nx = cx + mv.get('X', 0.0)
+                    ny = cy + mv.get('Y', 0.0)
+                    nz = cz + mv.get('Z', 0.0)
+                else:
+                    nx = mv.get('X', cx)
+                    ny = mv.get('Y', cy)
+                    nz = mv.get('Z', cz)
+
+                is_rapid = (mode == 'G0')
+                compat_item = _CompatItem(line_idx, is_rapid=is_rapid)
+
+                if mode in ('G2', 'G3'):
+                    arc_pts = self._interpolate_arc((cx, cy, cz), (nx, ny, nz), mode, plane, i, j, k, r_val)
+                    p_curr = (cx, cy, cz)
+                    for pt in arc_pts:
+                        seg = {'type': mode, 'p0': p_curr, 'p1': pt, 'line_no': line_idx}
+                        self.segments.append(seg)
+                        p_curr = pt
+                else:
+                    seg = {'type': mode, 'p0': (cx, cy, cz), 'p1': (nx, ny, nz), 'line_no': line_idx}
+                    self.segments.append(seg)
+
+                self.segment_items[line_idx] = {'item': compat_item, 'is_rapid': is_rapid}
+                cx, cy, cz = nx, ny, nz
+
+        self.fit_view()
+
+    def _interpolate_arc(self, p0, p1, mode, plane, i, j, k, r):
+        x0, y0, z0 = p0
+        x1, y1, z1 = p1
+        if plane == 'G17':
+            u0, v0, u1, v1 = x0, y0, x1, y1
+            du, dv = i, j
+        elif plane == 'G18':
+            u0, v0, u1, v1 = z0, x0, z1, x1
+            du, dv = k, i
+        else:
+            u0, v0, u1, v1 = y0, z0, y1, z1
+            du, dv = j, k
+
+        if r is not None and abs(r) > 1e-6:
+            dx = (u1 - u0) / 2.0
+            dy = (v1 - v0) / 2.0
+            d_sq = dx*dx + dy*dy
+            r_sq = r*r
+            if d_sq > r_sq:
+                cu, cv = (u0 + u1)/2.0, (v0 + v1)/2.0
+            else:
+                h = math.sqrt(max(0.0, r_sq - d_sq))
+                d = math.sqrt(d_sq)
+                sign = (1 if r > 0 else -1) if mode == 'G2' else (-1 if r > 0 else 1)
+                cu = (u0 + u1)/2.0 - sign * h * dy / d
+                cv = (v0 + v1)/2.0 + sign * h * dx / d
+        else:
+            cu, cv = u0 + du, v0 + dv
+
+        ru0, rv0 = u0 - cu, v0 - cv
+        ru1, rv1 = u1 - cu, v1 - cv
+        radius = math.hypot(ru0, rv0)
+        if radius < 1e-4:
+            return [p1]
+
+        start_ang = math.atan2(rv0, ru0)
+        end_ang = math.atan2(rv1, ru1)
+        sweep = end_ang - start_ang
+        if mode == 'G2':
+            if sweep >= 0: sweep -= 2 * math.pi
+        else:
+            if sweep <= 0: sweep += 2 * math.pi
+
+        if abs(u0 - u1) < 1e-4 and abs(v0 - v1) < 1e-4:
+            sweep = -2 * math.pi if mode == 'G2' else 2 * math.pi
+
+        steps = max(3, min(72, int(abs(math.degrees(sweep)) / 5.0)))
+        pts = []
+        for s in range(1, steps + 1):
+            t = s / steps
+            ang = start_ang + sweep * t
+            u = cu + radius * math.cos(ang)
+            v = cv + radius * math.sin(ang)
+            if plane == 'G17':
+                z = z0 + (z1 - z0) * t
+                pts.append((u, v, z))
+            elif plane == 'G18':
+                y = y0 + (y1 - y0) * t
+                pts.append((v, y, u))
+            else:
+                x = x0 + (x1 - x0) * t
+                pts.append((x, u, v))
+        return pts
+
+    def highlight_line(self, line_idx):
+        if not hasattr(self, 'segment_items') or not getattr(self, 'preview_enabled', True):
+            return
+        if self.active_line in self.segment_items:
+            data = self.segment_items[self.active_line]
+            if 'item' in data and hasattr(data['item'], 'setPen'):
+                pen = QPen(QColor(150, 150, 150, 100), 1, Qt.PenStyle.DashLine) if data.get('is_rapid') else QPen(QColor("#39FF14"), 1.5)
+                pen.setCosmetic(True)
+                data['item'].setPen(pen)
+                data['item'].setZValue(0)
+
+        self.active_line = int(line_idx)
+        if line_idx in self.segment_items:
+            data = self.segment_items[line_idx]
+            if 'item' in data and hasattr(data['item'], 'setPen'):
+                hl_pen = QPen(QColor("#ff00ff"), 3)
+                hl_pen.setCosmetic(True)
+                data['item'].setPen(hl_pen)
+                data['item'].setZValue(1)
+        self.update()
+
+    def update_tool_position(self, x, y, z=0.0):
+        scale = 1.0
+        if getattr(self, 'display_units', 'mm') == "inch":
+            scale = 25.4
+        try:
+            self.tool_pos = (float(x) * scale, float(y) * scale, float(z) * scale)
+        except (ValueError, TypeError):
+            return
+        if hasattr(self, 'tool_marker') and hasattr(self.tool_marker, 'setPos'):
+            self.tool_marker.setPos(self.tool_pos[0], self.tool_pos[1])
+        self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_mode = 'orbit'
+            self._last_mouse_pos = event.position()
+            self._mouse_press_pos = event.position()
+        elif event.button() in (Qt.MouseButton.RightButton, Qt.MouseButton.MiddleButton):
+            self._drag_mode = 'pan'
+            self._last_mouse_pos = event.position()
+
+    def mouseMoveEvent(self, event):
+        if not self._drag_mode or not self._last_mouse_pos:
+            return
+        dx = event.position().x() - self._last_mouse_pos.x()
+        dy = event.position().y() - self._last_mouse_pos.y()
+        self._last_mouse_pos = event.position()
+
+        if self._drag_mode == 'orbit':
+            self.azimuth = (self.azimuth + dx * 0.5) % 360.0
+            self.elevation = max(-89.9, min(89.9, self.elevation - dy * 0.5))
+            self.update()
+        elif self._drag_mode == 'pan':
+            self.pan_x += dx
+            self.pan_y += dy
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_mode = None
 
     def wheelEvent(self, event):
         if event.angleDelta().y() == 0:
             event.ignore()
             return
         factor = 1.15 if event.angleDelta().y() > 0 else 1.0 / 1.15
-        self.scale(factor, factor)
+        mx = event.position().x()
+        my = event.position().y()
+        cx = self.width() / 2.0
+        cy = self.height() / 2.0
+        self.pan_x = mx - cx - (mx - cx - self.pan_x) * factor
+        self.pan_y = my - cy - (my - cy - self.pan_y) * factor
+        self.zoom = max(0.0001, min(10000.0, self.zoom * factor))
+        self.update()
         event.accept()
 
-    def update_path(self, gcode_text):
-        for item in list(self.scene.items()):
-            if item != getattr(self, 'tool_marker', None):
-                self.scene.removeItem(item)
-        self.segment_items.clear()
-        self.active_line = -1
-
-        if not gcode_text or not str(gcode_text).strip():
-            return
-
-        text = str(gcode_text)
-        lines = text.splitlines()
-        line_count = len(lines)
-        preview_note = None
-
-        if line_count > self.MAX_PREVIEW_LINES:
-            sample_step = max(1, line_count // self.MAX_PREVIEW_SEGMENTS)
-            preview_lines = [(idx, line) for idx, line in enumerate(lines) if idx % sample_step == 0]
-            preview_note = self.scene.addText(
-                f"Preview simplified: {line_count:,} lines sampled to {len(preview_lines):,} moves"
-            )
-            preview_note.setDefaultTextColor(QColor("#ffb347"))
-            preview_note.setPos(10, 10)
-        else:
-            preview_lines = list(enumerate(lines))
-
-        cos_a = math.cos(math.radians(30))
-        sin_a = math.sin(math.radians(30))
-        
-        def to_iso(px, py, pz):
-            sx = (px - py) * cos_a
-            sy = -(px + py) * sin_a - pz
-            return sx, sy
-
-        x, y, z = 0.0, 0.0, 0.0
-        current_mode = 'G1'
-        distance_mode = 'G90'
-
-        feed_pen = QPen(QColor("#39FF14"), 1.5)
-        feed_pen.setCosmetic(True)
-
-        rapid_pen = QPen(QColor(150, 150, 150, 100), 1, Qt.PenStyle.DashLine)
-        rapid_pen.setCosmetic(True)
-
-        for line_idx, line in preview_lines:
-            clean_line = line.split(';')[0].split('(')[0].strip().upper()
-            if not clean_line: continue
-
-            tokens = re.findall(r'[A-Z][-+]?[^A-Z\s]*', clean_line)
-            for token in tokens:
-                if token in ['G0', 'G00']: current_mode = 'G0'
-                elif token in ['G1', 'G01']: current_mode = 'G1'
-                elif token in ['G2', 'G02']: current_mode = 'G2'
-                elif token in ['G3', 'G03']: current_mode = 'G3'
-                elif token in ['G38.2', 'G38.3', 'G38.4', 'G38.5']:
-                    current_mode = 'G38'
-                elif token in ['G90', 'G90.0']:
-                    distance_mode = 'G90'
-                elif token in ['G91', 'G91.0']:
-                    distance_mode = 'G91'
-
-            new_x, new_y, new_z = x, y, z
-            i, j = 0.0, 0.0
-            has_move = False
-            move_values = {}
-            for token in tokens:
-                if token.startswith('X'):
-                    try: move_values['X'] = float(token[1:]); has_move = True
-                    except: pass
-                elif token.startswith('Y'):
-                    try: move_values['Y'] = float(token[1:]); has_move = True
-                    except: pass
-                elif token.startswith('Z'):
-                    try: move_values['Z'] = float(token[1:]); has_move = True
-                    except: pass
-                elif token.startswith('I'):
-                    try: i = float(token[1:])
-                    except: pass
-                elif token.startswith('J'):
-                    try: j = float(token[1:])
-                    except: pass
-
-            if has_move:
-                if distance_mode == 'G91':
-                    new_x += move_values.get('X', 0.0)
-                    new_y += move_values.get('Y', 0.0)
-                    new_z += move_values.get('Z', 0.0)
-                else:
-                    new_x = move_values.get('X', new_x)
-                    new_y = move_values.get('Y', new_y)
-                    new_z = move_values.get('Z', new_z)
-
-                path = QPainterPath()
-                path.moveTo(*to_iso(x, y, z))
-
-                if current_mode == 'G0':
-                    path.lineTo(*to_iso(new_x, new_y, new_z))
-                    item = self.scene.addPath(path, rapid_pen)
-                    item.setData(0, line_idx)
-                    self.segment_items[line_idx] = {'item': item, 'is_rapid': True}
-                elif current_mode in ['G2', 'G3']:
-                    cx, cy = x + i, y + j
-                    rx, ry = x - cx, y - cy
-                    nx, ny = new_x - cx, new_y - cy
-                    radius = math.hypot(rx, ry)
-
-                    if radius > 0.0001:
-                        start_ang = math.degrees(math.atan2(ry, rx))
-                        end_ang = math.degrees(math.atan2(ny, nx))
-                        sweep = end_ang - start_ang
-
-                        if current_mode == 'G2': # CW
-                            # Ensure sweep is negative for CW
-                            if sweep > 0: sweep -= 360
-                        else: # CCW
-                            # Ensure sweep is positive for CCW
-                            if sweep < 0: sweep += 360
-
-                        steps = max(int(abs(sweep) / 5.0), 3) 
-                        
-                        for step in range(1, steps + 1):
-                            t = step / steps
-                            ang = math.radians(start_ang + sweep * t)
-                            arc_x = cx + radius * math.cos(ang)
-                            arc_y = cy + radius * math.sin(ang)
-                            arc_z = z + (new_z - z) * t
-                            path.lineTo(*to_iso(arc_x, arc_y, arc_z))
-                            
-                    else:
-                        path.lineTo(*to_iso(new_x, new_y, new_z))
-
-                    item = self.scene.addPath(path, feed_pen)
-                    item.setData(0, line_idx)
-                    self.segment_items[line_idx] = {'item': item, 'is_rapid': False}
-                else:
-                    path.lineTo(*to_iso(new_x, new_y, new_z))
-                    item = self.scene.addPath(path, feed_pen)
-                    item.setData(0, line_idx)
-                    self.segment_items[line_idx] = {'item': item, 'is_rapid': False}
-
-                x, y, z = new_x, new_y, new_z
-
-        rect = self.scene.itemsBoundingRect()
-        if rect.width() > 0 and rect.height() > 0:
-            self._update_tool_marker_size(rect)
-            padded_rect = rect.adjusted(-rect.width()*0.05, -rect.height()*0.05, rect.width()*0.05, rect.height()*0.05)
-            self.fitInView(padded_rect, Qt.AspectRatioMode.KeepAspectRatio)
-
-                
-    def highlight_line(self, line_idx):
-        if not hasattr(self, 'segment_items'): return
-        
-        # Reset previous highlight
-        if self.active_line in self.segment_items:
-            data = self.segment_items[self.active_line]
-            pen = QPen(QColor(150, 150, 150, 100), 1, Qt.PenStyle.DashLine) if data['is_rapid'] else QPen(QColor("#39FF14"), 1.5)
-            pen.setCosmetic(True)
-            data['item'].setPen(pen)
-            data['item'].setZValue(0)
-            
-        self.active_line = line_idx
-        
-        if line_idx in self.segment_items:
-            data = self.segment_items[line_idx]
-            hl_pen = QPen(QColor("#ff00ff"), 3) # Vibrant magenta for active toolpath
-            hl_pen.setCosmetic(True)
-            data['item'].setPen(hl_pen)
-            data['item'].setZValue(1) # Pop to front
-            
-    def update_tool_position(self, x, y, z=0.0):
-        # The toolpath is always drawn in mm, so we must scale the live position
-        # if the machine is operating in inches. The incoming x,y,z are already
-        # converted to the display units, so we just need to convert them back to
-        # the canonical 'mm' that the drawing uses.
-        scale = 1.0
-        if self.display_units == "inch": scale = 25.4
-
-        try:
-            x, y, z = float(x) * scale, float(y) * scale, float(z) * scale
-        except:
-            return
-
-        cos_a = math.cos(math.radians(30))
-        sin_a = math.sin(math.radians(30))
-
-        # No offset here, it tracks the same projection mapping relative to path!
-        iso_x = (x - y) * cos_a
-        iso_y = -(x + y) * sin_a - z
-        self.tool_marker.setPos(iso_x, iso_y)
-        
     def mouseDoubleClickEvent(self, event):
-        super().mouseDoubleClickEvent(event)
-        scene_pos = self.mapToScene(event.pos())
-        
-        # Create a small 4x4 bounding box to make it easier to hit thin lines
-        rect = QRectF(scene_pos.x() - 2, scene_pos.y() - 2, 4, 4)
-        for item in self.scene.items(rect, Qt.ItemSelectionMode.IntersectsItemShape):
-            line_idx = item.data(0)
-            if line_idx is not None:
-                self.segment_double_clicked.emit(line_idx)
-                break
+        mx = event.position().x()
+        my = event.position().y()
+        best_dist = 12.0
+        best_line = None
+
+        for seg in self.segments:
+            p0 = self.project_3d(*seg['p0'])
+            p1 = self.project_3d(*seg['p1'])
+            dx = p1[0] - p0[0]
+            dy = p1[1] - p0[1]
+            l2 = dx*dx + dy*dy
+            if l2 < 1e-4:
+                d = math.hypot(mx - p0[0], my - p0[1])
+            else:
+                t = max(0.0, min(1.0, ((mx - p0[0])*dx + (my - p0[1])*dy) / l2))
+                px = p0[0] + t * dx
+                py = p0[1] + t * dy
+                d = math.hypot(mx - px, my - py)
+            if d < best_dist:
+                best_dist = d
+                best_line = seg['line_no']
+
+        if best_line is not None:
+            self.segment_double_clicked.emit(best_line)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#111111"))
+
+        if not self.preview_enabled:
+            painter.setPen(QColor("#888888"))
+            font = QFont("Arial", 11)
+            painter.setFont(font)
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "3D Toolpath Preview is disabled.\nClick 'Enable Preview' to parse and display.")
+            painter.end()
+            return
+
+        # 1. Machine limits wireframe box
+        ml = self.machine_limits
+        corners = [
+            (ml['min_x'], ml['min_y'], ml['min_z']), (ml['max_x'], ml['min_y'], ml['min_z']),
+            (ml['max_x'], ml['max_y'], ml['min_z']), (ml['min_x'], ml['max_y'], ml['min_z']),
+            (ml['min_x'], ml['min_y'], ml['max_z']), (ml['max_x'], ml['min_y'], ml['max_z']),
+            (ml['max_x'], ml['max_y'], ml['max_z']), (ml['min_x'], ml['max_y'], ml['max_z']),
+        ]
+        edges = [
+            (0, 1), (1, 2), (2, 3), (3, 0),
+            (4, 5), (5, 6), (6, 7), (7, 4),
+            (0, 4), (1, 5), (2, 6), (3, 7),
+        ]
+        pen_box = QPen(QColor(52, 73, 94, 160), 1, Qt.PenStyle.DashLine)
+        painter.setPen(pen_box)
+        for i0, i1 in edges:
+            p0 = self.project_3d(*corners[i0])
+            p1 = self.project_3d(*corners[i1])
+            painter.drawLine(QPointF(*p0), QPointF(*p1))
+
+        # 2. Table grid on Z=0
+        pen_grid = QPen(QColor(40, 50, 60, 90), 1, Qt.PenStyle.DotLine)
+        painter.setPen(pen_grid)
+        step = 200.0
+        gx = ml['min_x']
+        while gx <= ml['max_x']:
+            p0 = self.project_3d(gx, ml['min_y'], 0.0)
+            p1 = self.project_3d(gx, ml['max_y'], 0.0)
+            painter.drawLine(QPointF(*p0), QPointF(*p1))
+            gx += step
+        gy = ml['min_y']
+        while gy <= ml['max_y']:
+            p0 = self.project_3d(ml['min_x'], gy, 0.0)
+            p1 = self.project_3d(ml['max_x'], gy, 0.0)
+            painter.drawLine(QPointF(*p0), QPointF(*p1))
+            gy += step
+
+        # 3. Origin marker (0,0,0)
+        op = self.project_3d(0.0, 0.0, 0.0)
+        ax_len = 25.0
+        ox_pt = self.project_3d(ax_len, 0.0, 0.0)
+        oy_pt = self.project_3d(0.0, ax_len, 0.0)
+        oz_pt = self.project_3d(0.0, 0.0, ax_len)
+        painter.setPen(QPen(QColor("#e74c3c"), 2))
+        painter.drawLine(QPointF(*op), QPointF(*ox_pt))
+        painter.setPen(QPen(QColor("#2ecc71"), 2))
+        painter.drawLine(QPointF(*op), QPointF(*oy_pt))
+        painter.setPen(QPen(QColor("#3498db"), 2))
+        painter.drawLine(QPointF(*op), QPointF(*oz_pt))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(255, 255, 255, 220)))
+        painter.drawEllipse(QPointF(*op), 3, 3)
+
+        # 4. Toolpath segments
+        pen_rapid = QPen(QColor(150, 150, 150, 90), 1, Qt.PenStyle.DashLine)
+        pen_feed = QPen(QColor("#39FF14"), 1.5)
+        pen_active = QPen(QColor("#FF00FF"), 3.0)
+
+        for seg in self.segments:
+            p0 = self.project_3d(*seg['p0'])
+            p1 = self.project_3d(*seg['p1'])
+            if seg['line_no'] == self.active_line:
+                painter.setPen(pen_active)
+            elif seg['type'] == 'G0':
+                painter.setPen(pen_rapid)
+            else:
+                painter.setPen(pen_feed)
+            painter.drawLine(QPointF(*p0), QPointF(*p1))
+
+        # 5. Live Tool Cone
+        tx, ty, tz = self.tool_pos
+        tip = self.project_3d(tx, ty, tz)
+        cone_h = 25.0
+        cone_r = 6.0
+
+        # Guide line to table
+        base_pt = self.project_3d(tx, ty, 0.0)
+        painter.setPen(QPen(QColor(243, 156, 18, 80), 1, Qt.PenStyle.DotLine))
+        painter.drawLine(QPointF(*tip), QPointF(*base_pt))
+
+        # 3D Cone
+        poly = QPolygonF()
+        poly.append(QPointF(*tip))
+        for step_idx in range(13):
+            th = (step_idx / 12.0) * 2.0 * math.pi
+            bx = tx + cone_r * math.cos(th)
+            by = ty + cone_r * math.sin(th)
+            bz = tz + cone_h
+            pt = self.project_3d(bx, by, bz)
+            poly.append(QPointF(*pt))
+
+        painter.setPen(QPen(QColor("#f39c12"), 1.5))
+        painter.setBrush(QBrush(QColor(243, 156, 18, 170)))
+        painter.drawPolygon(poly)
+
+        # Tool tip dot
+        painter.setPen(QPen(QColor("#ffffff"), 1))
+        painter.setBrush(QBrush(QColor("#ff2222")))
+        painter.drawEllipse(QPointF(*tip), 3.0, 3.0)
+
+        # 6. Orientation Triad (bottom-left)
+        ox, oy = 50.0, self.height() - 50.0
+        triad_len = 35.0
+        (rx, ry, rz), (ux, uy, uz) = self.get_camera_basis()
+        xx, xy = ox + rx * triad_len, oy - ux * triad_len
+        painter.setPen(QPen(QColor("#e74c3c"), 2.5))
+        painter.drawLine(QPointF(ox, oy), QPointF(xx, xy))
+        painter.drawText(QPointF(xx + 3, xy + 4), "X")
+        yx, yy = ox + ry * triad_len, oy - uy * triad_len
+        painter.setPen(QPen(QColor("#2ecc71"), 2.5))
+        painter.drawLine(QPointF(ox, oy), QPointF(yx, yy))
+        painter.drawText(QPointF(yx + 3, yy + 4), "Y")
+        zx, zy = ox + rz * triad_len, oy - uz * triad_len
+        painter.setPen(QPen(QColor("#3498db"), 2.5))
+        painter.drawLine(QPointF(ox, oy), QPointF(zx, zy))
+        painter.drawText(QPointF(zx + 3, zy + 4), "Z")
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 200))
+        painter.drawEllipse(QPointF(ox, oy), 3, 3)
+
+        # 7. Status HUD Overlay
+        painter.setPen(QColor("#aaaaaa"))
+        font_hud = QFont("Monospace", 9)
+        painter.setFont(font_hud)
+        painter.drawText(12, 20, f"View: Azimuth {self.azimuth:.0f}° | Elevation {self.elevation:.0f}° | Zoom {self.zoom:.2f}x")
+        if self.preview_note:
+            painter.setPen(QColor("#ffb347"))
+            painter.drawText(12, 36, self.preview_note)
+
+        painter.setPen(QColor("#666666"))
+        painter.drawText(self.width() - 280, self.height() - 15, "Left-drag: Orbit | Right-drag: Pan | Wheel: Zoom")
+        painter.end()
 
 class PositionFetcherThread(QThread):
     position_fetched = pyqtSignal(dict)
@@ -509,17 +1004,11 @@ last_ok = time.time()
 last_file = None
 total_lines = 0
 
-def safety_shutdown(*args):
-    try:
-        if s is not None:
-            s.poll()
-            if getattr(s, 'interp_state', 1) == linuxcnc.INTERP_IDLE:
-                c.state(linuxcnc.STATE_ESTOP)
-    except: pass
+def cleanup_and_exit(*args):
     sys.exit(0)
 
-signal.signal(signal.SIGHUP, safety_shutdown)
-signal.signal(signal.SIGTERM, safety_shutdown)
+signal.signal(signal.SIGHUP, cleanup_and_exit)
+signal.signal(signal.SIGTERM, cleanup_and_exit)
 try:
     signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 except: pass
@@ -616,6 +1105,8 @@ while True:
         out['TOOL_IN_SPINDLE'] = int(getattr(s, 'tool_in_spindle', 0))
         out['POCKET_PREPPED'] = int(getattr(s, 'pocket_prepped', -1))
         out['TASK_BLOCKED'] = getattr(s, 'exec_state', 2) not in (1, 2)
+        out['PROBE_VAL'] = getattr(s, 'probe_val', 0)
+        out['probe_tripped'] = bool(getattr(s, 'probe_tripped', False))
         
         try:
             out['ABSOLUTE_X'] = s.actual_position[0]
@@ -633,7 +1124,7 @@ while True:
         last_ok = time.time()
     except Exception:
         if time.time() - last_ok > 5.0:
-            safety_shutdown()
+            cleanup_and_exit()
     time.sleep(0.1)"""
         b64 = base64.b64encode(py_code.encode()).decode()
         self.cmd = f"python3 -u -c \"import base64; exec(base64.b64decode('{b64}').decode())\""
@@ -652,55 +1143,68 @@ while True:
                 self.msleep(100)
             return
 
-        if is_local_ip(self.ip):
+        if is_local_controller(self.ip):
             self.running = True
+            if sys.platform.startswith("linux"):
+                system_site_packages = "/usr/lib/python3/dist-packages"
+                if os.path.isdir(system_site_packages) and system_site_packages not in sys.path:
+                    sys.path.append(system_site_packages)
+            try:
+                import linuxcnc
+                status = linuxcnc.stat()
+                error_channel = linuxcnc.error_channel()
+            except Exception as error:
+                self.error.emit(f"Local LinuxCNC API unavailable: {error}")
+                self.running = False
+                return
+
             while self.running:
-                proc = subprocess.Popen(self.cmd, shell=True, stdout=subprocess.PIPE, text=True)
-                while self.running:
-                    line = proc.stdout.readline()
-                    if not line: break
-                    line = line.strip()
-                    if line.startswith('{') and line.endswith('}'):
-                        try:
-                            coords = json.loads(line)
-                            self.position_fetched.emit(coords)
-                        except json.JSONDecodeError: pass
-                proc.terminate()
-                for _ in range(20):
-                    if not self.running: break
-                    self.msleep(100)
+                try:
+                    if status is None:
+                        status = linuxcnc.stat()
+                    if error_channel is None:
+                        error_channel = linuxcnc.error_channel()
+                    self.position_fetched.emit(
+                        linuxcnc_status_snapshot(linuxcnc, status, error_channel)
+                    )
+                except Exception as error:
+                    status = None
+                    error_channel = None
+                    if self.running:
+                        self.error.emit(f"Local LinuxCNC status failed: {error}")
+                    self.msleep(1000)
+                    continue
+                self.msleep(100)
             return
 
-        if not HAS_PARAMIKO:
+        if not self.ip or not self.user:
+            self.error.emit("Remote credentials are required for live monitoring.")
             return
             
         self.running = True
         while self.running:
             try:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(self.ip, username=self.user, password=self.password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(self.password), allow_agent=not bool(self.password))
-                
-                stdin, stdout, stderr = ssh.exec_command(self.cmd)
-                stdout.channel.settimeout(1.0)
-                
-                import socket
-                while self.running:
+                proc = subprocess.Popen(
+                    ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{self.user}@{self.ip}", self.cmd],
+                    stdout=subprocess.PIPE,
+                    text=True,
+                )
+                self.proc = proc
+                while self.running and proc.poll() is None:
                     try:
-                        line = stdout.readline()
+                        line = proc.stdout.readline()
                         if not line: break
                         line = line.strip()
                         if line.startswith('{') and line.endswith('}'):
                             coords = json.loads(line)
                             self.position_fetched.emit(coords)
-                    except (socket.timeout, json.JSONDecodeError):
-                        continue # Ignore read timeouts and malformed JSON and keep waiting
+                    except json.JSONDecodeError:
+                        continue
                     except Exception as e:
                         if self.running:
                             self.error.emit(f"Position fetcher error: {e}")
-                        break # The socket died or had a fatal error, break to trigger reconnect timer!
-                        
-                ssh.close()
+                        break
+                proc.terminate()
             except Exception as e:
                 if self.running:
                     self.error.emit(f"SSH connection failed: {e}")
@@ -712,6 +1216,9 @@ while True:
 
     def stop(self):
         self.running = False
+        if hasattr(self, 'proc') and self.proc and self.proc.poll() is None:
+            try: self.proc.terminate()
+            except: pass
 
 
 class AgentCapabilityFetcherThread(QThread):
@@ -747,24 +1254,36 @@ class CalibrationWorker(QThread):
 
     def run(self):
         ip, user, password = self.dashboard.get_ssh_creds()
+        b64_code = base64.b64encode(self.py_code.encode()).decode()
+        cmd = f"python3 -u -c \"import base64; exec(base64.b64decode('{b64_code}').decode())\""
+
+        if is_local_controller(ip):
+            try:
+                proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=300)
+                result = proc.stdout.strip()
+                error = proc.stderr.strip()
+                if "ERROR" in result or (error and "Traceback" not in error): self.calibration_failed.emit(result or error)
+                elif "USER_CANCEL" in result: pass
+                else: self.calibration_complete.emit(result)
+            except Exception as e:
+                self.calibration_failed.emit(str(e))
+            return
+
         if not ip or not user:
             self.calibration_failed.emit("SSH credentials are not configured.")
             return
 
-        b64_code = base64.b64encode(self.py_code.encode()).decode()
-        cmd = f"python3 -u -c \"import base64; exec(base64.b64decode('{b64_code}').decode())\""
-
         try:
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(ip, username=user, password=password, timeout=10, look_for_keys=not bool(password), allow_agent=not bool(password))
-            stdin, stdout, stderr = ssh.exec_command(cmd, timeout=300)
-            result = stdout.read().decode().strip() # This will block until the remote command finishes
-            error = stderr.read().decode().strip()
-            ssh.close()
-            
+            res = subprocess.run(
+                ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", f"{user}@{ip}", cmd],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            result = res.stdout.strip()
+            error = res.stderr.strip()
             if "ERROR" in result or (error and "Traceback" not in error): self.calibration_failed.emit(result or error)
-            elif "USER_CANCEL" in result: pass # User cancelled, do nothing
+            elif "USER_CANCEL" in result: pass
             else: self.calibration_complete.emit(result)
         except Exception as e:
             self.calibration_failed.emit(str(e))
@@ -868,36 +1387,17 @@ class AgentUnhomeAllWorker(QThread):
         except Exception as error:
             self.failed.emit(str(error))
 
-# Define MockLinuxCNC before using it
-class MockLinuxCNC:
-    def command(self): return self
-    def stat(self): return self
-    def mode(self, *args): pass
-    def wait_complete(self): pass
-    def home(self, *args): print("[dashboard.py] SIM: Homing axes...")
-    def state(self, *args): print(f"[dashboard.py] SIM: State changed to {args}")
-    def abort(self): print("[dashboard.py] SIM: Abort triggered")
-    @property
-    def position(self): return [1.23, 4.56, 7.89, 0, 0, 0]
-    def poll(self): pass
-    MODE_MANUAL = 1
-    MODE_MDI = 2
-    STATE_ON = 1
-    STATE_OFF = 0
-
-# Moved linuxcnc and IS_SIM initialization to the top of the file for better visibility
-linuxcnc = MockLinuxCNC()
-IS_SIM = True
-
 class MachineDashboard(QWidget):
     error_signal = pyqtSignal(str)
     program_sync_state = pyqtSignal(bool)
+    LARGE_FILE_THRESHOLD = 2 * 1024 * 1024
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.error_signal.connect(self.show_error_message)
         self.program_sync_state.connect(self._set_program_sync_state)
         self.settings = settings
+        self.local_api = LocalLinuxCNCAPI() if getattr(settings, "local_only", False) else None
         self.home_buttons = {}
         self.dro_labels = {}
         self.custom_dro_labels = {}
@@ -912,7 +1412,10 @@ class MachineDashboard(QWidget):
         self.is_estopped = True
         self.machine_state = "ESTOP"
         self.active_jogs = set()
+        self._last_update_state = {}
         self._program_sync_in_progress = False
+        self._is_large_file_preview = False
+        self.loaded_gcode_path = None
         self._tool_change_prompt_active = False
         self._tool_change_last_pocket = -1
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -1030,7 +1533,7 @@ class MachineDashboard(QWidget):
         available = set(capabilities)
         capability_map = {
             "program_control": [self.btn_cycle_start, self.btn_cycle_pause],
-            "mode_control": [self.btn_mode_manual, self.btn_mode_auto],
+            "mode_control": [self.btn_mode_manual, self.btn_mode_mdi, self.btn_mode_auto],
             "spindle_control": [self.btn_m3, self.btn_m4, self.btn_m5],
             "coolant_control": [self.btn_m7, self.btn_m8, self.btn_m9],
             "home_all": [self.btn_home_all],
@@ -1357,8 +1860,8 @@ except Exception as e:
         btn_load.clicked.connect(lambda: self.load_gcode(self.default_gcode_editor))
         btn_merge.clicked.connect(lambda: self.merge_gcode_files(self.default_gcode_editor))
         btn_save.clicked.connect(lambda: self.save_gcode(self.default_gcode_editor))
-        btn_sync.clicked.connect(lambda: self.sync_gcode_to_machine(self.default_gcode_editor.toPlainText()))
-        btn_clear.clicked.connect(self.default_gcode_editor.clear)
+        btn_sync.clicked.connect(lambda: self.sync_gcode_to_machine("" if self.__dict__.get('_is_large_file_preview', False) else self.default_gcode_editor.toPlainText()))
+        btn_clear.clicked.connect(lambda: self.clear_gcode(self.default_gcode_editor))
         btn_clean.clicked.connect(self.clean_gcode)
         btn_optimize.clicked.connect(self.fix_fusion_rapids)
         self.default_gcode_editor.line_double_clicked.connect(self.run_from_line)
@@ -1379,20 +1882,91 @@ except Exception as e:
         preview_group = QGroupBox("3D Toolpath Preview")
         preview_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #444; border-radius: 4px; margin-top: 10px; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
         preview_vbox = QVBoxLayout()
-        self.toolpath_viewer = ToolpathViewer()
+        
+        # View Preset Controls Toolbar
+        view_toolbar = QHBoxLayout()
+        view_toolbar.setSpacing(4)
+        btn_style = (
+            "QPushButton { background-color: #2b2b2b; color: #e0e0e0; border: 1px solid #555; "
+            "border-radius: 3px; padding: 3px 8px; font-weight: bold; font-size: 11px; } "
+            "QPushButton:hover { background-color: #3d3d3d; border-color: #00adb5; } "
+            "QPushButton:pressed { background-color: #1a1a1a; }"
+        )
+
+        self.btn_view_iso = QPushButton("🔄 ISO")
+        self.btn_view_iso.setStyleSheet(btn_style)
+        self.btn_view_iso.setToolTip("Isometric View (Azimuth: -45°, Elevation: 30°)")
+        view_toolbar.addWidget(self.btn_view_iso)
+
+        self.btn_view_top = QPushButton("📐 TOP")
+        self.btn_view_top.setStyleSheet(btn_style)
+        self.btn_view_top.setToolTip("Top View (XY Plane)")
+        view_toolbar.addWidget(self.btn_view_top)
+
+        self.btn_view_front = QPushButton("⏹ FRONT")
+        self.btn_view_front.setStyleSheet(btn_style)
+        self.btn_view_front.setToolTip("Front View (XZ Plane)")
+        view_toolbar.addWidget(self.btn_view_front)
+
+        self.btn_view_side = QPushButton("⏹ SIDE")
+        self.btn_view_side.setStyleSheet(btn_style)
+        self.btn_view_side.setToolTip("Side View (YZ Plane)")
+        view_toolbar.addWidget(self.btn_view_side)
+
+        self.btn_view_fit = QPushButton("🔍 FIT")
+        self.btn_view_fit.setStyleSheet(btn_style)
+        self.btn_view_fit.setToolTip("Fit Toolpath and Machine Limits to Viewport")
+        view_toolbar.addWidget(self.btn_view_fit)
+
+        view_toolbar.addStretch()
+        preview_vbox.addLayout(view_toolbar)
+
+        self.toolpath_viewer = ToolpathViewer(parent=self)
+        self.btn_view_iso.clicked.connect(self.toolpath_viewer.set_view_iso)
+        self.btn_view_top.clicked.connect(self.toolpath_viewer.set_view_top)
+        self.btn_view_front.clicked.connect(self.toolpath_viewer.set_view_front)
+        self.btn_view_side.clicked.connect(self.toolpath_viewer.set_view_side)
+        self.btn_view_fit.clicked.connect(self.toolpath_viewer.fit_view)
+
+        if hasattr(self, 'settings') and self.settings is not None:
+            try:
+                min_x = float(self.settings.get_setting('AXIS_X', 'min_limit', '-5.0'))
+                max_x = float(self.settings.get_setting('AXIS_X', 'max_limit', '1275.0'))
+                min_y = float(self.settings.get_setting('AXIS_Y', 'min_limit', '-5.0'))
+                max_y = float(self.settings.get_setting('AXIS_Y', 'max_limit', '1275.0'))
+                min_z = float(self.settings.get_setting('AXIS_Z', 'min_limit', '-134.0'))
+                max_z = float(self.settings.get_setting('AXIS_Z', 'max_limit', '5.0'))
+                self.toolpath_viewer.set_machine_limits(min_x, max_x, min_y, max_y, min_z, max_z)
+            except Exception:
+                pass
+        
+        preview_pref = True
+        if hasattr(self, 'settings') and self.settings is not None:
+            preview_pref = self.settings.get_setting('UI_PREFERENCES', 'enable_toolpath_preview', 'True') == 'True'
+        if not preview_pref:
+            self.toolpath_viewer.set_preview_enabled(False)
+            
         preview_vbox.addWidget(self.toolpath_viewer)
+        
+        preview_btn_layout = QHBoxLayout()
+        
+        self.btn_toggle_preview = QPushButton()
+        self.update_preview_toggle_button()
+        self.btn_toggle_preview.clicked.connect(self.toggle_toolpath_preview)
+        preview_btn_layout.addWidget(self.btn_toggle_preview)
         
         btn_screenshot = QPushButton("📸 Save Screenshot")
         btn_screenshot.setStyleSheet("QPushButton { background-color: #2c3e50; color: white; padding: 4px 10px; border-radius: 3px; font-weight: bold; } QPushButton:pressed { background-color: #1a252f; }")
         btn_screenshot.clicked.connect(self.save_toolpath_screenshot)
-        preview_vbox.addWidget(btn_screenshot)
+        preview_btn_layout.addWidget(btn_screenshot)
         
+        preview_vbox.addLayout(preview_btn_layout)
         preview_group.setLayout(preview_vbox)
         
         gcode_preview_layout.addWidget(preview_group, 2)
         
         # Wire Editor changes to Toolpath Viewer
-        self.default_gcode_editor.textChanged.connect(lambda: self.toolpath_viewer.update_path(self.default_gcode_editor.toPlainText()))
+        self.default_gcode_editor.textChanged.connect(self._on_gcode_text_changed)
         self.toolpath_viewer.segment_double_clicked.connect(self.highlight_gcode_line)
         
         master_layout.addLayout(gcode_preview_layout, 1) # Stretch to fill middle
@@ -1504,82 +2078,30 @@ except Exception as e:
         plate_layout.addStretch()
         probe_tabs.addTab(plate_tab, "Plate")
         
-        # --- TOUCH TAB ---
+        # --- TOUCH TAB (SHORTCUT TO PROBING TAB) ---
         touch_tab = QWidget()
-        touch_layout = QHBoxLayout(touch_tab)
-        
-        # OUTSIDE GRID
-        out_group = QGroupBox("Measure Outside")
-        out_grid = QGridLayout()
-        out_btns = [
-            ("⌜ B-L", "out_bl"), ("⬆ Back", "out_b"), ("B-R ⌝", "out_br"),
-            ("⬅ Left", "out_l"), ("⏺ Boss", "out_boss"), ("Right ➡", "out_r"),
-            ("⌞ F-L", "out_fl"), ("⬇ Front", "out_f"), ("F-R ⌟", "out_fr")
-        ]
-        for i, (text, action) in enumerate(out_btns):
-            btn = QPushButton(text)
-            btn.setStyleSheet("QPushButton { background-color: #2980b9; color: white; font-weight: bold; padding: 6px; border-radius: 4px; } QPushButton:pressed { background-color: #1f618d; }")
-            btn.clicked.connect(lambda _, a=action: self.trigger_probing(a))
-            btn.setObjectName(f"probe_{action}")
-            out_grid.addWidget(btn, i // 3, i % 3)
-        out_group.setLayout(out_grid)
-        
-        # SETTINGS
-        mid_group = QGroupBox("Settings")
-        mid_layout = QVBoxLayout()
-        
-        self.input_probe_diam = QLineEdit(self.settings.get_setting("PROBING", "probe_diam", ""))
-        self.input_probe_diam.setPlaceholderText("Dia")
-        self.input_probe_diam.textChanged.connect(lambda t: self.settings.save_setting("PROBING", "probe_diam", t))
-        
-        self.input_xy_clearance = QLineEdit(self.settings.get_setting("PROBING", "xy_clear", ""))
-        self.input_xy_clearance.setPlaceholderText("Clear")
-        self.input_xy_clearance.textChanged.connect(lambda t: self.settings.save_setting("PROBING", "xy_clear", t))
-        
-        self.input_z_drop = QLineEdit(self.settings.get_setting("PROBING", "z_drop", ""))
-        self.input_z_drop.setPlaceholderText("Drop")
-        self.input_z_drop.textChanged.connect(lambda t: self.settings.save_setting("PROBING", "z_drop", t))
-        
-        self.input_search_dist = QLineEdit(self.settings.get_setting("PROBING", "search_dist", ""))
-        self.input_search_dist.setPlaceholderText("Search")
-        self.input_search_dist.textChanged.connect(lambda t: self.settings.save_setting("PROBING", "search_dist", t))
-        
-        for w in [self.input_probe_diam, self.input_xy_clearance, self.input_z_drop, self.input_search_dist]:
-            w.setStyleSheet("max-width: 60px;")
-            
-        form = QGridLayout()
-        form.addWidget(QLabel("Dia:"), 0, 0); form.addWidget(self.input_probe_diam, 0, 1)
-        form.addWidget(QLabel("XY Clr:"), 1, 0); form.addWidget(self.input_xy_clearance, 1, 1)
-        form.addWidget(QLabel("Z Drop:"), 2, 0); form.addWidget(self.input_z_drop, 2, 1)
-        form.addWidget(QLabel("Search:"), 3, 0); form.addWidget(self.input_search_dist, 3, 1)
-        mid_layout.addLayout(form)
-        
-        btn_probe_z = QPushButton("Probe Z")
-        btn_probe_z.setStyleSheet("QPushButton { background-color: #8e44ad; color: white; font-weight: bold; padding: 6px; border-radius: 4px; } QPushButton:pressed { background-color: #732d91; }")
-        btn_probe_z.clicked.connect(lambda: self.trigger_probing("probe_z"))
-        mid_layout.addWidget(btn_probe_z)
-        mid_layout.addStretch()
-        mid_group.setLayout(mid_layout)
-        
-        # INSIDE GRID
-        in_group = QGroupBox("Measure Inside")
-        in_grid = QGridLayout()
-        in_btns = [
-            ("⌟ B-L", "in_bl"), ("⬇ Back", "in_b"), ("B-R ⌞", "in_br"),
-            ("➡ Left", "in_l"), ("⏺ Hole", "in_hole"), ("Right ⬅", "in_r"),
-            ("⌝ F-L", "in_fl"), ("⬆ Front", "in_f"), ("F-R ⌜", "in_fr")
-        ]
-        for i, (text, action) in enumerate(in_btns):
-            btn = QPushButton(text)
-            btn.setStyleSheet("QPushButton { background-color: #27ae60; color: white; font-weight: bold; padding: 6px; border-radius: 4px; } QPushButton:pressed { background-color: #229954; }")
-            btn.clicked.connect(lambda _, a=action: self.trigger_probing(a))
-            btn.setObjectName(f"probe_{action}")
-            in_grid.addWidget(btn, i // 3, i % 3)
-        in_group.setLayout(in_grid)
-        
-        touch_layout.addWidget(out_group)
-        touch_layout.addWidget(mid_group)
-        touch_layout.addWidget(in_group)
+        touch_layout = QVBoxLayout(touch_tab)
+        touch_layout.setContentsMargins(10, 15, 10, 15)
+        touch_layout.setSpacing(10)
+
+        lbl_touch_info = QLabel("Workpiece probing has been upgraded to Probe Basic style in the dedicated Probing tab.")
+        lbl_touch_info.setStyleSheet("color: #cbd5e1; font-size: 11px;")
+        lbl_touch_info.setWordWrap(True)
+        lbl_touch_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        touch_layout.addWidget(lbl_touch_info)
+
+        btn_open_probing = QPushButton("🔍 Open Probing Tab (Probe Basic)")
+        btn_open_probing.setStyleSheet("QPushButton { background-color: #0284c7; color: white; font-weight: bold; padding: 10px; border-radius: 4px; font-size: 12px; } QPushButton:hover { background-color: #0369a1; }")
+        btn_open_probing.clicked.connect(self.open_probing_tab)
+        touch_layout.addWidget(btn_open_probing)
+
+        # Retain parameters for backwards compatibility
+        self.input_probe_diam = QLineEdit(self.settings.get_setting("PROBING", "probe_diam", "3.0"))
+        self.input_xy_clearance = QLineEdit(self.settings.get_setting("PROBING", "xy_clear", "5.0"))
+        self.input_z_drop = QLineEdit(self.settings.get_setting("PROBING", "z_drop", "5.0"))
+        self.input_search_dist = QLineEdit(self.settings.get_setting("PROBING", "search_dist", "20.0"))
+
+        touch_layout.addStretch()
         probe_tabs.addTab(touch_tab, "Touch")
         
         # --- TOOL SETTER TAB ---
@@ -1718,23 +2240,32 @@ except Exception as e:
         self.progress_bar.setFixedHeight(25)
         run_layout.addWidget(self.progress_bar)
         
+        mode_btn_layout = QHBoxLayout()
         self.btn_mode_manual = QPushButton("MANUAL")
+        self.btn_mode_mdi = QPushButton("MDI")
         self.btn_mode_auto = QPushButton("AUTO")
+        for btn in [self.btn_mode_manual, self.btn_mode_mdi, self.btn_mode_auto]:
+            btn.setFixedHeight(36)
+            btn.setStyleSheet("QPushButton { background-color: #34495e; color: white; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #2c3e50; }")
+            mode_btn_layout.addWidget(btn)
+        run_layout.addLayout(mode_btn_layout)
+
         self.btn_cycle_start = QPushButton("▶ CYCLE START")
         self.btn_cycle_pause = QPushButton("⏸ PAUSE")
         self.btn_cycle_stop = QPushButton("⏹ STOP")
-        
-        for btn in [self.btn_mode_manual, self.btn_mode_auto, self.btn_cycle_start, self.btn_cycle_pause, self.btn_cycle_stop]:
+
+        for btn in [self.btn_cycle_start, self.btn_cycle_pause, self.btn_cycle_stop]:
             btn.setFixedHeight(40)
             btn.setStyleSheet("QPushButton { background-color: #34495e; color: white; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #2c3e50; }")
             run_layout.addWidget(btn)
-            
+
         self.btn_mode_manual.clicked.connect(lambda: self.select_machine_mode("manual"))
+        self.btn_mode_mdi.clicked.connect(lambda: self.select_machine_mode("mdi"))
         self.btn_mode_auto.clicked.connect(lambda: self.select_machine_mode("auto"))
         self.btn_cycle_start.clicked.connect(self.start_cycle)
         self.btn_cycle_pause.clicked.connect(self.pause_or_resume_cycle)
         self.btn_cycle_stop.clicked.connect(self.stop_cycle)
-            
+
         self.btn_cycle_start.setStyleSheet("QPushButton { background-color: #27ae60; color: white; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #229954; }")
         self.btn_cycle_pause.setStyleSheet("QPushButton { background-color: #f39c12; color: black; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #c87f0a; }")
         self.btn_cycle_stop.setStyleSheet("QPushButton { background-color: #c0392b; color: white; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #922b21; }")
@@ -2095,8 +2626,8 @@ except Exception as e:
                 
                 btn_load.clicked.connect(lambda _, t=txt: self.load_gcode(t))
                 btn_save.clicked.connect(lambda _, t=txt: self.save_gcode(t))
-                btn_sync.clicked.connect(lambda _, t=txt: self.sync_gcode_to_machine(t.toPlainText()))
-                btn_clear.clicked.connect(txt.clear)
+                btn_sync.clicked.connect(lambda _, t=txt: self.sync_gcode_to_machine("" if self.__dict__.get('_is_large_file_preview', False) else t.toPlainText()))
+                btn_clear.clicked.connect(lambda _, t=txt: self.clear_gcode(t))
                 txt.line_double_clicked.connect(self.run_from_line)
                 widget_obj = container
             elif "3D" in w_type:
@@ -2138,21 +2669,25 @@ except Exception as e:
             self.error_signal.emit("Secure mode does not permit arbitrary HAL pin writes.")
             return
 
-        ip = self.settings.get_setting("SSH", "ip_address", "")
-        user = self.settings.get_setting("SSH", "username", "")
-        password = self.settings.get_setting("SSH", "password", "")
-        
-        if not ip or not user: return
-            
         # Translate virtual UI pins to their real-time command parameters
         if pin_name.startswith("ui."):
             clean_name = pin_name.replace("ui.", "").replace(".", "_").replace("-", "_")
             target = f"linuxcnc_ui.0.{clean_name}_cmd"
         else:
             target = pin_name
-            
-        cmd = f"halcmd setp {target} {value_str}"
-        self.cmd_queue.put(cmd)
+
+        if getattr(self.settings, "local_only", False):
+            try:
+                self.local_api.set_hal_value(target, value_str)
+            except Exception as error:
+                self.error_signal.emit(f"HAL write failed for {target}: {error}")
+            return
+
+        ip = self.settings.get_setting("SSH", "ip_address", "")
+        user = self.settings.get_setting("SSH", "username", "")
+        if not ip or not user:
+            return
+        self.cmd_queue.put(f"halcmd setp {target} {value_str}")
 
     def switch_probe_hardware(self, index):
         agent_client = client_from_settings(self.settings)
@@ -2174,6 +2709,14 @@ except Exception as e:
             self.probe_selector.setStyleSheet("background-color: #d35400; color: white; font-weight: bold; padding: 6px; border-radius: 4px; margin-bottom: 5px;")
 
     def run_from_line(self, line_number):
+        if self.__dict__.get('_is_large_file_preview', False):
+            QMessageBox.warning(
+                self,
+                "Run From Line",
+                "Run from line is disabled in Large File Preview Mode because the editor contains a sampled preview.",
+            )
+            return
+
         if client_from_settings(self.settings) is not None:
             QMessageBox.information(
                 self,
@@ -2272,66 +2815,335 @@ except Exception as e:
         self.confirm_and_execute_mdi(mdi[action], f"Spindle {action.title()}")
 
     def stop_cycle(self):
-        """Abort the active program through the typed agent when enrolled."""
+        """Abort the active program, clear feed-hold, and safely return to manual mode."""
         agent_client = client_from_settings(self.settings)
         if agent_client is not None:
             try:
                 agent_client.machine_command("abort")
+                try:
+                    agent_client.spindle_command("stop", 0.0)
+                except Exception:
+                    pass
+                try:
+                    agent_client.machine_command("coolant_off")
+                except Exception:
+                    pass
+                try:
+                    agent_client.machine_command("mode_manual")
+                except Exception:
+                    pass
             except Exception as error:
                 self.error_signal.emit(f"Cycle stop failed: {error}")
-            return
-        self._send_b64_py_cmd("import linuxcnc\nc=linuxcnc.command(); c.abort()", urgent=True)
+        elif getattr(self.settings, "local_only", False) and self.local_api:
+            try:
+                command = self.local_api.command()
+                try:
+                    command.set_feed_hold(0)
+                except Exception:
+                    pass
+                command.abort()
+                command.wait_complete(1.0)
+                try:
+                    command.spindle(self.local_api.linuxcnc.SPINDLE_OFF)
+                except Exception:
+                    pass
+                try:
+                    command.flood(0)
+                    command.mist(0)
+                except Exception:
+                    pass
+                try:
+                    status = self.local_api.status()
+                    for _ in range(20):
+                        status.poll()
+                        if getattr(status, "current_vel", 0.0) == 0.0 and getattr(status, "interp_state", 1) == self.local_api.linuxcnc.INTERP_IDLE:
+                            break
+                        time.sleep(0.05)
+                except Exception:
+                    pass
+                command.mode(self.local_api.linuxcnc.MODE_MANUAL)
+                command.wait_complete(1.0)
+                try:
+                    command.reset_interpreter()
+                except Exception:
+                    pass
+                try:
+                    err_chan = self.local_api.error_channel()
+                    for _ in range(100):
+                        if not err_chan.poll():
+                            break
+                except Exception:
+                    pass
+            except Exception as error:
+                self.error_signal.emit(f"Cycle stop failed: {error}")
+        else:
+            self._send_b64_py_cmd(
+                "import linuxcnc, time\nc=linuxcnc.command(); s=linuxcnc.stat()\n"
+                "try: c.set_feed_hold(0)\nexcept: pass\n"
+                "c.abort()\n"
+                "try: c.spindle(linuxcnc.SPINDLE_OFF)\nexcept: pass\n"
+                "try: c.flood(0); c.mist(0)\nexcept: pass\n"
+                "for _ in range(20):\n"
+                "    try:\n"
+                "        s.poll()\n"
+                "        if getattr(s, 'current_vel', 0.0) == 0.0 and getattr(s, 'interp_state', 1) == linuxcnc.INTERP_IDLE: break\n"
+                "    except: pass\n"
+                "    time.sleep(0.05)\n"
+                "c.mode(linuxcnc.MODE_MANUAL)\nc.wait_complete(1.0)\n"
+                "try: c.reset_interpreter()\nexcept: pass\n"
+                "try:\n"
+                "    e = linuxcnc.error_channel()\n"
+                "    for _ in range(100):\n"
+                "        if not e.poll(): break\n"
+                "except: pass",
+                urgent=True,
+            )
+        if hasattr(self, 'btn_cycle_pause'):
+            self.btn_cycle_pause.setText("⏸ PAUSE")
+            self.btn_cycle_pause.setStyleSheet(
+                "QPushButton { background-color: #f39c12; color: black; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #c87f0a; }"
+            )
+        if self.__dict__.get('active_jogs'):
+            self.active_jogs.clear()
+        self.mock_coords["MODE"] = "MANUAL"
+        self.mock_coords["STATUS"] = "IDLE"
+        self.mock_coords["IS_PAUSED"] = False
+        self.update_status()
 
     def start_cycle(self):
         """Start the loaded program through a typed command when enrolled."""
+        if self.__dict__.get('active_jogs'):
+            self.jog_button_released()
+            self.active_jogs.clear()
+
         agent_client = client_from_settings(self.settings)
         if agent_client is not None:
             if self._program_sync_in_progress:
                 self.error_signal.emit("Cycle start is unavailable while the G-code program is still being uploaded.")
                 return
+            mock_coords = self.__dict__.get("mock_coords", {})
+            if mock_coords.get("MODE") and mock_coords.get("MODE") != "AUTO":
+                QMessageBox.warning(
+                    self,
+                    "Mode Error",
+                    "Cannot start cycle: Machine must be in AUTO mode.\nPlease select AUTO mode first.",
+                )
+                return
             try:
-                agent_client.open_program("active_program.ngc")
+                loaded_path = self.__dict__.get('loaded_gcode_path')
+                target_prog = os.path.basename(loaded_path) if loaded_path else "active_program.ngc"
+                agent_client.open_program(target_prog)
                 agent_client.machine_command("program_start", timeout=15.0)
+            except Exception as error:
+                if self.__dict__.get('error_signal'):
+                    self.error_signal.emit(f"Cycle start failed: {error}")
+            return
+        if getattr(self.settings, "local_only", False) and self.local_api:
+            try:
+                command = self.local_api.command()
+                status = self.local_api.status()
+                status.poll()
+                current_file = getattr(status, 'file', '') or ''
+
+                loaded_path = self.__dict__.get('loaded_gcode_path')
+                has_program = False
+                if loaded_path and os.path.exists(loaded_path):
+                    has_program = True
+                elif self.__dict__.get('default_gcode_editor') and not self.default_gcode_editor.document().isEmpty():
+                    has_program = True
+                elif current_file and os.path.exists(current_file):
+                    has_program = True
+
+                if not has_program:
+                    QMessageBox.warning(self, "No Program", "Please load a G-code program before starting cycle.")
+                    return
+
+                if getattr(status, 'task_mode', None) != self.local_api.linuxcnc.MODE_AUTO:
+                    QMessageBox.warning(
+                        self,
+                        "Mode Error",
+                        "Cannot start cycle: Machine must be in AUTO mode.\nPlease select AUTO mode first.",
+                    )
+                    return
+
+                if not current_file or not os.path.exists(current_file):
+                    if loaded_path and os.path.exists(loaded_path):
+                        command.program_open(loaded_path)
+                        command.wait_complete(2.0)
+                    else:
+                        local_dir = self.get_nc_files_dir()
+                        local_dest = os.path.join(local_dir, "active_program.ngc")
+                        editor_content = self.default_gcode_editor.toPlainText().strip() if "default_gcode_editor" in self.__dict__ else ""
+                        with open(local_dest, 'w', encoding='utf-8') as f:
+                            f.write(editor_content)
+                        command.program_open(local_dest)
+                        command.wait_complete(2.0)
+
+                try:
+                    command.set_feed_hold(0)
+                except Exception:
+                    pass
+                command.auto(self.local_api.linuxcnc.AUTO_RUN, 0)
             except Exception as error:
                 self.error_signal.emit(f"Cycle start failed: {error}")
             return
+
+        mock_coords = self.__dict__.get("mock_coords", {})
+        if mock_coords.get("MODE") and mock_coords.get("MODE") != "AUTO":
+            QMessageBox.warning(
+                self,
+                "Mode Error",
+                "Cannot start cycle: Machine must be in AUTO mode.\nPlease select AUTO mode first.",
+            )
+            return
+
         self._send_b64_py_cmd(
-            "import linuxcnc, time\nc=linuxcnc.command(); c.mode(linuxcnc.MODE_AUTO); time.sleep(0.1); c.auto(linuxcnc.AUTO_RUN, 0)"
+            "import linuxcnc, sys\n"
+            "c=linuxcnc.command(); s=linuxcnc.stat(); s.poll()\n"
+            "if s.task_mode != linuxcnc.MODE_AUTO: sys.exit(0)\n"
+            "try: c.set_feed_hold(0)\nexcept: pass\n"
+            "c.auto(linuxcnc.AUTO_RUN, 0)"
         )
 
     def select_machine_mode(self, mode):
-        """Select Manual or Auto through the typed agent when enrolled."""
-        # Ignore mode changes while actively jogging to prevent interruption
-        if self.active_jogs:
+        """Select Manual, MDI, or Auto mode."""
+        if self.__dict__.get('active_jogs'):
+            self.jog_button_released()
+            self.active_jogs.clear()
+
+        # Reject mode changes while actively running or paused
+        if self.mock_coords.get('STATUS') in ('RUNNING', 'PAUSED'):
+            QMessageBox.warning(
+                self,
+                "Mode Switch Blocked",
+                "Cannot change machine mode while a program is running or paused.\nPlease stop the program first.",
+            )
             return
-            
+
+        mode_key = str(mode).strip().lower()
+        if mode_key not in ("manual", "mdi", "auto"):
+            self.error_signal.emit(f"Unknown mode: {mode}")
+            return
+
         agent_client = client_from_settings(self.settings)
         if agent_client is not None:
             try:
-                agent_client.machine_command(f"mode_{mode}")
+                agent_client.machine_command(f"mode_{mode_key}")
+                self.mock_coords["MODE"] = mode_key.upper()
+                self.update_status()
             except Exception as error:
                 self.error_signal.emit(f"Mode selection failed: {error}")
             return
+
+        if getattr(self.settings, "local_only", False) and self.local_api:
+            try:
+                status = self.local_api.status()
+                status.poll()
+                istate = getattr(status, 'interp_state', 1)
+                if isinstance(istate, int) and istate != getattr(self.local_api.linuxcnc, 'INTERP_IDLE', 1):
+                    QMessageBox.warning(
+                        self,
+                        "Mode Switch Blocked",
+                        "Cannot change machine mode while a program is running or paused.\nPlease stop the program first.",
+                    )
+                    return
+
+                mode_map = {
+                    "manual": self.local_api.linuxcnc.MODE_MANUAL,
+                    "mdi": self.local_api.linuxcnc.MODE_MDI,
+                    "auto": self.local_api.linuxcnc.MODE_AUTO,
+                }
+                target_mode = mode_map[mode_key]
+                command = self.local_api.command()
+                command.mode(target_mode)
+                command.wait_complete(1.0)
+                self.mock_coords["MODE"] = mode_key.upper()
+                self.update_status()
+            except Exception as error:
+                self.error_signal.emit(f"Mode selection failed: {error}")
+            return
+
         legacy_code = {
             "manual": "import linuxcnc\nc=linuxcnc.command(); c.mode(linuxcnc.MODE_MANUAL)",
+            "mdi": "import linuxcnc\nc=linuxcnc.command(); c.mode(linuxcnc.MODE_MDI)",
             "auto": "import linuxcnc\nc=linuxcnc.command(); c.mode(linuxcnc.MODE_AUTO)",
         }
-        self._send_b64_py_cmd(legacy_code[mode])
+        self._send_b64_py_cmd(legacy_code[mode_key], urgent=True)
+        self.mock_coords["MODE"] = mode_key.upper()
+        self.update_status()
 
     def pause_or_resume_cycle(self):
-        """Pause or resume the program through a typed command when enrolled."""
+        """Pause or resume the program with immediate feed-hold and interpreter control."""
         agent_client = client_from_settings(self.settings)
         if agent_client is not None:
             try:
                 agent_client.machine_command("program_pause_resume", timeout=15.0)
+                is_currently_paused = self.mock_coords.get("STATUS") == "PAUSED"
+                self.mock_coords["STATUS"] = "RUNNING" if is_currently_paused else "PAUSED"
+                self.mock_coords["IS_PAUSED"] = not is_currently_paused
+                self.update_status()
+            except Exception as error:
+                self.error_signal.emit(f"Pause/resume failed: {error}")
+            return
+        if getattr(self.settings, "local_only", False) and self.local_api:
+            try:
+                status = self.local_api.status()
+                status.poll()
+                command = self.local_api.command()
+                is_paused = bool(
+                    getattr(status, 'paused', False)
+                    or getattr(status, 'task_paused', False)
+                    or getattr(status, 'interp_state', 1) == self.local_api.linuxcnc.INTERP_PAUSED
+                    or self.mock_coords.get("STATUS") == "PAUSED"
+                )
+                if is_paused:
+                    try:
+                        command.set_feed_hold(0)
+                    except Exception:
+                        pass
+                    command.auto(self.local_api.linuxcnc.AUTO_RESUME)
+                    self.mock_coords["STATUS"] = "RUNNING"
+                    self.mock_coords["IS_PAUSED"] = False
+                    if hasattr(self, 'btn_cycle_pause'):
+                        self.btn_cycle_pause.setText("⏸ PAUSE")
+                        self.btn_cycle_pause.setStyleSheet(
+                            "QPushButton { background-color: #f39c12; color: black; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #c87f0a; }"
+                        )
+                else:
+                    try:
+                        command.set_feed_hold(1)
+                    except Exception:
+                        pass
+                    command.auto(self.local_api.linuxcnc.AUTO_PAUSE)
+                    self.mock_coords["STATUS"] = "PAUSED"
+                    self.mock_coords["IS_PAUSED"] = True
+                    if hasattr(self, 'btn_cycle_pause'):
+                        self.btn_cycle_pause.setText("▶ RESUME")
+                        self.btn_cycle_pause.setStyleSheet(
+                            "QPushButton { background-color: #3498db; color: white; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #2980b9; }"
+                        )
+                self.update_status()
             except Exception as error:
                 self.error_signal.emit(f"Pause/resume failed: {error}")
             return
         self._send_b64_py_cmd(
-            "import linuxcnc\nc=linuxcnc.command(); s=linuxcnc.stat(); s.poll(); "
-            "c.auto(linuxcnc.AUTO_RESUME if s.interp_state == linuxcnc.INTERP_PAUSED else linuxcnc.AUTO_PAUSE)",
+            "import linuxcnc\n"
+            "c=linuxcnc.command(); s=linuxcnc.stat(); s.poll()\n"
+            "is_paused = bool(getattr(s, 'paused', False) or getattr(s, 'task_paused', False) or getattr(s, 'interp_state', 1) == linuxcnc.INTERP_PAUSED)\n"
+            "if is_paused:\n"
+            "    try: c.set_feed_hold(0)\n"
+            "    except: pass\n"
+            "    c.auto(linuxcnc.AUTO_RESUME)\n"
+            "else:\n"
+            "    try: c.set_feed_hold(1)\n"
+            "    except: pass\n"
+            "    c.auto(linuxcnc.AUTO_PAUSE)\n",
             urgent=True,
         )
+        is_currently_paused = self.mock_coords.get("STATUS") == "PAUSED"
+        self.mock_coords["STATUS"] = "RUNNING" if is_currently_paused else "PAUSED"
+        self.mock_coords["IS_PAUSED"] = not is_currently_paused
+        self.update_status()
 
     def execute_mdi(self, mdi_cmd):
         if client_from_settings(self.settings) is not None:
@@ -2348,6 +3160,36 @@ except Exception as e:
 
         if not self.mock_coords.get('MACHINE_ON', False):
             QMessageBox.warning(self, "Power Off", "Machine power is OFF.\n\nPlease click the 'POWER ON' button before sending MDI commands.")
+            return
+
+        if self.mock_coords.get('STATUS') in ('RUNNING', 'PAUSED'):
+            QMessageBox.warning(self, "Interpreter Busy", "Cannot execute MDI command while a program is running or paused.")
+            return
+
+        if getattr(self.settings, "local_only", False):
+            try:
+                linuxcnc = self.local_api.linuxcnc
+                status = self.local_api.status()
+                status.poll()
+                if status.task_state == linuxcnc.STATE_ESTOP:
+                    raise RuntimeError("E-stop is active.")
+                if status.task_state != linuxcnc.STATE_ON:
+                    raise RuntimeError("Machine power is off.")
+                istate = getattr(status, 'interp_state', 1)
+                if isinstance(istate, int) and istate != getattr(linuxcnc, 'INTERP_IDLE', 1):
+                    raise RuntimeError("Cannot execute MDI command while a program is running or paused.")
+                command = self.local_api.command()
+                if status.task_mode != linuxcnc.MODE_MDI:
+                    command.mode(linuxcnc.MODE_MDI)
+                    command.wait_complete(1.0)
+                command.mdi(mdi_cmd)
+                command.wait_complete(1.0)
+                self.mock_coords["MODE"] = "MDI"
+                self.update_status()
+            except Exception as error:
+                self.error_signal.emit(f"MDI command failed: {error}")
+                return
+            print(f"[dashboard.py] Executed MDI: {mdi_cmd}")
             return
 
         ip = self.settings.get_setting("SSH", "ip_address", "")
@@ -2487,7 +3329,7 @@ except Exception as e:
                 return
             py_code = f"""import linuxcnc, time, sys, os
 try:
-    os.system("halcmd setp lut5.0.in-2 0") #Force Touch Plate Mode
+    hal.set_p("lut5.0.in-2", "0") #Force Touch Plate Mode
     time.sleep(0.2)
     c = linuxcnc.command(); s = linuxcnc.stat()
     e = getattr(linuxcnc, 'error_channel', lambda: None)()
@@ -2540,7 +3382,7 @@ try:
     run_mdi(f"G38.2 Z{{z_target:.4f}} F{setter_vel * 4.0}")
     s.poll()
     if not s.probe_tripped:
-        os.system("export DISPLAY=:0; zenity --error --title='Probe Failed' --text='Fast search failed to make contact.' --width=300")
+        report_error("Probe failed: fast search did not make contact.")
         sys.exit(1)
         
     run_mdi("G91"); run_mdi("G0 Z2.0"); run_mdi("G90")
@@ -2550,7 +3392,7 @@ try:
         tool_num = s.tool_in_spindle
         if tool_num == 0:
             # Cannot set length for T0, prompt user to load a tool
-            os.system("export DISPLAY=:0; zenity --error --title='No Tool Loaded' --text='Cannot set tool length because no tool is currently loaded (T0). Please load a tool (e.g., T1 M6) and try again.' --width=300")
+            report_error("Cannot set tool length because no tool is loaded (T0). Load a tool and retry.")
             sys.exit(1)
             
         tool_length = s.probed_position[2] - {setter_ref_z}
@@ -2621,70 +3463,112 @@ except Exception as e: pass"""
         def probe_in(ax, srch_sgn):
             return f"""
     run_mdi("G91")
+    run_mdi(f"G38.3 Z-{{zdrop}} F{{vel}}")
+    s.poll()
+    if s.probe_tripped:
+        run_mdi("G90")
+        run_mdi(f"G53 G0 X{{start_x}} Y{{start_y}}")
+        run_mdi(f"G53 G0 Z{{start_z}}")
+        sys.exit(0)
     run_mdi(f"G38.2 {{'{ax}'}}{{search * {srch_sgn}}} F{{vel}}")
     s.poll()
     if not s.probe_tripped:
         run_mdi("G90")
         run_mdi(f"G53 G0 X{{start_x}} Y{{start_y}}")
+        run_mdi(f"G53 G0 Z{{start_z}}")
         sys.exit(0)
     run_mdi(f"G10 L20 P0 {{'{ax}'}}{{pr if {srch_sgn} < 0 else -pr}}")
-    run_mdi(f"G0 {{'{ax}'}}{{-search/4.0 * {srch_sgn}}}")
     run_mdi("G90")
     run_mdi(f"G53 G0 X{{start_x}} Y{{start_y}}")
+    run_mdi(f"G53 G0 Z{{start_z}}")
 """
 
         def probe_center(ctype):
             if ctype == "hole":
                 return """
     run_mdi("G91")
+    run_mdi(f"G38.3 Z-{zdrop} F{vel}")
+    s.poll()
+    if s.probe_tripped:
+        run_mdi("G90")
+        run_mdi(f"G53 G0 X{start_x} Y{start_y}")
+        run_mdi(f"G53 G0 Z{start_z}")
+        sys.exit(0)
     run_mdi(f"G38.2 X{search} F{vel}")
-    s.poll(); 
+    s.poll()
     if not s.probe_tripped:
         run_mdi("G90")
-        run_mdi(f"G53 G0 X{{start_x}} Y{{start_y}}")
+        run_mdi(f"G53 G0 X{start_x} Y{start_y}")
+        run_mdi(f"G53 G0 Z{start_z}")
         sys.exit(0)
     x1 = s.probed_position[0]
-    
     run_mdi("G90")
     run_mdi(f"G53 G0 X{start_x}")
-    run_mdi("G91")
+    run_mdi(f"G53 G0 Z{start_z}")
     
+    run_mdi("G91")
+    run_mdi(f"G38.3 Z-{zdrop} F{vel}")
+    s.poll()
+    if s.probe_tripped:
+        run_mdi("G90")
+        run_mdi(f"G53 G0 X{start_x} Y{start_y}")
+        run_mdi(f"G53 G0 Z{start_z}")
+        sys.exit(0)
     run_mdi(f"G38.2 X{-search} F{vel}")
-    s.poll(); 
+    s.poll()
     if not s.probe_tripped:
         run_mdi("G90")
-        run_mdi(f"G53 G0 X{{start_x}} Y{{start_y}}")
+        run_mdi(f"G53 G0 X{start_x} Y{start_y}")
+        run_mdi(f"G53 G0 Z{start_z}")
         sys.exit(0)
     x2 = s.probed_position[0]
-    
     run_mdi("G90")
+    run_mdi(f"G53 G0 X{start_x}")
+    run_mdi(f"G53 G0 Z{start_z}")
+    
     cx = (x1 + x2) / 2.0
     run_mdi(f"G53 G0 X{cx}")
     run_mdi("G10 L20 P0 X0")
     
-    run_mdi(f"G53 G0 Y{start_y}")
     run_mdi("G91")
+    run_mdi(f"G38.3 Z-{zdrop} F{vel}")
+    s.poll()
+    if s.probe_tripped:
+        run_mdi("G90")
+        run_mdi(f"G53 G0 X{cx} Y{start_y}")
+        run_mdi(f"G53 G0 Z{start_z}")
+        sys.exit(0)
     run_mdi(f"G38.2 Y{search} F{vel}")
-    s.poll(); 
+    s.poll()
     if not s.probe_tripped:
         run_mdi("G90")
-        run_mdi(f"G53 G0 X{{cx}} Y{{start_y}}")
+        run_mdi(f"G53 G0 X{cx} Y{start_y}")
+        run_mdi(f"G53 G0 Z{start_z}")
         sys.exit(0)
     y1 = s.probed_position[1]
-    
     run_mdi("G90")
     run_mdi(f"G53 G0 Y{start_y}")
-    run_mdi("G91")
+    run_mdi(f"G53 G0 Z{start_z}")
     
+    run_mdi("G91")
+    run_mdi(f"G38.3 Z-{zdrop} F{vel}")
+    s.poll()
+    if s.probe_tripped:
+        run_mdi("G90")
+        run_mdi(f"G53 G0 X{cx} Y{start_y}")
+        run_mdi(f"G53 G0 Z{start_z}")
+        sys.exit(0)
     run_mdi(f"G38.2 Y{-search} F{vel}")
-    s.poll(); 
+    s.poll()
     if not s.probe_tripped:
         run_mdi("G90")
-        run_mdi(f"G53 G0 X{{cx}} Y{{start_y}}")
+        run_mdi(f"G53 G0 X{cx} Y{start_y}")
         sys.exit(0)
     y2 = s.probed_position[1]
-    
     run_mdi("G90")
+    run_mdi(f"G53 G0 Y{start_y}")
+    run_mdi(f"G53 G0 Z{start_z}")
+    
     cy = (y1 + y2) / 2.0
     run_mdi(f"G53 G0 Y{cy}")
     run_mdi("G10 L20 P0 Y0")
@@ -2699,20 +3583,20 @@ except Exception as e: pass"""
     s.poll(); 
     if s.probe_tripped:
         run_mdi("G90")
-        run_mdi(f"G53 G0 Z{{start_z}}")
-        run_mdi(f"G53 G0 X{{start_x}} Y{{start_y}}")
+        run_mdi(f"G53 G0 Z{start_z}")
+        run_mdi(f"G53 G0 X{start_x} Y{start_y}")
         sys.exit(0)
     run_mdi(f"G38.2 X-{search} F{vel}")
     s.poll(); 
     if not s.probe_tripped:
         run_mdi("G90")
-        run_mdi(f"G53 G0 Z{{start_z}}")
-        run_mdi(f"G53 G0 X{{start_x}} Y{{start_y}}")
+        run_mdi(f"G53 G0 Z{start_z}")
+        run_mdi(f"G53 G0 X{start_x} Y{start_y}")
         sys.exit(0)
     x1 = s.probed_position[0]
     run_mdi(f"G0 X{search/4.0}")
     run_mdi("G90")
-    run_mdi(f"G53 G0 Z{{start_z}}")
+    run_mdi(f"G53 G0 Z{start_z}")
     
     run_mdi("G90")
     run_mdi(f"G53 G0 X{start_x - clear}")
@@ -2721,68 +3605,68 @@ except Exception as e: pass"""
     s.poll(); 
     if s.probe_tripped:
         run_mdi("G90")
-        run_mdi(f"G53 G0 Z{{start_z}}")
-        run_mdi(f"G53 G0 X{{start_x}} Y{{start_y}}")
+        run_mdi(f"G53 G0 Z{start_z}")
+        run_mdi(f"G53 G0 X{start_x} Y{start_y}")
         sys.exit(0)
     run_mdi(f"G38.2 X{search} F{vel}")
     s.poll(); 
     if not s.probe_tripped:
         run_mdi("G90")
-        run_mdi(f"G53 G0 Z{{start_z}}")
-        run_mdi(f"G53 G0 X{{start_x}} Y{{start_y}}")
+        run_mdi(f"G53 G0 Z{start_z}")
+        run_mdi(f"G53 G0 X{start_x} Y{start_y}")
         sys.exit(0)
     x2 = s.probed_position[0]
     run_mdi(f"G0 X{-search/4.0}")
     run_mdi("G90")
-    run_mdi(f"G53 G0 Z{{start_z}}")
+    run_mdi(f"G53 G0 Z{start_z}")
     
     run_mdi("G90")
     cx = (x1 + x2) / 2.0
     run_mdi(f"G53 G0 X{cx}")
     run_mdi("G10 L20 P0 X0")
     
-    run_mdi(f"G53 G0 X{start_x} Y{start_y + clear}")
+    run_mdi(f"G53 G0 X{cx} Y{start_y + clear}")
     run_mdi("G91")
     run_mdi(f"G38.3 Z-{zdrop} F{vel}")
     s.poll(); 
     if s.probe_tripped:
         run_mdi("G90")
-        run_mdi(f"G53 G0 Z{{start_z}}")
-        run_mdi(f"G53 G0 X{{cx}} Y{{start_y}}")
+        run_mdi(f"G53 G0 Z{start_z}")
+        run_mdi(f"G53 G0 X{cx} Y{start_y}")
         sys.exit(0)
     run_mdi(f"G38.2 Y-{search} F{vel}")
     s.poll(); 
     if not s.probe_tripped:
         run_mdi("G90")
-        run_mdi(f"G53 G0 Z{{start_z}}")
-        run_mdi(f"G53 G0 X{{cx}} Y{{start_y}}")
+        run_mdi(f"G53 G0 Z{start_z}")
+        run_mdi(f"G53 G0 X{cx} Y{start_y}")
         sys.exit(0)
     y1 = s.probed_position[1]
     run_mdi(f"G0 Y{search/4.0}")
     run_mdi("G90")
-    run_mdi(f"G53 G0 Z{{start_z}}")
+    run_mdi(f"G53 G0 Z{start_z}")
     
     run_mdi("G90")
-    run_mdi(f"G53 G0 Y{start_y - clear}")
+    run_mdi(f"G53 G0 X{cx} Y{start_y - clear}")
     run_mdi("G91")
     run_mdi(f"G38.3 Z-{zdrop} F{vel}")
     s.poll(); 
     if s.probe_tripped:
         run_mdi("G90")
-        run_mdi(f"G53 G0 Z{{start_z}}")
-        run_mdi(f"G53 G0 X{{cx}} Y{{start_y}}")
+        run_mdi(f"G53 G0 Z{start_z}")
+        run_mdi(f"G53 G0 X{cx} Y{start_y}")
         sys.exit(0)
     run_mdi(f"G38.2 Y{search} F{vel}")
     s.poll(); 
     if not s.probe_tripped:
         run_mdi("G90")
-        run_mdi(f"G53 G0 Z{{start_z}}")
-        run_mdi(f"G53 G0 X{{cx}} Y{{start_y}}")
+        run_mdi(f"G53 G0 Z{start_z}")
+        run_mdi(f"G53 G0 X{cx} Y{start_y}")
         sys.exit(0)
     y2 = s.probed_position[1]
     run_mdi(f"G0 Y{-search/4.0}")
     run_mdi("G90")
-    run_mdi(f"G53 G0 Z{{start_z}}")
+    run_mdi(f"G53 G0 Z{start_z}")
     
     run_mdi("G90")
     cy = (y1 + y2) / 2.0
@@ -2798,11 +3682,11 @@ except Exception as e: pass"""
     s.poll()
     if not s.probe_tripped:
         run_mdi("G90")
-        run_mdi(f"G53 G0 Z{{start_z}}")
+        run_mdi(f"G53 G0 Z{start_z}")
         sys.exit(0)
     run_mdi("G10 L20 P0 Z0")
     run_mdi("G90")
-    run_mdi(f"G53 G0 Z{{start_z}}")
+    run_mdi(f"G53 G0 Z{start_z}")
 """
 
         logic = ""
@@ -2871,7 +3755,7 @@ except Exception as e: pass"""
 
         py_code = f"""import linuxcnc, time, sys, os
 try:
-    os.system("halcmd setp lut5.0.in-2 1")
+    hal.set_p("lut5.0.in-2", "1")
     time.sleep(0.2)
     c = linuxcnc.command(); s = linuxcnc.stat()
     e = linuxcnc.error_channel()
@@ -2919,6 +3803,11 @@ except Exception as e: pass"""
         
         self._send_b64_py_cmd(py_code, timeout=120)
 
+    def open_probing_tab(self):
+        parent_app = getattr(self, 'parent_app', None)
+        if parent_app and hasattr(parent_app, 'tabs') and hasattr(parent_app, 'probing_tab'):
+            parent_app.tabs.setCurrentWidget(parent_app.probing_tab)
+
     def move_to_tool_setter(self):
         if self.is_estopped:
             QMessageBox.warning(self, "E-STOP", "Machine is in E-STOP state. Release E-STOP before running.")
@@ -2926,6 +3815,16 @@ except Exception as e: pass"""
             
         if not self.mock_coords.get('MACHINE_ON', False):
             QMessageBox.warning(self, "Power Off", "Machine power is OFF.\n\nPlease click the 'POWER ON' button before moving.")
+            return
+
+        remote_homed_count = int(self.mock_coords.get('HOMED_COUNT', 0))
+        remote_joint_count = int(self.mock_coords.get('JOINTS', 0))
+        if remote_joint_count > 0 and remote_homed_count < remote_joint_count:
+            QMessageBox.warning(self, "Homing Required", "Please home all axes before moving to tool setter position.")
+            return
+
+        if self.mock_coords.get('STATUS') in ('RUNNING', 'PAUSED'):
+            QMessageBox.warning(self, "Interpreter Busy", "Cannot move while a program is running or paused.\nPlease stop the program first.")
             return
 
         setter_x = float(self.settings.get_setting("PROBING", "tool_setter_x", 0.0))
@@ -2945,24 +3844,39 @@ except Exception as e: pass"""
                 except Exception as error:
                     self.error_signal.emit(f"Tool-setter move failed: {error}")
                 return
+
+            if getattr(self.settings, "local_only", False) and self.local_api:
+                try:
+                    status = self.local_api.status()
+                    status.poll()
+                    if status.task_state != self.local_api.linuxcnc.STATE_ON:
+                        QMessageBox.warning(self, "Power Off", "Machine power is OFF.\nPlease click 'POWER ON' before moving.")
+                        return
+                    if status.interp_state != self.local_api.linuxcnc.INTERP_IDLE:
+                        QMessageBox.warning(self, "Interpreter Busy", "Cannot move while interpreter is busy.")
+                        return
+                    command = self.local_api.command()
+                    if status.task_mode != self.local_api.linuxcnc.MODE_MDI:
+                        command.mode(self.local_api.linuxcnc.MODE_MDI)
+                        command.wait_complete(1.0)
+                    command.mdi(f"G53 G0 Z{setter_z}")
+                    command.wait_complete(30.0)
+                    command.mdi(f"G53 G0 X{setter_x} Y{setter_y}")
+                    command.wait_complete(30.0)
+                    self.mock_coords["MODE"] = "MDI"
+                    self.update_status()
+                except Exception as error:
+                    self.error_signal.emit(f"Tool-setter move failed: {error}")
+                return
+
             py_code = f"""import linuxcnc, time, sys
 try:
     c = linuxcnc.command(); s = linuxcnc.stat()
-    e = linuxcnc.error_channel()
-    e = getattr(linuxcnc, 'error_channel', lambda: None)()
     def wait_idle(timeout=30):
         start_time = time.time()
-        err = e.poll()
-        if err:
-            sys.stderr.write(str(err[1]))
-            sys.exit(1)
         while time.time() - start_time < timeout:
             s.poll()
             if s.interp_state == linuxcnc.INTERP_IDLE: return
-            err = e.poll()
-            if err:
-                sys.stderr.write(str(err[1]))
-                sys.exit(1)
             if s.task_state == linuxcnc.STATE_ESTOP:
                 sys.stderr.write("Machine is in E-STOP state.")
                 sys.exit(1)
@@ -2990,6 +3904,16 @@ except Exception as e: pass"""
             QMessageBox.warning(self, "Power Off", "Machine power is OFF.\n\nPlease click the 'POWER ON' button before parking.")
             return
 
+        remote_homed_count = int(self.mock_coords.get('HOMED_COUNT', 0))
+        remote_joint_count = int(self.mock_coords.get('JOINTS', 0))
+        if remote_joint_count > 0 and remote_homed_count < remote_joint_count:
+            QMessageBox.warning(self, "Homing Required", "Please home all axes before moving to park position.")
+            return
+
+        if self.mock_coords.get('STATUS') in ('RUNNING', 'PAUSED'):
+            QMessageBox.warning(self, "Interpreter Busy", "Cannot park machine while a program is running or paused.\nPlease stop the program first.")
+            return
+
         park_x = float(self.settings.get_setting("LOCATIONS", "park_x", 0.0))
         park_y = float(self.settings.get_setting("LOCATIONS", "park_y", 0.0))
         park_z = float(self.settings.get_setting("LOCATIONS", "park_z", 0.0))
@@ -3008,24 +3932,38 @@ except Exception as e: pass"""
                     self.error_signal.emit(f"Park move failed: {error}")
                 return
 
+            if getattr(self.settings, "local_only", False) and self.local_api:
+                try:
+                    status = self.local_api.status()
+                    status.poll()
+                    if status.task_state != self.local_api.linuxcnc.STATE_ON:
+                        QMessageBox.warning(self, "Power Off", "Machine power is OFF.\nPlease click 'POWER ON' before parking.")
+                        return
+                    if status.interp_state != self.local_api.linuxcnc.INTERP_IDLE:
+                        QMessageBox.warning(self, "Interpreter Busy", "Cannot park machine while interpreter is busy.")
+                        return
+                    command = self.local_api.command()
+                    if status.task_mode != self.local_api.linuxcnc.MODE_MDI:
+                        command.mode(self.local_api.linuxcnc.MODE_MDI)
+                        command.wait_complete(1.0)
+                    command.mdi(f"G53 G0 Z{park_z}")
+                    command.wait_complete(30.0)
+                    command.mdi(f"G53 G0 X{park_x} Y{park_y}")
+                    command.wait_complete(30.0)
+                    self.mock_coords["MODE"] = "MDI"
+                    self.update_status()
+                except Exception as error:
+                    self.error_signal.emit(f"Park move failed: {error}")
+                return
+
             py_code = f"""import linuxcnc, time, sys
 try:
     c = linuxcnc.command(); s = linuxcnc.stat()
-    e = linuxcnc.error_channel()
-    e = getattr(linuxcnc, 'error_channel', lambda: None)()
     def wait_idle(timeout=30):
         start_time = time.time()
-        err = e.poll()
-        if err:
-            sys.stderr.write(str(err[1]))
-            sys.exit(1)
         while time.time() - start_time < timeout:
             s.poll()
             if s.interp_state == linuxcnc.INTERP_IDLE: return
-            err = e.poll()
-            if err:
-                sys.stderr.write(str(err[1]))
-                sys.exit(1)
             if s.task_state == linuxcnc.STATE_ESTOP:
                 sys.stderr.write("Machine is in E-STOP state.")
                 sys.exit(1)
@@ -3047,23 +3985,39 @@ except Exception as e: pass"""
     def _send_linuxcnc_py_cmd(self, cmd, timeout=5):
         self.cmd_queue.put((cmd, timeout))
 
+    def _execute_local_linuxcnc_code(self, source):
+        try:
+            self.local_api.execute_application_command(source)
+        except SystemExit as error:
+            if error.code not in (None, 0):
+                self.error_signal.emit(f"LinuxCNC command exited with status {error.code}.")
+        except Exception as error:
+            self.error_signal.emit(f"LinuxCNC command failed: {error}")
+
     def _cmd_worker(self):
         while True:
             cmd = self.cmd_queue.get()
             if cmd is None: break
             
             # Unpack tuple
-            if isinstance(cmd, tuple):
+            command_type = "shell"
+            if isinstance(cmd, tuple) and len(cmd) == 3:
+                command_type, command, timeout = cmd
+            elif isinstance(cmd, tuple):
                 command, timeout = cmd
             else:
                 command, timeout = cmd, 5 # Default timeout for old-style calls
 
+            if getattr(self.settings, "local_only", False):
+                if command_type == "api":
+                    self._execute_local_linuxcnc_code(command)
+                continue
+
             ip = self.settings.get_setting("SSH", "ip_address", "")
             user = self.settings.get_setting("SSH", "username", "")
             password = self.settings.get_setting("SSH", "password", "")
-            if not ip or not user: continue
-            
-            if is_local_ip(ip):
+
+            if is_local_controller(ip):
                 try: 
                     result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
                     if result.stderr:
@@ -3071,29 +4025,15 @@ except Exception as e: pass"""
                 except Exception as e:
                     self.error_signal.emit(str(e))
                 continue
+
+            if not ip or not user: continue
                 
-            if HAS_PARAMIKO:
-                ssh = None
-                try:
-                    ssh = paramiko.SSHClient()
-                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    ssh.connect(ip, username=user, password=password, timeout=2, banner_timeout=3, auth_timeout=3, look_for_keys=not bool(password), allow_agent=not bool(password))
-                    stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
-                    error_output = stderr.read().decode().strip()
-                    if error_output:
-                        self.error_signal.emit(error_output)
-                except Exception as e:
-                    self.error_signal.emit(str(e))
-                finally:
-                    if ssh:
-                        ssh.close()
-            else: # Fallback to system SSH
-                try: 
-                    result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", command], capture_output=True, text=True, timeout=timeout)
-                    if result.stderr:
-                        self.error_signal.emit(result.stderr.strip())
-                except Exception as e:
-                    self.error_signal.emit(str(e))
+            try: 
+                result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", command], capture_output=True, text=True, timeout=timeout)
+                if result.stderr:
+                    self.error_signal.emit(result.stderr.strip())
+            except Exception as e:
+                self.error_signal.emit(str(e))
 
     def set_feed_override(self):
         agent_client = client_from_settings(self.settings)
@@ -3171,13 +4111,82 @@ except Exception as e: pass"""
         else:
             QMessageBox.critical(self, "Error", "Failed to save screenshot.")
 
-    def sync_gcode_to_machine(self, content):
-        if not content.strip(): return
+    def update_preview_toggle_button(self):
+        if not hasattr(self, 'btn_toggle_preview'):
+            return
+        is_enabled = getattr(self.toolpath_viewer, 'preview_enabled', True)
+        if is_enabled:
+            self.btn_toggle_preview.setText("👁️ Disable Preview")
+            self.btn_toggle_preview.setStyleSheet(
+                "QPushButton { background-color: #7f1d1d; color: #fecaca; padding: 4px 10px; border-radius: 3px; font-weight: bold; border: 1px solid #ef4444; } "
+                "QPushButton:hover { background-color: #991b1b; } "
+                "QPushButton:pressed { background-color: #450a0a; }"
+            )
+            self.btn_toggle_preview.setToolTip("Disable 3D toolpath preview parsing (significantly speeds up file loading)")
+        else:
+            self.btn_toggle_preview.setText("👁️ Enable Preview")
+            self.btn_toggle_preview.setStyleSheet(
+                "QPushButton { background-color: #14532d; color: #bbf7d0; padding: 4px 10px; border-radius: 3px; font-weight: bold; border: 1px solid #22c55e; } "
+                "QPushButton:hover { background-color: #166534; } "
+                "QPushButton:pressed { background-color: #052e16; }"
+            )
+            self.btn_toggle_preview.setToolTip("Enable 3D toolpath preview parsing and display")
+
+    def toggle_toolpath_preview(self):
+        viewer = self.__dict__.get('toolpath_viewer')
+        new_state = not getattr(viewer, 'preview_enabled', True)
+        target_path = self.__dict__.get('loaded_gcode_path')
+        gcode = ""
+        if not self.__dict__.get('_is_large_file_preview', False):
+            editor = self.__dict__.get('default_gcode_editor')
+            gcode = editor.toPlainText() if editor else ""
+        if viewer:
+            viewer.set_preview_enabled(new_state, gcode_text=gcode, file_path=target_path)
+        if self.__dict__.get('settings') is not None:
+            try:
+                self.settings.save_setting('UI_PREFERENCES', 'enable_toolpath_preview', str(new_state))
+            except Exception:
+                pass
+        self.update_preview_toggle_button()
+
+    def _on_gcode_text_changed(self):
+        viewer = self.__dict__.get('toolpath_viewer')
+        if not viewer:
+            return
+        if self.__dict__.get('_is_large_file_preview', False):
+            return
+        if not getattr(viewer, 'preview_enabled', True):
+            viewer.last_gcode_text = None
+            return
+        editor = self.__dict__.get('default_gcode_editor')
+        if editor:
+            viewer.update_path(editor.toPlainText())
+
+    def get_nc_files_dir(self):
+        default_dir = os.path.expanduser("~/linuxcnc/nc_files")
+        nc_dir = ""
+        if hasattr(self, "settings") and self.settings is not None:
+            nc_dir = self.settings.get_setting("PATHS", "machine_gcode_root", "")
+            if not nc_dir:
+                nc_dir = self.settings.get_setting("PATHS", "nc_files_dir", default_dir)
+        if not nc_dir:
+            nc_dir = default_dir
+        nc_dir = os.path.expanduser(nc_dir)
+        os.makedirs(nc_dir, exist_ok=True)
+        return nc_dir
+
+    def sync_gcode_to_machine(self, content, file_path=None):
+        if self.__dict__.get('_is_large_file_preview', False) and self.__dict__.get('loaded_gcode_path'):
+            file_path = self.__dict__['loaded_gcode_path']
+        elif file_path is None:
+            file_path = self.__dict__.get('loaded_gcode_path')
+        if not content.strip() and not file_path: return
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
         agent_client = client_from_settings(self.settings)
-        if agent_client is None and (not ip or not user): return
+        is_local = getattr(self.settings, "local_only", False) or is_local_controller(ip)
+        if agent_client is None and not is_local and (not ip or not user): return
 
         self._program_sync_in_progress = True
         self.program_sync_state.emit(True)
@@ -3186,53 +4195,59 @@ except Exception as e: pass"""
             try:
                 if agent_client is not None:
                     try:
-                        agent_client.upload_content("gcode", "active_program.ngc", content.encode("utf-8"))
-                        agent_client.open_program("active_program.ngc")
+                        if file_path and os.path.exists(file_path):
+                            with open(file_path, 'rb') as f:
+                                file_bytes = f.read()
+                            target_name = os.path.basename(file_path)
+                            agent_client.upload_content("gcode", target_name, file_bytes)
+                            agent_client.open_program(target_name)
+                        else:
+                            agent_client.upload_content("gcode", "active_program.ngc", content.encode("utf-8"))
+                            agent_client.open_program("active_program.ngc")
                     except Exception as error:
                         self.error_signal.emit(f"G-code upload failed: {error}")
                     return
 
-                remote_dir = f"/home/{user}/linuxcnc/nc_files"
-                remote_path = f"{remote_dir}/active_program.ngc"
-            
-                if is_local_ip(ip):
+                if is_local:
                     try:
-                        os.makedirs(os.path.expanduser("~/linuxcnc/nc_files"), exist_ok=True)
-                        local_dest = os.path.expanduser("~/linuxcnc/nc_files/active_program.ngc")
-                        with open(local_dest, 'w', encoding='utf-8') as f:
-                            f.write(content)
-                        remote_path = local_dest
+                        if file_path and os.path.exists(file_path):
+                            remote_path = file_path
+                        else:
+                            local_dir = self.get_nc_files_dir()
+                            local_dest = os.path.join(local_dir, "active_program.ngc")
+                            with open(local_dest, 'w', encoding='utf-8') as f:
+                                f.write(content)
+                            remote_path = local_dest
                     except Exception as error:
-                        self.error_signal.emit(f"G-code upload failed: {error}")
-                        return
-                elif HAS_PARAMIKO:
-                    try:
-                        ssh = paramiko.SSHClient()
-                        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                        ssh.connect(ip, username=user, password=password, timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
-                        ssh.exec_command(f"mkdir -p {remote_dir}")
-                        sftp = ssh.open_sftp()
-                        with sftp.file(remote_path, 'w') as f:
-                            f.write(content.encode('utf-8'))
-                        sftp.close()
-                        ssh.close()
-                    except Exception as error:
-                        self.error_signal.emit(f"G-code upload failed: {error}")
+                        self.error_signal.emit(f"G-code save failed: {error}")
                         return
                 else:
+                    remote_dir = f"/home/{user}/linuxcnc/nc_files"
+                    target_name = os.path.basename(file_path) if file_path else "active_program.ngc"
+                    remote_path = f"{remote_dir}/{target_name}"
                     try:
                         subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", f"mkdir -p {remote_dir}"], capture_output=True, timeout=5)
-                        with tempfile.NamedTemporaryFile(delete=False, mode='w', encoding='utf-8') as f:
-                            f.write(content)
-                            temp_path = f.name
-                        subprocess.run(["scp", "-o", "BatchMode=yes", temp_path, f"{user}@{ip}:{remote_path}"], capture_output=True, timeout=10)
-                        os.remove(temp_path)
+                        if file_path and os.path.exists(file_path):
+                            subprocess.run(["scp", "-o", "BatchMode=yes", file_path, f"{user}@{ip}:{remote_path}"], capture_output=True, timeout=30)
+                        else:
+                            with tempfile.NamedTemporaryFile(delete=False, mode='w', encoding='utf-8') as f:
+                                f.write(content)
+                                temp_path = f.name
+                            subprocess.run(["scp", "-o", "BatchMode=yes", temp_path, f"{user}@{ip}:{remote_path}"], capture_output=True, timeout=10)
+                            os.remove(temp_path)
                     except Exception as error:
                         self.error_signal.emit(f"G-code upload failed: {error}")
                         return
                     
-                py_code = f"import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.program_open('{remote_path}')\nexcept: pass"
-                self._send_b64_py_cmd(py_code)
+                if getattr(self.settings, "local_only", False) and self.local_api:
+                    try:
+                        command = self.local_api.command()
+                        command.program_open(remote_path)
+                    except Exception as error:
+                        self.error_signal.emit(f"Failed to open G-code program: {error}")
+                else:
+                    py_code = f"import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.program_open({repr(remote_path)})\nexcept: pass"
+                    self._send_b64_py_cmd(py_code)
             finally:
                 self.program_sync_state.emit(False)
             
@@ -3251,11 +4266,11 @@ except Exception as e: pass"""
         """Detect a pending manual M6 and offer an automatic tool-length probe."""
         blocked = self.mock_coords.get('TASK_BLOCKED', False)
         if not blocked:
-            if self._tool_change_prompt_active:
+            if getattr(self, '_tool_change_prompt_active', False):
                 self._tool_change_prompt_active = False
                 self._tool_change_last_pocket = -1
             return
-        if self._tool_change_prompt_active:
+        if getattr(self, '_tool_change_prompt_active', False):
             return
         pocket = self.mock_coords.get('POCKET_PREPPED', -1)
         current_tool = self.mock_coords.get('TOOL_IN_SPINDLE', 0)
@@ -3287,9 +4302,9 @@ except Exception as e: pass"""
         """
         py_code = """import os, time
 try:
-    os.system("halcmd setp iocontrol.0.tool-changed 1")
+    hal.set_p("iocontrol.0.tool-changed", "1")
     time.sleep(0.3)
-    os.system("halcmd setp iocontrol.0.tool-changed 0")
+    hal.set_p("iocontrol.0.tool-changed", "0")
 except Exception: pass"""
         agent_client = client_from_settings(self.settings)
         if agent_client is not None:
@@ -3305,19 +4320,207 @@ except Exception: pass"""
 
     def load_gcode(self, text_widget):
         default_dir = os.path.expanduser("~")
-        last_dir = self.settings.get_setting("PATHS", "last_local_gcode_dir", default_dir)
+        last_dir = default_dir
+        if hasattr(self, "settings") and self.settings is not None:
+            last_dir = self.settings.get_setting("PATHS", "last_local_gcode_dir", default_dir)
         if not os.path.exists(last_dir): last_dir = default_dir
         path, _ = QFileDialog.getOpenFileName(self, "Load G-Code", last_dir, "G-Code Files (*.ngc *.gcode *.nc);;All Files (*)")
         if not path: return
-        self.settings.save_setting("PATHS", "last_local_gcode_dir", os.path.dirname(path))
+        if hasattr(self, "settings") and self.settings is not None:
+            self.settings.save_setting("PATHS", "last_local_gcode_dir", os.path.dirname(path))
         
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            text_widget.setPlainText(content)
-            self.sync_gcode_to_machine(content)
+            nc_dir = self.get_nc_files_dir()
+            filename = os.path.basename(path)
+            local_target = os.path.join(nc_dir, filename)
+
+            is_same = False
+            try:
+                if os.path.exists(local_target):
+                    is_same = os.path.samefile(path, local_target)
+            except Exception:
+                is_same = (os.path.abspath(path) == os.path.abspath(local_target))
+
+            if not is_same:
+                shutil.copy2(path, local_target)
+
+            self.loaded_gcode_path = local_target
+            file_size = os.path.getsize(local_target)
+            threshold = self.__dict__.get('LARGE_FILE_THRESHOLD', getattr(self.__class__, 'LARGE_FILE_THRESHOLD', 2 * 1024 * 1024))
+
+            if file_size > threshold:
+                self._is_large_file_preview = True
+                with open(local_target, 'rb') as bf:
+                    total_lines = sum(chunk.count(b'\n') for chunk in iter(lambda: bf.read(1024 * 1024), b''))
+                if hasattr(self, 'mock_coords') and isinstance(self.mock_coords, dict):
+                    self.mock_coords['TOTAL_LINES'] = total_lines
+
+                head_lines = []
+                tail_buf = collections.deque(maxlen=200)
+                with open(local_target, 'r', encoding='utf-8', errors='ignore') as f:
+                    for i, line in enumerate(f):
+                        if i < 1000:
+                            head_lines.append(line)
+                        else:
+                            tail_buf.append(line)
+                tail_lines = list(tail_buf)
+
+                size_mb = file_size / (1024 * 1024)
+                banner = (
+                    f"( ==================================================================== )\n"
+                    f"( LARGE FILE PREVIEW MODE - {filename} ({size_mb:.1f} MB, {total_lines:,} lines) )\n"
+                    f"( Showing first {len(head_lines):,} lines and last {len(tail_lines):,} lines for inspection. )\n"
+                    f"( The full {size_mb:.1f} MB program has been loaded directly into LinuxCNC. )\n"
+                    f"( Note: Inline editing/optimizing is disabled to protect CAM toolpaths. )\n"
+                    f"( ==================================================================== )\n\n"
+                )
+                omitted_count = max(0, total_lines - len(head_lines) - len(tail_lines))
+                separator = f"\n( ... {omitted_count:,} intermediate CAM toolpath lines omitted for UI responsiveness ... )\n\n"
+                preview_text = banner + "".join(head_lines) + separator + "".join(tail_lines)
+
+                text_widget.blockSignals(True)
+                try:
+                    text_widget.setPlainText(preview_text)
+                finally:
+                    text_widget.blockSignals(False)
+
+                if hasattr(self, 'toolpath_viewer') and self.toolpath_viewer:
+                    self.toolpath_viewer.update_path("", file_path=local_target)
+                self.sync_gcode_to_machine("", file_path=local_target)
+            else:
+                self._is_large_file_preview = False
+                with open(local_target, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+
+                if hasattr(self, 'mock_coords') and isinstance(self.mock_coords, dict):
+                    self.mock_coords['TOTAL_LINES'] = content.count('\n') + 1
+
+                text_widget.blockSignals(True)
+                try:
+                    text_widget.setPlainText(content)
+                finally:
+                    text_widget.blockSignals(False)
+
+                if hasattr(self, 'toolpath_viewer') and self.toolpath_viewer:
+                    self.toolpath_viewer.update_path(content, file_path=local_target)
+                self.sync_gcode_to_machine(content)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load G-Code:\n{e}")
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def clear_gcode(self, text_widget=None):
+        """Clear the G-code editor, 3D toolpath preview, and unload the active program from LinuxCNC."""
+        self._is_large_file_preview = False
+        self.loaded_gcode_path = None
+        if hasattr(self, 'mock_coords') and isinstance(self.mock_coords, dict):
+            self.mock_coords['TOTAL_LINES'] = 0
+
+        # 1. Clear editor
+        if text_widget is not None:
+            text_widget.clear()
+        elif hasattr(self, 'default_gcode_editor') and self.default_gcode_editor:
+            self.default_gcode_editor.clear()
+
+        # 2. Clear 3D preview
+        if hasattr(self, 'toolpath_viewer') and self.toolpath_viewer:
+            self.toolpath_viewer.update_path("")
+            self.toolpath_viewer.last_gcode_text = None
+
+        # 3. Reset progress bar
+        if hasattr(self, 'progress_bar') and self.progress_bar:
+            self.progress_bar.setValue(0)
+            self.progress_bar.setFormat("No Program Loaded")
+
+        # 4. Remove / truncate active_program.ngc locally
+        try:
+            nc_dir = self.get_nc_files_dir()
+            active_dest = os.path.join(nc_dir, "active_program.ngc")
+            if os.path.exists(active_dest):
+                try:
+                    os.remove(active_dest)
+                except Exception:
+                    with open(active_dest, 'w', encoding='utf-8') as f:
+                        f.write("")
+        except Exception:
+            pass
+
+        # 5. Tell LinuxCNC controller to abort, return to manual mode, and reset interpreter
+        agent_client = client_from_settings(self.settings) if hasattr(self, 'settings') and self.settings else None
+        if agent_client is not None:
+            try:
+                agent_client.machine_command("abort")
+                agent_client.upload_content("gcode", "active_program.ngc", b"")
+            except Exception as error:
+                self.error_signal.emit(f"Failed to clear program: {error}")
+            return
+
+        ip = self.settings.get_setting("SSH", "ip_address", "") if hasattr(self, 'settings') and self.settings else ""
+        is_local = getattr(self.settings, "local_only", False) or is_local_controller(ip)
+
+        if is_local:
+            if getattr(self.settings, "local_only", False) and self.local_api:
+                try:
+                    command = self.local_api.command()
+                    try:
+                        command.set_feed_hold(0)
+                    except Exception:
+                        pass
+                    command.abort()
+                    command.wait_complete(1.0)
+                    command.mode(self.local_api.linuxcnc.MODE_MANUAL)
+                    command.wait_complete(1.0)
+                    try:
+                        command.reset_interpreter()
+                    except Exception:
+                        pass
+                except Exception as error:
+                    self.error_signal.emit(f"Failed to clear machine program: {error}")
+            else:
+                py_code = (
+                    "import linuxcnc\n"
+                    "try:\n"
+                    "    c = linuxcnc.command()\n"
+                    "    try: c.set_feed_hold(0)\n"
+                    "    except: pass\n"
+                    "    c.abort()\n"
+                    "    c.wait_complete(1.0)\n"
+                    "    c.mode(linuxcnc.MODE_MANUAL)\n"
+                    "    c.wait_complete(1.0)\n"
+                    "    try: c.reset_interpreter()\n"
+                    "    except: pass\n"
+                    "except Exception: pass"
+                )
+                self._send_b64_py_cmd(py_code, urgent=True)
+        else:
+            user = self.settings.get_setting("SSH", "username", "") if hasattr(self, 'settings') and self.settings else ""
+            if ip and user:
+                remote_dir = f"/home/{user}/linuxcnc/nc_files"
+                remote_path = f"{remote_dir}/active_program.ngc"
+                try:
+                    subprocess.run(
+                        ["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", f"rm -f {remote_path}"],
+                        capture_output=True,
+                        timeout=5,
+                    )
+                except Exception:
+                    pass
+            py_code = (
+                "import linuxcnc\n"
+                "try:\n"
+                "    c = linuxcnc.command()\n"
+                "    try: c.set_feed_hold(0)\n"
+                "    except: pass\n"
+                "    c.abort()\n"
+                "    c.wait_complete(1.0)\n"
+                "    c.mode(linuxcnc.MODE_MANUAL)\n"
+                "    c.wait_complete(1.0)\n"
+                "    try: c.reset_interpreter()\n"
+                "    except: pass\n"
+                "except Exception: pass"
+            )
+            self._send_b64_py_cmd(py_code, urgent=True)
 
     def merge_gcode_files(self, text_widget):
         default_dir = os.path.expanduser("~")
@@ -3375,6 +4578,14 @@ except Exception: pass"""
         QMessageBox.information(self, "Merge Complete", f"Successfully merged {len(files)} files!\n\nThe combined program has been synced to the machine.\n\nMake sure to verify the tool changes and transition moves in the 3D preview.")
 
     def save_gcode(self, text_widget):
+        if self.__dict__.get('_is_large_file_preview', False):
+            QMessageBox.warning(
+                self,
+                "Save Disabled",
+                "Saving is disabled in Large File Preview Mode to prevent overwriting the full program with preview lines."
+            )
+            return
+
         default_dir = os.path.expanduser("~")
         last_dir = self.settings.get_setting("PATHS", "last_local_gcode_dir", default_dir)
         if not os.path.exists(last_dir): last_dir = default_dir
@@ -3392,6 +4603,14 @@ except Exception: pass"""
             QMessageBox.critical(self, "Error", f"Failed to save G-Code:\n{e}")
 
     def fix_fusion_rapids(self):
+        if self.__dict__.get('_is_large_file_preview', False):
+            QMessageBox.warning(
+                self,
+                "Optimizer Disabled",
+                "Rapids optimization is disabled in Large File Preview Mode to protect the original file."
+            )
+            return
+
         text = self.default_gcode_editor.toPlainText()
         if not text.strip(): return
         
@@ -3453,6 +4672,14 @@ except Exception: pass"""
             QMessageBox.information(self, "No Changes", "No linear moves were found matching that high feedrate.")
 
     def clean_gcode(self):
+        if self.__dict__.get('_is_large_file_preview', False):
+            QMessageBox.warning(
+                self,
+                "Clean Disabled",
+                "G-code cleaning is disabled in Large File Preview Mode to protect the original file."
+            )
+            return
+
         text = self.default_gcode_editor.toPlainText()
         if not text.strip(): return
         
@@ -3479,6 +4706,17 @@ except Exception: pass"""
             )
             return
 
+        if getattr(self.settings, "local_only", False):
+            if urgent:
+                threading.Thread(
+                    target=self._execute_local_linuxcnc_code,
+                    args=(py_code,),
+                    daemon=True,
+                ).start()
+            else:
+                self.cmd_queue.put(("api", py_code, timeout))
+            return
+
         b64_code = base64.b64encode(py_code.encode()).decode()
         cmd = f"python3 -u -c \"import base64; exec(base64.b64decode('{b64_code}').decode())\""
         if urgent:
@@ -3490,71 +4728,308 @@ except Exception: pass"""
         ip = self.settings.get_setting("SSH", "ip_address", "")
         user = self.settings.get_setting("SSH", "username", "")
         password = self.settings.get_setting("SSH", "password", "")
-        if not ip or not user: return
-        
-        if is_local_ip(ip):
+
+        if is_local_controller(ip):
             try: 
                 subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
             except Exception as e:
                 with open('/tmp/linuxcnc_jog_debug.txt', 'a') as f: f.write(f"\\nURGENT SUBPROCESS EXCEPTION:\\n{e}\\n")
             return
-            
-        if HAS_PARAMIKO:
-            try:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=5, look_for_keys=not bool(password), allow_agent=not bool(password))
-                ssh.exec_command(cmd, timeout=timeout)
-                ssh.close()
-            except Exception:
-                pass
-        else:
-            try: subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", cmd], capture_output=True, timeout=timeout)
-            except: pass
+
+        if not ip or not user: return
+
+        try:
+            subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"{user}@{ip}", cmd], capture_output=True, timeout=timeout)
+        except:
+            pass
 
     def toggle_estop(self):
-        agent_client = client_from_settings(self.settings)
+        agent_client = client_from_settings(self.__dict__.get("settings"))
+        is_estopped = self.__dict__.get("is_estopped", False)
         if agent_client is not None:
             try:
-                agent_client.machine_command("estop_reset" if self.is_estopped else "estop")
+                agent_client.machine_command("estop_reset" if is_estopped else "estop")
+                if is_estopped:
+                    try:
+                        agent_client.machine_command("mode_manual")
+                    except Exception:
+                        pass
+                self.is_estopped = not is_estopped
+                if "mock_coords" in self.__dict__:
+                    self.mock_coords["ESTOP_ACTIVATED"] = self.is_estopped
+                    if self.is_estopped:
+                        self.mock_coords["MACHINE_ON"] = False
+                    else:
+                        self.mock_coords["MODE"] = "MANUAL"
+                if "update_status" in self.__dict__ or hasattr(self.__class__, "update_status"):
+                    try:
+                        self.update_status()
+                    except Exception:
+                        pass
             except Exception as error:
-                self.error_signal.emit(f"E-stop command failed: {error}")
+                if self.__dict__.get("error_signal"):
+                    self.error_signal.emit(f"E-stop command failed: {error}")
             return
-        if self.is_estopped:
-                
-            # Send real commands to reset E-Stop ONLY
-            py_code = "import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.state(linuxcnc.STATE_ESTOP_RESET)\nexcept: pass"
+        if getattr(self.__dict__.get("settings"), "local_only", False) and self.__dict__.get("local_api"):
+            try:
+                status = self.local_api.status()
+                status.poll()
+                command = self.local_api.command()
+                if status.task_state == self.local_api.linuxcnc.STATE_ESTOP:
+                    try:
+                        command.set_feed_hold(0)
+                    except Exception:
+                        pass
+                    command.abort()
+                    command.wait_complete(1.0)
+                    # Reset E-STOP first before changing mode!
+                    command.state(self.local_api.linuxcnc.STATE_ESTOP_RESET)
+                    command.wait_complete(2.0)
+                    try:
+                        err_chan = self.local_api.error_channel()
+                        for _ in range(100):
+                            if not err_chan.poll():
+                                break
+                    except Exception:
+                        pass
+                    try:
+                        command.mode(self.local_api.linuxcnc.MODE_MANUAL)
+                        command.wait_complete(1.0)
+                    except Exception:
+                        pass
+                    self.is_estopped = False
+                    if "mock_coords" in self.__dict__:
+                        self.mock_coords["ESTOP_ACTIVATED"] = False
+                        self.mock_coords["MODE"] = "MANUAL"
+                    if "update_status" in self.__dict__ or hasattr(self.__class__, "update_status"):
+                        try:
+                            self.update_status()
+                        except Exception:
+                            pass
+                else:
+                    command.state(self.local_api.linuxcnc.STATE_OFF)
+                    command.wait_complete(2.0)
+                    command.state(self.local_api.linuxcnc.STATE_ESTOP)
+                    command.wait_complete(2.0)
+                    self.is_estopped = True
+                    if "mock_coords" in self.__dict__:
+                        self.mock_coords["ESTOP_ACTIVATED"] = True
+                        self.mock_coords["MACHINE_ON"] = False
+                    if "update_status" in self.__dict__ or hasattr(self.__class__, "update_status"):
+                        try:
+                            self.update_status()
+                        except Exception:
+                            pass
+            except Exception as error:
+                if self.__dict__.get("error_signal"):
+                    self.error_signal.emit(f"E-stop command failed: {error}")
+            return
+        if is_estopped:
+            # Send real commands to reset E-Stop FIRST, then restore MANUAL mode
+            py_code = (
+                "import linuxcnc, time\n"
+                "try:\n"
+                "    c = linuxcnc.command()\n"
+                "    try: c.set_feed_hold(0)\n"
+                "    except: pass\n"
+                "    c.abort()\n"
+                "    c.wait_complete(1.0)\n"
+                "    c.state(linuxcnc.STATE_ESTOP_RESET)\n"
+                "    c.wait_complete(2.0)\n"
+                "    try:\n"
+                "        e = linuxcnc.error_channel()\n"
+                "        for _ in range(100):\n"
+                "            if not e.poll(): break\n"
+                "    except: pass\n"
+                "    s = linuxcnc.stat(); s.poll()\n"
+                "    if s.task_state != linuxcnc.STATE_ESTOP:\n"
+                "        try:\n"
+                "            c.mode(linuxcnc.MODE_MANUAL)\n"
+                "            c.wait_complete(1.0)\n"
+                "        except: pass\n"
+                "except: pass"
+            )
             self._send_b64_py_cmd(py_code, urgent=True)
+            self.is_estopped = False
+            if "mock_coords" in self.__dict__:
+                self.mock_coords["ESTOP_ACTIVATED"] = False
+                self.mock_coords["MODE"] = "MANUAL"
+            if "update_status" in self.__dict__ or hasattr(self.__class__, "update_status"):
+                try:
+                    self.update_status()
+                except Exception:
+                    pass
         else:
-                
             # Send real commands to Power Off and trigger E-Stop
-            py_code = "import linuxcnc, time\ntry:\n    c=linuxcnc.command()\n    c.state(linuxcnc.STATE_OFF)\n    time.sleep(0.1)\n    c.state(linuxcnc.STATE_ESTOP)\nexcept: pass"
+            py_code = (
+                "import linuxcnc, time\n"
+                "try:\n"
+                "    c = linuxcnc.command()\n"
+                "    c.state(linuxcnc.STATE_OFF)\n"
+                "    time.sleep(0.1)\n"
+                "    c.state(linuxcnc.STATE_ESTOP)\n"
+                "except: pass"
+            )
             self._send_b64_py_cmd(py_code, urgent=True)
+            self.is_estopped = True
+            if "mock_coords" in self.__dict__:
+                self.mock_coords["ESTOP_ACTIVATED"] = True
+                self.mock_coords["MACHINE_ON"] = False
+            if "update_status" in self.__dict__ or hasattr(self.__class__, "update_status"):
+                try:
+                    self.update_status()
+                except Exception:
+                    pass
 
     def toggle_power(self):
-        if self.is_estopped:
-            QMessageBox.warning(self, "E-STOP", "Cannot turn on machine power while E-STOP is active.\nPlease release the E-STOP first.")
-            return
-            
-        is_powered_on = self.mock_coords.get('MACHINE_ON', False)
-        agent_client = client_from_settings(self.settings)
+        agent_client = client_from_settings(self.__dict__.get("settings"))
+        is_estopped = self.__dict__.get("is_estopped", False)
+        is_powered_on = self.__dict__.get("mock_coords", {}).get("MACHINE_ON", False)
         if agent_client is not None:
+            if is_estopped:
+                try:
+                    agent_client.machine_command("estop_reset")
+                    self.is_estopped = False
+                    if "mock_coords" in self.__dict__:
+                        self.mock_coords["ESTOP_ACTIVATED"] = False
+                    try:
+                        agent_client.machine_command("mode_manual")
+                    except Exception:
+                        pass
+                except Exception as error:
+                    if self.__dict__.get("error_signal"):
+                        self.error_signal.emit(f"E-stop reset before power on failed: {error}")
+                    return
             try:
                 agent_client.machine_command("power_off" if is_powered_on else "power_on")
             except Exception as error:
-                self.error_signal.emit(f"Power command failed: {error}")
+                if self.__dict__.get("error_signal"):
+                    self.error_signal.emit(f"Power command failed: {error}")
+            return
+
+        if getattr(self.__dict__.get("settings"), "local_only", False) and self.__dict__.get("local_api"):
+            try:
+                status = self.local_api.status()
+                status.poll()
+                command = self.local_api.command()
+                if status.task_state == self.local_api.linuxcnc.STATE_ON:
+                    command.state(self.local_api.linuxcnc.STATE_OFF)
+                    command.wait_complete(2.0)
+                    return
+                if status.task_state == self.local_api.linuxcnc.STATE_ESTOP:
+                    physical_estop_ok = True
+                    for estop_pin in ("iocontrol.0.emc-enable-in", "halui.estop.is-activated"):
+                        try:
+                            val = self.local_api.get_hal_value(estop_pin)
+                            if estop_pin == "iocontrol.0.emc-enable-in" and not val:
+                                physical_estop_ok = False
+                                break
+                            elif estop_pin == "halui.estop.is-activated" and val:
+                                physical_estop_ok = False
+                                break
+                        except Exception:
+                            pass
+                    if not physical_estop_ok:
+                        QMessageBox.warning(self, "E-STOP", "Reset the physical E-stop before enabling machine power.")
+                        return
+                    try:
+                        command.set_feed_hold(0)
+                    except Exception:
+                        pass
+                    command.abort()
+                    command.wait_complete(1.0)
+                    # Reset E-STOP first before changing mode or turning on power
+                    command.state(self.local_api.linuxcnc.STATE_ESTOP_RESET)
+                    command.wait_complete(2.0)
+                    status.poll()
+                    if status.task_state == self.local_api.linuxcnc.STATE_ESTOP:
+                        QMessageBox.warning(self, "E-STOP", "Reset the physical E-stop before enabling machine power.")
+                        return
+                    try:
+                        command.mode(self.local_api.linuxcnc.MODE_MANUAL)
+                        command.wait_complete(1.0)
+                    except Exception:
+                        pass
+                    self.is_estopped = False
+                    if "mock_coords" in self.__dict__:
+                        self.mock_coords["ESTOP_ACTIVATED"] = False
+                active_limits = []
+                for joint_index in range(getattr(status, "joints", 0)):
+                    for suffix, label in (("neg-lim-sw-in", "negative"), ("pos-lim-sw-in", "positive")):
+                        pin_name = f"joint.{joint_index}.{suffix}"
+                        try:
+                            if self.local_api.get_hal_value(pin_name):
+                                active_limits.append(f"joint {joint_index} {label}")
+                        except Exception as error:
+                            if self.__dict__.get("error_signal"):
+                                self.error_signal.emit(f"Unable to read {pin_name}; power remains off: {error}")
+                            return
+                if active_limits:
+                    QMessageBox.warning(
+                        self,
+                        "Power On Blocked",
+                        "LinuxCNC reports active hard-limit inputs: "
+                        + ", ".join(active_limits)
+                        + ". Inspect the switches and the saved HAL mapping; no limit override was applied.",
+                    )
+                    return
+                command.state(self.local_api.linuxcnc.STATE_ON)
+                command.wait_complete(2.0)
+            except Exception as error:
+                if self.__dict__.get("error_signal"):
+                    self.error_signal.emit(f"Power command failed: {error}")
+            return
+            
+        if is_estopped:
+            # Send real commands to reset E-Stop first, then enable Power
+            py_code = (
+                "import linuxcnc, time\n"
+                "try:\n"
+                "    c = linuxcnc.command()\n"
+                "    try: c.set_feed_hold(0)\n"
+                "    except: pass\n"
+                "    c.abort()\n"
+                "    c.wait_complete(1.0)\n"
+                "    c.state(linuxcnc.STATE_ESTOP_RESET)\n"
+                "    c.wait_complete(2.0)\n"
+                "    s = linuxcnc.stat(); s.poll()\n"
+                "    if s.task_state != linuxcnc.STATE_ESTOP:\n"
+                "        try:\n"
+                "            c.mode(linuxcnc.MODE_MANUAL)\n"
+                "            c.wait_complete(1.0)\n"
+                "        except: pass\n"
+                "        c.state(linuxcnc.STATE_ON)\n"
+                "except: pass"
+            )
+            self._send_b64_py_cmd(py_code, urgent=True)
+            self.is_estopped = False
+            if "mock_coords" in self.__dict__:
+                self.mock_coords['ESTOP_ACTIVATED'] = False
+                self.mock_coords['MACHINE_ON'] = True
+                self.mock_coords['MODE'] = 'MANUAL'
+            if "update_status" in self.__dict__ or hasattr(self.__class__, "update_status"):
+                try:
+                    self.update_status()
+                except Exception:
+                    pass
             return
         
         if is_powered_on:
             py_code = "import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.state(linuxcnc.STATE_OFF)\nexcept: pass"
             self._send_b64_py_cmd(py_code, urgent=True)
-            self.mock_coords['MACHINE_ON'] = False
+            if "mock_coords" in self.__dict__:
+                self.mock_coords['MACHINE_ON'] = False
         else:
             py_code = "import linuxcnc\ntry:\n    c=linuxcnc.command()\n    c.state(linuxcnc.STATE_ON)\nexcept: pass"
             self._send_b64_py_cmd(py_code, urgent=True)
-            self.mock_coords['MACHINE_ON'] = True
+            if "mock_coords" in self.__dict__:
+                self.mock_coords['MACHINE_ON'] = True
             
-        self.update_status()
+        if "update_status" in self.__dict__ or hasattr(self.__class__, "update_status"):
+            try:
+                self.update_status()
+            except Exception:
+                pass
 
     def override_limits(self):
         # Allow overriding even if in E-STOP, as physical limit switches force an E-STOP state!
@@ -3562,6 +5037,21 @@ except Exception: pass"""
         if agent_client is not None:
             try:
                 agent_client.machine_command("override_limits")
+            except Exception as error:
+                self.error_signal.emit(f"Limit override failed: {error}")
+            return
+        if getattr(self.settings, "local_only", False):
+            confirm = QMessageBox.question(
+                self,
+                "Confirm Limit Override",
+                "Request a temporary LinuxCNC hard-limit override so an operator can carefully jog clear. "
+                "This does not reset E-stop or enable machine power. Continue only if the area is safe.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if confirm != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                self.local_api.command().override_limits()
             except Exception as error:
                 self.error_signal.emit(f"Limit override failed: {error}")
             return
@@ -3636,7 +5126,7 @@ except Exception as e: pass"""
             print("[dashboard.py] Triggering Fast Z Probe")
             py_code = f"""import linuxcnc, time, sys, os
 try:
-    os.system("halcmd setp lut5.0.in-2 0")
+    hal.set_p("lut5.0.in-2", "0")
     time.sleep(0.2)
     
     c = linuxcnc.command()
@@ -3800,14 +5290,16 @@ except Exception as e: pass"""
             self._last_update_state = {}
             
         # Update the numbers in the dictionary instead of using old variable names
+        dro_labels = getattr(self, 'dro_labels', {})
+        dro_mode = getattr(self, 'dro_mode', 'WORK')
         for axis in ['X', 'Y', 'Z', 'FEED', 'RPM']:
-            if axis in self.dro_labels:                
+            if axis in dro_labels:                
                 if axis in ['X', 'Y', 'Z']:
-                    if self.dro_mode == 'WORK':
+                    if dro_mode == 'WORK':
                         val = self.mock_coords.get(axis, 0.0)
-                    elif self.dro_mode == 'MACHINE':
+                    elif dro_mode == 'MACHINE':
                         val = self.mock_coords.get(f'ABSOLUTE_{axis}', 0.0)
-                    elif self.dro_mode == 'DTG':
+                    elif dro_mode == 'DTG':
                         val = self.mock_coords.get(f'DTG_{axis}', 0.0)
                     else: # Fallback
                         val = self.mock_coords.get(axis, 0.0)
@@ -3816,11 +5308,11 @@ except Exception as e: pass"""
                     val = self.mock_coords.get(axis, 0.0)
                     text = f"{val:.1f}"
                 if self._last_update_state.get(f"dro_{axis}") != text:
-                    self.dro_labels[axis].setText(text)
+                    dro_labels[axis].setText(text)
                     self._last_update_state[f"dro_{axis}"] = text
-                custom_label = self.custom_dro_labels.get(axis)
-                if custom_label is not None:
-                    custom_label.setText(text)
+                    custom_label = getattr(self, 'custom_dro_labels', {}).get(axis)
+                    if custom_label is not None:
+                        custom_label.setText(text)
 
         # Update live tool position in the 3D viewer
         tool_x = self.mock_coords.get('X', 0.0)
@@ -3850,28 +5342,31 @@ except Exception as e: pass"""
 
         # Update SSH LED Visuals
         current_time = time.time()
-        if self.ssh_connected:
-            if self._last_update_state.get("ssh") != "online":
-                self.status_leds["CONNECTION"].setStyleSheet("background-color: #00FF00; color: black; border-radius: 4px; font-weight: bold; padding: 8px;")
-                self.status_leds["CONNECTION"].setText("MACHINE: ONLINE")
-                self._last_update_state["ssh"] = "online"
-            self._was_connected_once = True
-        else:
-            if getattr(self, '_was_connected_once', False):
-                blink_state = "reconnect_1" if int(current_time * 2) % 2 == 0 else "reconnect_2"
-                if self._last_update_state.get("ssh") != blink_state:
-                    if blink_state == "reconnect_1":
-                        self.status_leds["CONNECTION"].setStyleSheet("background-color: #f39c12; color: black; border-radius: 4px; font-weight: bold; padding: 8px;")
-                        self.status_leds["CONNECTION"].setText("MACHINE: RECONNECTING")
-                    else:
-                        self.status_leds["CONNECTION"].setStyleSheet("background-color: #c0392b; color: white; border-radius: 4px; font-weight: bold; padding: 8px;")
-                        self.status_leds["CONNECTION"].setText("MACHINE: CONNECTION LOST")
-                    self._last_update_state["ssh"] = blink_state
+        leds = getattr(self, 'status_leds', {})
+        conn_led = leds.get("CONNECTION")
+        if conn_led:
+            if self.ssh_connected:
+                if self._last_update_state.get("ssh") != "online":
+                    conn_led.setStyleSheet("background-color: #00FF00; color: black; border-radius: 4px; font-weight: bold; padding: 8px;")
+                    conn_led.setText("MACHINE: ONLINE")
+                    self._last_update_state["ssh"] = "online"
+                self._was_connected_once = True
             else:
-                if self._last_update_state.get("ssh") != "offline":
-                    self.status_leds["CONNECTION"].setStyleSheet("background-color: red; color: white; border-radius: 4px; font-weight: bold; padding: 8px;")
-                    self.status_leds["CONNECTION"].setText("MACHINE: OFFLINE")
-                    self._last_update_state["ssh"] = "offline"
+                if getattr(self, '_was_connected_once', False):
+                    blink_state = "reconnect_1" if int(current_time * 2) % 2 == 0 else "reconnect_2"
+                    if self._last_update_state.get("ssh") != blink_state:
+                        if blink_state == "reconnect_1":
+                            conn_led.setStyleSheet("background-color: #f39c12; color: black; border-radius: 4px; font-weight: bold; padding: 8px;")
+                            conn_led.setText("MACHINE: RECONNECTING")
+                        else:
+                            conn_led.setStyleSheet("background-color: #c0392b; color: white; border-radius: 4px; font-weight: bold; padding: 8px;")
+                            conn_led.setText("MACHINE: CONNECTION LOST")
+                        self._last_update_state["ssh"] = blink_state
+                else:
+                    if self._last_update_state.get("ssh") != "offline":
+                        conn_led.setStyleSheet("background-color: red; color: white; border-radius: 4px; font-weight: bold; padding: 8px;")
+                        conn_led.setText("MACHINE: OFFLINE")
+                        self._last_update_state["ssh"] = "offline"
 
         # Update LED Visuals
         
@@ -3889,11 +5384,11 @@ except Exception as e: pass"""
             if 'ESTOP_ACTIVATED' in self.mock_coords:
                 self.is_estopped = self.mock_coords['ESTOP_ACTIVATED']
                 self.machine_state = "ESTOP" if self.is_estopped else "STANDBY"
-        elif self.ssh_connected:
+        elif getattr(self, 'ssh_connected', False):
             is_homed = expected_joints > 0 and remote_homed_count >= expected_joints
             is_powered_on = self.mock_coords.get('MACHINE_ON', not self.is_estopped)
         else:
-            is_homed = expected_joints > 0 and all(not btn.isEnabled() for btn in self.home_buttons.values())
+            is_homed = expected_joints > 0 and all(not btn.isEnabled() for btn in getattr(self, 'home_buttons', {}).values())
             is_powered_on = not self.is_estopped
             
         status_text = self.mock_coords.get('STATUS', 'IDLE')
@@ -3926,22 +5421,21 @@ except Exception as e: pass"""
         if self._last_update_state.get("drawn_mode") != current_mode:
             self._last_update_state["drawn_mode"] = current_mode
             if hasattr(self, 'btn_mode_manual') and hasattr(self, 'btn_mode_auto'):
-                if current_mode == 'MANUAL':
-                    self.btn_mode_manual.setStyleSheet("QPushButton { background-color: #27ae60; color: white; font-weight: bold; border-radius: 4px; }")       
-                    self.btn_mode_auto.setStyleSheet("QPushButton { background-color: #34495e; color: white; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #2c3e50; }")
-                elif current_mode == 'AUTO':
-                    self.btn_mode_auto.setStyleSheet("QPushButton { background-color: #27ae60; color: white; font-weight: bold; border-radius: 4px; }")
-                    self.btn_mode_manual.setStyleSheet("QPushButton { background-color: #34495e; color: white; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #2c3e50; }")
-                else:
-                    self.btn_mode_manual.setStyleSheet("QPushButton { background-color: #34495e; color: white; font-weight: bold; border-radius: 4px; }")       
-                    self.btn_mode_auto.setStyleSheet("QPushButton { background-color: #34495e; color: white; font-weight: bold; border-radius: 4px; }")
+                btn_mdi = getattr(self, 'btn_mode_mdi', None)
+                active_style = "QPushButton { background-color: #27ae60; color: white; font-weight: bold; border-radius: 4px; }"
+                inactive_style = "QPushButton { background-color: #34495e; color: white; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #2c3e50; }"
+                self.btn_mode_manual.setStyleSheet(active_style if current_mode == 'MANUAL' else inactive_style)
+                self.btn_mode_auto.setStyleSheet(active_style if current_mode == 'AUTO' else inactive_style)
+                if btn_mdi:
+                    btn_mdi.setStyleSheet(active_style if current_mode == 'MDI' else inactive_style)
 
         # Granular Cache: DRO Work/Abs/DTG
-        if self._last_update_state.get("drawn_dro") != self.dro_mode:
-            self._last_update_state["drawn_dro"] = self.dro_mode
+        dro_mode_val = getattr(self, 'dro_mode', 'WORK')
+        if self._last_update_state.get("drawn_dro") != dro_mode_val:
+            self._last_update_state["drawn_dro"] = dro_mode_val
             if hasattr(self, 'dro_mode_buttons'):
                 for mode, btn in self.dro_mode_buttons.items():
-                    btn.setStyleSheet(f"background-color: {'#2980b9' if mode == self.dro_mode else '#34495e'}; color: white; padding: 4px; border-radius: 3px; font-weight: bold;")
+                    btn.setStyleSheet(f"background-color: {'#2980b9' if mode == dro_mode_val else '#34495e'}; color: white; padding: 4px; border-radius: 3px; font-weight: bold;")
 
         # Granular Cache: Pause/Resume Button
         if self._last_update_state.get("drawn_pause") != status_text:
@@ -3954,75 +5448,91 @@ except Exception as e: pass"""
                     self.btn_cycle_pause.setText("⏸ PAUSE")
                     self.btn_cycle_pause.setStyleSheet("QPushButton { background-color: #f39c12; color: black; font-weight: bold; border-radius: 4px; } QPushButton:pressed { background-color: #c87f0a; }")
 
+        # Granular Cache: Jog Controls Enablement
+        jog_enabled = bool(is_powered_on and not self.is_estopped and (current_mode == 'MANUAL') and (status_text not in ('RUNNING', 'PAUSED')))
+        if self._last_update_state.get("jog_enabled") != jog_enabled:
+            self._last_update_state["jog_enabled"] = jog_enabled
+            jog_buttons = getattr(self, 'jog_buttons', None)
+            if isinstance(jog_buttons, dict):
+                for jog_button in jog_buttons.values():
+                    jog_button.setEnabled(jog_enabled)
+            elif isinstance(jog_buttons, (list, tuple, set)):
+                for jog_button in jog_buttons:
+                    jog_button.setEnabled(jog_enabled)
+
         state_tuple = (self.is_estopped, is_powered_on, is_homed, status_text)
 
         if self._last_update_state.get("led_state") != state_tuple:
             self._last_update_state["led_state"] = state_tuple
 
+            estop_led = leds.get("ESTOP")
+            power_led = leds.get("POWER")
+            homed_led = leds.get("HOMED")
+            ready_led = leds.get("READY")
+
             if self.is_estopped:
-                self.status_leds["ESTOP"].setStyleSheet("background-color: red; color: white; font-weight: bold; border: 2px solid darkred; padding: 8px; border-radius: 4px;")
-                self.status_leds["POWER"].setStyleSheet("background-color: #222; color: #444; padding: 8px; border-radius: 4px;")
-                self.status_leds["HOMED"].setStyleSheet("background-color: #555; color: white; font-weight: bold; padding: 8px; border-radius: 4px;")
-                self.status_leds["READY"].setText("OFFLINE")
-                self.status_leds["READY"].setStyleSheet("background-color: #555; color: white; font-weight: bold; padding: 8px; border-radius: 4px;")
+                if estop_led: estop_led.setStyleSheet("background-color: red; color: white; font-weight: bold; border: 2px solid darkred; padding: 8px; border-radius: 4px;")
+                if power_led: power_led.setStyleSheet("background-color: #222; color: #444; padding: 8px; border-radius: 4px;")
+                if homed_led: homed_led.setStyleSheet("background-color: #555; color: white; font-weight: bold; padding: 8px; border-radius: 4px;")
+                if ready_led:
+                    ready_led.setText("OFFLINE")
+                    ready_led.setStyleSheet("background-color: #555; color: white; font-weight: bold; padding: 8px; border-radius: 4px;")
                 if hasattr(self, 'btn_power'):
                     self.btn_power.setText("POWER ON")
                     self.btn_power.setStyleSheet("QPushButton { background-color: #444; color: #888; font-weight: bold; font-size: 16px; border-radius: 5px; } QPushButton:pressed { background-color: #222; padding-top: 2px; padding-left: 2px; }")
                 if hasattr(self, 'btn_master_toggle'):
                     self.btn_master_toggle.setText("RESET (E-STOP)")
                     self.btn_master_toggle.setStyleSheet("QPushButton { background-color: #c0392b; color: white; font-weight: bold; font-size: 20px; border-radius: 5px; } QPushButton:pressed { background-color: #922b21; padding-top: 2px; padding-left: 2px; }")
-                for button in self.home_buttons.values():
+                for button in getattr(self, 'home_buttons', {}).values():
                     button.setEnabled(False)
                 if hasattr(self, 'btn_home_all'):
                     self.btn_home_all.setEnabled(False)
-                for jog_button in self.jog_buttons.values():
-                    jog_button.setEnabled(False)
             else:
-                self.status_leds["ESTOP"].setStyleSheet("background-color: #222; color: #444; padding: 8px; border-radius: 4px;")
+                if estop_led: estop_led.setStyleSheet("background-color: #222; color: #444; padding: 8px; border-radius: 4px;")
                 
                 if is_powered_on:
-                    self.status_leds["POWER"].setStyleSheet("background-color: #00FF00; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
+                    if power_led: power_led.setStyleSheet("background-color: #00FF00; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
                     if hasattr(self, 'btn_power'):
                         self.btn_power.setText("POWER OFF")
                         self.btn_power.setStyleSheet("QPushButton { background-color: #e74c3c; color: white; font-weight: bold; font-size: 16px; border-radius: 5px; } QPushButton:pressed { background-color: #c0392b; padding-top: 2px; padding-left: 2px; }")
                 else:
-                    self.status_leds["POWER"].setStyleSheet("background-color: #f39c12; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
+                    if power_led: power_led.setStyleSheet("background-color: #f39c12; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
                     if hasattr(self, 'btn_power'):
                         self.btn_power.setText("POWER ON")
                         self.btn_power.setStyleSheet("QPushButton { background-color: #7f8c8d; color: white; font-weight: bold; font-size: 16px; border-radius: 5px; } QPushButton:pressed { background-color: #616a6b; padding-top: 2px; padding-left: 2px; }")
                 if hasattr(self, 'btn_master_toggle'):
                     self.btn_master_toggle.setText("E-STOP")
                     self.btn_master_toggle.setStyleSheet("QPushButton { background-color: orange; color: black; font-weight: bold; font-size: 20px; border-radius: 5px; } QPushButton:pressed { background-color: #cc8400; padding-top: 2px; padding-left: 2px; }")
-                for button in self.home_buttons.values():
+                for button in getattr(self, 'home_buttons', {}).values():
                     button.setEnabled(True)
                 if hasattr(self, 'btn_home_all'):
                     self.btn_home_all.setEnabled(True)
-                for jog_button in self.jog_buttons.values():
-                    jog_button.setEnabled(True)
 
                 self.is_machine_homed = is_homed
 
                 if is_homed:
-                    self.status_leds["HOMED"].setStyleSheet("background-color: #00FF00; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
-                    self.status_leds["READY"].setText(f"STATE: {status_text}")
-                    if status_text == 'RUNNING':
-                        self.status_leds["READY"].setStyleSheet("background-color: #39FF14; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
-                    elif status_text == 'PAUSED':
-                        self.status_leds["READY"].setStyleSheet("background-color: #f1c40f; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
-                    else:
-                        self.status_leds["READY"].setStyleSheet("background-color: #3498db; color: white; font-weight: bold; padding: 8px; border-radius: 4px;")
+                    if homed_led: homed_led.setStyleSheet("background-color: #00FF00; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
+                    if ready_led:
+                        ready_led.setText(f"STATE: {status_text}")
+                        if status_text == 'RUNNING':
+                            ready_led.setStyleSheet("background-color: #39FF14; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
+                        elif status_text == 'PAUSED':
+                            ready_led.setStyleSheet("background-color: #f1c40f; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
+                        else:
+                            ready_led.setStyleSheet("background-color: #3498db; color: white; font-weight: bold; padding: 8px; border-radius: 4px;")
                         
-                    for btn in self.home_buttons.values():
+                    for btn in getattr(self, 'home_buttons', {}).values():
                         btn.setEnabled(False) # Visually disable individual home buttons
                     if hasattr(self, 'btn_home_all'):
                         self.btn_home_all.setEnabled(True)
                         self.btn_home_all.setText("UNHOME ALL")
                         self.btn_home_all.setStyleSheet("QPushButton { background-color: #e74c3c; color: white; font-weight: bold; font-size: 16px; border-radius: 5px; } QPushButton:pressed { background-color: #c0392b; padding-top: 2px; padding-left: 2px; }")
                 else:
-                    self.status_leds["HOMED"].setStyleSheet("background-color: #f39c12; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
-                    self.status_leds["READY"].setText("UNHOMED")
-                    self.status_leds["READY"].setStyleSheet("background-color: #f39c12; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
-                    for btn in self.home_buttons.values():
+                    if homed_led: homed_led.setStyleSheet("background-color: #f39c12; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
+                    if ready_led:
+                        ready_led.setText("UNHOMED")
+                        ready_led.setStyleSheet("background-color: #f39c12; color: black; font-weight: bold; padding: 8px; border-radius: 4px;")
+                    for btn in getattr(self, 'home_buttons', {}).values():
                         btn.setEnabled(True) # Re-enable if machine loses homed state
                     if hasattr(self, 'btn_home_all'):
                         self.btn_home_all.setEnabled(True)
@@ -4190,8 +5700,16 @@ except Exception as e:
         """Silently checks if the LinuxCNC machine is reachable on the network."""
         if client_from_settings(self.settings) is not None:
             return
+        ip = self.settings.get_setting("SSH", "ip_address", "")
+        if is_local_controller(ip):
+            was_connected = self.ssh_connected
+            self.ssh_connected = is_local_linuxcnc_running()
+            if self.ssh_connected and not was_connected:
+                self.start_position_fetcher()
+            elif was_connected and not self.ssh_connected:
+                self.stop_position_fetcher()
+            return
         if self.ping_process.state() == QProcess.ProcessState.NotRunning:
-            ip = self.settings.get_setting("SSH", "ip_address", "")
             if not ip:
                 self.ssh_connected = False
                 return
@@ -4225,9 +5743,17 @@ except Exception as e:
             self.pos_fetcher.start()
             return
 
+        if is_local_controller(ip):
+            if not self.pos_fetcher:
+                self.pos_fetcher = PositionFetcherThread(ip or "127.0.0.1", user, password)
+                self.pos_fetcher.position_fetched.connect(self.update_real_coords)
+                self.pos_fetcher.error.connect(self.show_error_message)
+                self.pos_fetcher.start()
+            return
+
         if not ip or not user: return
-            
-        if (HAS_PARAMIKO or is_local_ip(ip)) and not self.pos_fetcher:
+
+        if not self.pos_fetcher:
             self.pos_fetcher = PositionFetcherThread(ip, user, password)
             self.pos_fetcher.position_fetched.connect(self.update_real_coords)
             self.pos_fetcher.error.connect(self.show_error_message)
@@ -4252,13 +5778,17 @@ except Exception as e:
             self.pos_fetcher = None
 
     def update_real_coords(self, coords):
+        if getattr(self, '_last_update_state', None) is None:
+            self._last_update_state = {}
         for axis in ['X', 'Y', 'Z', 'FEED', 'RPM']:
             if axis in coords:
                 self.mock_coords[axis] = coords[axis]
                 
-        for key in ['HOMED_COUNT', 'MACHINE_ON', 'ESTOP_ACTIVATED', 'JOINTS', 'AXIS_MASK', 'STATUS', 'MODE', 'PROGRAM_LOADED', 'TOTAL_LINES', 'LINE', 'CURRENT_LINE', 'READ_LINE', 'EXEC_STATE', 'INTERP_STATE', 'TASK_STATE', 'COMMAND', 'PROGRAM_FILE']:
+        for key in ['HOMED_COUNT', 'MACHINE_ON', 'ESTOP_ACTIVATED', 'JOINTS', 'AXIS_MASK', 'STATUS', 'MODE', 'PROGRAM_LOADED', 'TOTAL_LINES', 'LINE', 'CURRENT_LINE', 'READ_LINE', 'EXEC_STATE', 'INTERP_STATE', 'TASK_STATE', 'COMMAND', 'PROGRAM_FILE', 'LIMITS_ACTIVE', 'ACTIVE_LIMITS', 'IS_PAUSED', 'PROBE_VAL', 'probe_tripped']:
             if key in coords:
                 self.mock_coords[key] = coords[key]
+        self.ssh_connected = True
+        self.is_estopped = bool(coords.get('ESTOP_ACTIVATED', self.is_estopped))
                 
         for key in ['FEED_OVR', 'SPINDLE_OVR', 'ABSOLUTE_X', 'ABSOLUTE_Y', 'ABSOLUTE_Z', 'DTG_X', 'DTG_Y', 'DTG_Z']:
             if key in coords:
@@ -4269,21 +5799,28 @@ except Exception as e:
             if custom_label is not None:
                 if axis in ("X", "Y", "Z"):
                     value = coords.get(axis, self.mock_coords.get(axis, 0.0))
-                    custom_label.setText(f"{value:.3f}")
+                    text = f"{value:.3f}"
                 else:
                     value = coords.get(axis, self.mock_coords.get(axis, 0.0))
-                    custom_label.setText(f"{value:.1f}")
+                    text = f"{value:.1f}"
+                if self._last_update_state.get(f"custom_dro_{axis}") != text:
+                    self._last_update_state[f"custom_dro_{axis}"] = text
+                    custom_label.setText(text)
 
         homed = int(coords.get("HOMED_COUNT", self.mock_coords.get("HOMED_COUNT", 0)))
         joints = int(coords.get("JOINTS", self.mock_coords.get("JOINTS", 0)))
+        self.ssh_connected = True
+        self.is_estopped = bool(coords.get("ESTOP_ACTIVATED", self.is_estopped))
         homed_active = joints > 0 and homed >= joints
-        for title, label in self.custom_status_labels.items():
-            if "HOMED" in title or "READY" in title:
-                label.setStyleSheet(
-                    "background-color: #00FF00; color: black; font-weight: bold;"
-                    if homed_active else
-                    "background-color: #f39c12; color: black; font-weight: bold;"
-                )
+        if self._last_update_state.get("custom_homed_active") != homed_active:
+            self._last_update_state["custom_homed_active"] = homed_active
+            for title, label in self.custom_status_labels.items():
+                if "HOMED" in title or "READY" in title:
+                    label.setStyleSheet(
+                        "background-color: #00FF00; color: black; font-weight: bold;"
+                        if homed_active else
+                        "background-color: #f39c12; color: black; font-weight: bold;"
+                    )
 
         if 'TOOL_IN_SPINDLE' in coords:
             self.mock_coords['TOOL_IN_SPINDLE'] = coords['TOOL_IN_SPINDLE']
@@ -4303,9 +5840,22 @@ except Exception as e:
             if getattr(self, '_last_highlighted_line', -1) != new_line:
                 self.highlight_gcode_line(new_line)
                 self._last_highlighted_line = new_line
+
+        if hasattr(self, 'update_status'):
+            self.update_status()
             
     def highlight_gcode_line(self, line_number):
-        if not hasattr(self, 'default_gcode_editor'): return
+        # Add Toolpath Highlight
+        if hasattr(self, 'toolpath_viewer') and self.toolpath_viewer:
+            self.toolpath_viewer.highlight_line(line_number)
+
+        if not hasattr(self, 'default_gcode_editor') or not self.default_gcode_editor:
+            return
+
+        if self.__dict__.get('_is_large_file_preview', False):
+            doc = self.default_gcode_editor.document()
+            if doc and line_number >= doc.blockCount():
+                return
         
         selection = QTextEdit.ExtraSelection()
         selection.format.setBackground(QColor("#1f618d")) # A vibrant blue selection background
@@ -4324,10 +5874,6 @@ except Exception as e:
         self.default_gcode_editor.setTextCursor(cursor)
         
         self.default_gcode_editor.centerCursor()
-            
-        # Add Toolpath Highlight
-        if hasattr(self, 'toolpath_viewer'):
-            self.toolpath_viewer.highlight_line(line_number)
     def init_heartbeat(self):
         """Starts the background timer for DRO and LED updates."""
         self.timer = QTimer(self)
@@ -4368,29 +5914,94 @@ except Exception as e:
                 self.error_signal.emit(f"Jog start failed: {error}")
             return
 
-        if self.is_estopped:
+        if self.is_estopped or self.mock_coords.get('MACHINE_ON') is False:
             return
 
-        self.active_jogs.add(axis)
-        
-        # Calculate exact unit/sec velocity based on your slider % and INI max velocity
-        max_vel = float(self.settings.get_setting(f"AXIS_{axis}", "vel", 50.0))
-        velocity = (self.jog_speed_slider.value() / 100.0) * max_vel * speed_multiplier
-        velocity *= direction
-        
+        # Jogging is strictly forbidden when a program is running, paused, or in any mode other than MANUAL
+        if self.mock_coords.get('STATUS') in ('RUNNING', 'PAUSED') or self.mock_coords.get('MODE', 'MANUAL') != 'MANUAL':
+            return
+
         is_gantry, is_4_axis, is_5_axis, total_joints = self.get_kinematics_info()
+
+        if getattr(self.settings, "local_only", False) and getattr(self, "local_api", None):
+            try:
+                status = self.local_api.status()
+                status.poll()
+                if status.task_state != self.local_api.linuxcnc.STATE_ON:
+                    return
+                if status.task_mode != self.local_api.linuxcnc.MODE_MANUAL:
+                    return
+                istate = getattr(status, 'interp_state', 1)
+                if isinstance(istate, int) and istate != getattr(self.local_api.linuxcnc, 'INTERP_IDLE', 1):
+                    return
+
+                homed_count = sum(1 for h in getattr(status, 'homed', []) if h)
+                joints = int(getattr(status, 'joints', getattr(status, 'axes', total_joints)))
+                is_homed = (homed_count >= joints)
+
+                if is_gantry and axis == 'Y' and not is_homed:
+                    self.active_jogs.discard(axis)
+                    QMessageBox.warning(
+                        self,
+                        "Homing Required",
+                        f"Cannot manually jog the {axis} axis before homing!\n\n"
+                        f"Because your machine is configured as a Gantry (XYYZ), the {axis} axis uses dual independent motors. "
+                        f"Jogging them before the machine has executed its squaring sequence can rack and damage your linear rails.\n\n"
+                        f"Please click 'Home All' or 'Home {axis}' to safely synchronize the motors first.",
+                    )
+                    return
+
+                self.active_jogs.add(axis)
+                max_vel = float(self.settings.get_setting(f"AXIS_{axis}", "vel", 50.0))
+                slider = getattr(self, "jog_speed_slider", None)
+                slider_pct = (slider.value() / 100.0) if slider is not None else 1.0
+                velocity = slider_pct * max_vel * speed_multiplier * direction
+
+                if is_gantry:
+                    joint_idx = {'X': 0, 'Y': 1, 'Z': 3}.get(axis, 0)
+                elif is_4_axis:
+                    joint_idx = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3}.get(axis, 0)
+                elif is_5_axis:
+                    joint_idx = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3, 'B': 4}.get(axis, 0)
+                else:
+                    joint_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 0)
+
+                axis_idx = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3, 'B': 4}.get(axis, 0)
+
+                command = self.local_api.command()
+                if is_homed:
+                    if not getattr(status, 'motion_teleop', False):
+                        command.teleop_enable(1)
+                    command.jog(self.local_api.linuxcnc.JOG_CONTINUOUS, False, axis_idx, velocity)
+                else:
+                    if getattr(status, 'motion_teleop', False):
+                        command.teleop_enable(0)
+                    command.jog(self.local_api.linuxcnc.JOG_CONTINUOUS, True, joint_idx, velocity)
+            except Exception as error:
+                self.active_jogs.discard(axis)
+                self.error_signal.emit(f"Jog start failed: {error}")
+            return
+
+        # Remote / fallback path
         homed_count = self.mock_coords.get('HOMED_COUNT')
         is_homed = None if homed_count is None else int(homed_count) >= total_joints
 
         if is_gantry and axis == 'Y' and is_homed is False:
-            self.active_jog = None
-            QMessageBox.warning(self, "Homing Required",
-                                f"Cannot manually jog the {axis} axis before homing!\n\n"
-                                f"Because your machine is configured as a Gantry (XYYZ), the {axis} axis uses dual independent motors. "
-                                f"Jogging them before the machine has executed its squaring sequence can rack and damage your linear rails.\n\n"
-                                f"Please click 'Home All' or 'Home {axis}' to safely synchronize the motors first.")
+            self.active_jogs.discard(axis)
+            QMessageBox.warning(
+                self,
+                "Homing Required",
+                f"Cannot manually jog the {axis} axis before homing!\n\n"
+                f"Because your machine is configured as a Gantry (XYYZ), the {axis} axis uses dual independent motors. "
+                f"Jogging them before the machine has executed its squaring sequence can rack and damage your linear rails.\n\n"
+                f"Please click 'Home All' or 'Home {axis}' to safely synchronize the motors first.",
+            )
             return
-            
+
+        self.active_jogs.add(axis)
+        max_vel = float(self.settings.get_setting(f"AXIS_{axis}", "vel", 50.0))
+        velocity = (self.jog_speed_slider.value() / 100.0) * max_vel * speed_multiplier * direction
+
         if is_gantry:
             joint_idx = {'X': 0, 'Y': 1, 'Z': 3}.get(axis, 0)
         elif is_4_axis:
@@ -4399,9 +6010,9 @@ except Exception as e:
             joint_idx = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3, 'B': 4}.get(axis, 0)
         else:
             joint_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(axis, 0)
-            
+
         axis_idx = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3, 'B': 4}.get(axis, 0)
-        
+
         py_code = f"""import linuxcnc
 import time
 try:
@@ -4425,8 +6036,7 @@ except Exception as e:
     with open('/tmp/linuxcnc_jog_debug.txt', 'a') as f:
         f.write("JOG PRESS ERR: " + str(e) + "\\n")
 """
-
-        self._send_b64_py_cmd(py_code)
+        self._send_b64_py_cmd(py_code, urgent=True)
 
     def jog_button_released(self, axis=None):
         agent_client = client_from_settings(self.settings)
@@ -4442,11 +6052,42 @@ except Exception as e:
 
         axes_to_stop = [axis] if axis else list(self.active_jogs)
         for ax in axes_to_stop:
-            if ax in self.active_jogs:
-                self.active_jogs.remove(ax)
-                
-            is_gantry, is_4_axis, is_5_axis, total_joints = self.get_kinematics_info()
-            
+            self.active_jogs.discard(ax)
+
+        if not axes_to_stop:
+            return
+
+        is_gantry, is_4_axis, is_5_axis, total_joints = self.get_kinematics_info()
+
+        if getattr(self.settings, "local_only", False) and getattr(self, "local_api", None):
+            try:
+                command = self.local_api.command()
+                status = self.local_api.status()
+                status.poll()
+                if status.task_state == self.local_api.linuxcnc.STATE_ESTOP:
+                    self.active_jogs.clear()
+                    return
+
+                homed_count = sum(1 for h in getattr(status, 'homed', []) if h)
+                joints = int(getattr(status, 'joints', getattr(status, 'axes', total_joints)))
+                is_homed = (homed_count >= joints)
+
+                for ax in axes_to_stop:
+                    if is_gantry: ax_joint_idx = {'X': 0, 'Y': 1, 'Z': 3}.get(ax, 0)
+                    elif is_4_axis: ax_joint_idx = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3}.get(ax, 0)
+                    elif is_5_axis: ax_joint_idx = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3, 'B': 4}.get(ax, 0)
+                    else: ax_joint_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(ax, 0)
+                    ax_axis_idx = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3, 'B': 4}.get(ax, 0)
+
+                    if is_homed:
+                        command.jog(self.local_api.linuxcnc.JOG_STOP, False, ax_axis_idx)
+                    else:
+                        command.jog(self.local_api.linuxcnc.JOG_STOP, True, ax_joint_idx)
+            except Exception as error:
+                self.error_signal.emit(f"Jog stop failed: {error}")
+            return
+
+        for ax in axes_to_stop:
             if is_gantry: joint_idx = {'X': 0, 'Y': 1, 'Z': 3}.get(ax, 0)
             elif is_4_axis: joint_idx = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3}.get(ax, 0)
             elif is_5_axis: joint_idx = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3, 'B': 4}.get(ax, 0)
@@ -4469,8 +6110,7 @@ except Exception as e:
     with open('/tmp/linuxcnc_jog_debug.txt', 'a') as f:
         f.write("JOG REL ERR: " + str(e) + "\\n")
 """
-
-            self._send_b64_py_cmd(py_code)
+            self._send_b64_py_cmd(py_code, urgent=True)
 
     def keyPressEvent(self, event):
         if event is None or event.isAutoRepeat():
@@ -4496,7 +6136,10 @@ except Exception as e:
             self.toggle_estop()
             return
 
-        if self.is_estopped:
+        if self.is_estopped or self.mock_coords.get('MACHINE_ON') is False:
+            return
+
+        if self.mock_coords.get('STATUS') in ('RUNNING', 'PAUSED') or self.mock_coords.get('MODE', 'MANUAL') != 'MANUAL':
             return
 
         # Allow input fields (MDI, text editors, etc.) to receive keyboard input
@@ -4532,9 +6175,9 @@ except Exception as e:
 
     def focusOutEvent(self, event):
         super().focusOutEvent(event)
-        # If we lose focus while holding down a key (e.g. clicking a tab), stop jogging!
-        if hasattr(self, 'active_jogs') and self.active_jogs:
-            for axis in list(self.active_jogs):
+        active = self.__dict__.get('active_jogs')
+        if active:
+            for axis in list(active):
                 self.jog_button_released(axis)
         self.current_key = None
 
@@ -4591,6 +6234,15 @@ except Exception as e:
         if hasattr(self, 'toolpath_viewer'):
             self.toolpath_viewer.machine_units = "inch" if "Imperial" in machine_units_str else "mm"
             self.toolpath_viewer.display_units = self.display_units
+            preview_pref = self.settings.get_setting('UI_PREFERENCES', 'enable_toolpath_preview', 'True') == 'True'
+            if getattr(self.toolpath_viewer, 'preview_enabled', True) != preview_pref:
+                target_path = self.__dict__.get('loaded_gcode_path')
+                gcode = ""
+                if not self.__dict__.get('_is_large_file_preview', False):
+                    editor = self.__dict__.get('default_gcode_editor')
+                    gcode = editor.toPlainText() if editor else ""
+                self.toolpath_viewer.set_preview_enabled(preview_pref, gcode_text=gcode, file_path=target_path)
+                self.update_preview_toggle_button()
         self.jog_speed = float(self.settings.get_setting('JOG_SETTINGS', 'jog_speed', 100))
         self.turbo_multiplier = float(self.settings.get_setting('JOG_SETTINGS', 'turbo_multiplier', 5.0))
         self.update_status() # Force a full redraw with new units

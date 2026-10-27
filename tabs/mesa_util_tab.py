@@ -1,11 +1,14 @@
 import subprocess
 import os
+import shutil
 import json
 import re
 import platform
 import base64
 from core.credentials import CredentialStore, CredentialStoreError
 from core.machine_agent import client_from_settings
+from core.linuxcnc_api import LocalLinuxCNCAPI
+from tabs.hal_show_tab import format_hal_pin_listing
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QGroupBox, QLineEdit, QPushButton, QTextEdit,
                              QLabel, QMessageBox, QApplication, QFileDialog, QInputDialog)
@@ -21,12 +24,6 @@ except:
 
 def is_local_ip(ip):
     return ip in LOCAL_IPS
-
-try:
-    import paramiko
-    HAS_PARAMIKO = True
-except ImportError:
-    HAS_PARAMIKO = False
 
 class MesaUtilTab(QWidget):
     def __init__(self, parent_library_tab):
@@ -60,20 +57,27 @@ class MesaUtilTab(QWidget):
         conn_layout.setSpacing(10)
         
         self.settings = self.library_tab.parent_app.settings
+        local_only = getattr(self.settings, "local_only", False)
         
         self.ip_input = QLineEdit(self.settings.get_setting("SSH", "ip_address", "192.168.1.125"))
         self.user_input = QLineEdit(self.settings.get_setting("SSH", "username", "linuxcnc"))
         self.pass_input = QLineEdit(self.settings.get_setting("SSH", "password", ""))
+        self.ip_input.setReadOnly(local_only)
+        self.user_input.setReadOnly(local_only)
+        self.pass_input.setReadOnly(local_only)
         self.pass_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.pass_input.setPlaceholderText("Stored in OS credential manager")
         
         self.board_input = QLineEdit(self.settings.get_setting("MESA", "board_model", "7i76eu"))
         self.mesa_ip_input = QLineEdit(self.settings.get_setting("MESA", "ip_address", "10.10.10.10"))
         
-        conn_layout.addWidget(QLabel("Linux Machine IP:"), 0, 0)
+        conn_layout.addWidget(QLabel("Local Controller:" if local_only else "Linux Machine IP:"), 0, 0)
         conn_layout.addWidget(self.ip_input, 0, 1)
-        conn_layout.addWidget(QLabel("SSH Username:"), 0, 2)
-        conn_layout.addWidget(self.user_input, 0, 3)
+        if local_only:
+            conn_layout.addWidget(QLabel("SSH and remote agent access disabled"), 0, 2, 1, 2)
+        else:
+            conn_layout.addWidget(QLabel("SSH Username:"), 0, 2)
+            conn_layout.addWidget(self.user_input, 0, 3)
         
         conn_layout.addWidget(QLabel("Mesa Board:"), 1, 0)
         board_layout = QHBoxLayout()
@@ -82,9 +86,12 @@ class MesaUtilTab(QWidget):
         board_layout.addWidget(self.mesa_ip_input)
         conn_layout.addLayout(board_layout, 1, 1)
         
-        conn_layout.addWidget(QLabel("SSH Password:"), 1, 2)
-        conn_layout.addWidget(self.pass_input, 1, 3)
+        if not local_only:
+            conn_layout.addWidget(QLabel("SSH Password:"), 1, 2)
+            conn_layout.addWidget(self.pass_input, 1, 3)
         self.credential_status = QLabel(self._credential_status_text())
+        if local_only:
+            self.credential_status.setText("Local-only profile: commands run on this PC.")
         self.credential_status.setStyleSheet("color: #8bc34a; font-style: italic;")
         conn_layout.addWidget(self.credential_status, 2, 0, 1, 4)
         
@@ -99,7 +106,11 @@ class MesaUtilTab(QWidget):
         btn_layout.addWidget(self.btn_test_ssh)
         btn_layout.addWidget(self.btn_save_auth)
         btn_layout.addStretch()
-        conn_layout.addLayout(btn_layout, 3, 0, 1, 4)
+        if local_only:
+            self.btn_test_ssh.hide()
+            self.btn_save_auth.hide()
+        else:
+            conn_layout.addLayout(btn_layout, 3, 0, 1, 4)
         conn_layout.setColumnStretch(4, 1)
         
         conn_group.setLayout(conn_layout)
@@ -193,6 +204,7 @@ class MesaUtilTab(QWidget):
         self.btn_dl_vnc = QPushButton("🌐 Download VNC Viewer")
         self.btn_dl_vnc.setStyleSheet("background-color: #2c3e50; color: white; font-weight: bold;")
         self.btn_dl_vnc.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://www.realvnc.com/en/connect/download/viewer/")))
+        self.btn_dl_vnc.setVisible(not getattr(self.settings, "local_only", False))
         self.btn_autostart = QPushButton("🔄 Enable Auto-Start on Boot")
         self.btn_autostart.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
         self.btn_autostart.clicked.connect(self.enable_autostart)
@@ -299,6 +311,9 @@ class MesaUtilTab(QWidget):
         self.execute_remote_command(cmd, use_sudo=use_sudo)
 
     def save_credentials(self):
+        if getattr(self.settings, "local_only", False):
+            self.set_status("Remote credentials are disabled in local-only mode.")
+            return
         try:
             self.settings.save_setting("SSH", "username", self.user_input.text())
             self.settings.save_setting("SSH", "password", self.pass_input.text())
@@ -317,7 +332,7 @@ class MesaUtilTab(QWidget):
             self.set_status("Use an approved machine-agent operation instead.")
             return None, message
 
-        ip = self.ip_input.text()
+        ip = "127.0.0.1" if getattr(self.settings, "local_only", False) else self.ip_input.text()
         user = self.user_input.text()
         password = self.pass_input.text()
         
@@ -345,38 +360,18 @@ class MesaUtilTab(QWidget):
                 self.set_status("Command failed.")
                 return None, str(e)
                 
-        if HAS_PARAMIKO:
-            try:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                stdin, stdout, stderr = ssh.exec_command(cmd)
-                out = stdout.read().decode()
-                err = stderr.read().decode()
-                ssh.close()
-                
-                if out: self.console.append(out)
-                if err: self.console.append(f"[ERROR]:\n{err}")
-                return out, err
-            except Exception as e:
-                self.console.append(f"[SSH FAILED]: {e}")
-                return None, str(e)
-        else:
-            self.console.append("⚠️ Paramiko not installed. Falling back to local subprocess.")
-            self.console.append("For full SSH support with passwords, run: pip install paramiko")
-            try:
-                # Local fallback without password support (relies on SSH keys)
-                self.set_status(f"Running local subprocess command to {ip}...")
-                full_cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", cmd]
-                result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=15)
-                if result.stdout: self.console.append(result.stdout)
-                if result.stderr: self.console.append(f"[ERROR]:\n{result.stderr}")
-                self.set_status("Ready.")
-                return result.stdout, result.stderr
-            except Exception as e:
-                self.console.append(f"[LOCAL EXEC FAILED]: {e}")
-                self.set_status("Command failed.")
-                return None, str(e)
+        try:
+            self.set_status(f"Running command to {ip}...")
+            full_cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}", cmd]
+            result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=15)
+            if result.stdout: self.console.append(result.stdout)
+            if result.stderr: self.console.append(f"[ERROR]:\n{result.stderr}")
+            self.set_status("Ready.")
+            return result.stdout, result.stderr
+        except Exception as e:
+            self.console.append(f"[EXEC FAILED]: {e}")
+            self.set_status("Command failed.")
+            return None, str(e)
 
     def run_hal_show(self):
         self.set_status("Initializing HAL pin dump. This will take a few seconds...")
@@ -395,6 +390,16 @@ class MesaUtilTab(QWidget):
             except Exception as error:
                 self.console.append(f"[AGENT FAILED]: {error}")
             return
+        if getattr(self.settings, "local_only", False):
+            try:
+                output = format_hal_pin_listing(LocalLinuxCNCAPI().get_hal_pins())
+                self.console.append(output)
+                self.btn_import.setEnabled("Component Pins:" in output)
+                self.set_status("Ready.")
+            except Exception as error:
+                self.console.append(f"[HAL API FAILED]: {error}")
+                self.set_status("HAL read failed.")
+            return
         out, err = self.execute_remote_command("halcmd show pin")
 
     def run_hal_components(self):
@@ -409,6 +414,20 @@ class MesaUtilTab(QWidget):
                     self.console.append(f"[ERROR]:\n{result['error']}")
             except Exception as error:
                 self.console.append(f"[AGENT FAILED]: {error}")
+            return
+        if getattr(self.settings, "local_only", False):
+            try:
+                api = LocalLinuxCNCAPI()
+                component_names = sorted({
+                    str(pin.get("NAME", "")).split(".", 1)[0]
+                    for pin in api.get_hal_pins()
+                    if pin.get("NAME")
+                })
+                self.console.append("Active HAL components (from exported pins):\n" + "\n".join(component_names))
+                self.set_status("Ready.")
+            except Exception as error:
+                self.console.append(f"[HAL API FAILED]: {error}")
+                self.set_status("HAL read failed.")
             return
         self.execute_remote_command("halcmd show comp")
 
@@ -428,6 +447,9 @@ class MesaUtilTab(QWidget):
             self.console.append(f"[AGENT FAILED]: {error}")
 
     def test_ssh(self):
+        if getattr(self.settings, "local_only", False):
+            self.set_status("SSH and remote agent tests are disabled in local-only mode.")
+            return
         self.console.clear()
         agent_client = client_from_settings(self.settings)
         if agent_client is not None:
@@ -677,28 +699,22 @@ class MesaUtilTab(QWidget):
         user = self.user_input.text()
         password = self.pass_input.text()
 
-        if HAS_PARAMIKO:
-            try:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                sftp = ssh.open_sftp()
-                sftp.get(remote_dest, path)
-                
-                # Clean up the temp file on the remote machine
-                try: sftp.remove(remote_dest)
+        try:
+            if is_local_ip(ip):
+                shutil.copyfile(remote_dest, path)
+                try: os.remove(remote_dest)
                 except: pass
-                
-                sftp.close()
-                ssh.close()
-                self.console.append("Download complete.")
-                QMessageBox.information(self, "Success", f"Firmware backed up successfully to:\n{path}")
-            except Exception as e:
-                self.console.append(f"[SFTP FAILED]: {e}")
-                self.set_status("Download failed.")
-                QMessageBox.critical(self, "Download Failed", f"Failed to download firmware backup:\n{e}")
-        else:
-            QMessageBox.critical(self, "Download Failed", "Paramiko is required to download the firmware file. Please run 'pip install paramiko'.")
+            else:
+                res = subprocess.run(["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}:{remote_dest}", path], capture_output=True, timeout=30)
+                if res.returncode != 0:
+                    raise RuntimeError(res.stderr.decode() if isinstance(res.stderr, bytes) else str(res.stderr))
+                subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", f"rm -f {remote_dest}"], capture_output=True)
+            self.console.append("Download complete.")
+            QMessageBox.information(self, "Success", f"Firmware backed up successfully to:\n{path}")
+        except Exception as e:
+            self.console.append(f"[DOWNLOAD FAILED]: {e}")
+            self.set_status("Download failed.")
+            QMessageBox.critical(self, "Download Failed", f"Failed to download firmware backup:\n{e}")
             
         self.set_status("Ready.")
 
@@ -745,26 +761,24 @@ class MesaUtilTab(QWidget):
         self.set_status("Downloading configuration backup...")
         self.console.append(f"\n--- Downloading backup to {path} ---")
         
-        if HAS_PARAMIKO:
-            try:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                pwd = self.pass_input.text()
-                ssh.connect(self.ip_input.text(), username=self.user_input.text(), password=pwd, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(pwd), allow_agent=not bool(pwd))
-                sftp = ssh.open_sftp()
-                sftp.get(remote_dest, path)
-                try: sftp.remove(remote_dest)  # Clean up temp file
+        ip = self.ip_input.text()
+        user = self.user_input.text()
+        try:
+            if is_local_ip(ip):
+                shutil.copyfile(remote_dest, path)
+                try: os.remove(remote_dest)
                 except: pass
-                sftp.close()
-                ssh.close()
-                self.console.append("Download complete.")
-                QMessageBox.information(self, "Success", f"LinuxCNC configuration backed up to:\n{path}")
-            except Exception as e:
-                self.console.append(f"[SFTP FAILED]: {e}")
-                self.set_status("Download failed.")
-                QMessageBox.critical(self, "Download Failed", f"Failed to download config backup:\n{e}")
-        else:
-            QMessageBox.critical(self, "Download Failed", "Paramiko is required to download the backup. Please run 'pip install paramiko'.")
+            else:
+                res = subprocess.run(["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}:{remote_dest}", path], capture_output=True, timeout=30)
+                if res.returncode != 0:
+                    raise RuntimeError(res.stderr.decode() if isinstance(res.stderr, bytes) else str(res.stderr))
+                subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", f"rm -f {remote_dest}"], capture_output=True)
+            self.console.append("Download complete.")
+            QMessageBox.information(self, "Success", f"LinuxCNC configuration backed up to:\n{path}")
+        except Exception as e:
+            self.console.append(f"[DOWNLOAD FAILED]: {e}")
+            self.set_status("Download failed.")
+            QMessageBox.critical(self, "Download Failed", f"Failed to download config backup:\n{e}")
             
         self.set_status("Ready.")
 
@@ -810,26 +824,24 @@ class MesaUtilTab(QWidget):
         self.set_status("Downloading NC files backup...")
         self.console.append(f"\n--- Downloading backup to {path} ---")
         
-        if HAS_PARAMIKO:
-            try:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                pwd = self.pass_input.text()
-                ssh.connect(self.ip_input.text(), username=self.user_input.text(), password=pwd, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(pwd), allow_agent=not bool(pwd))
-                sftp = ssh.open_sftp()
-                sftp.get(remote_dest, path)
-                try: sftp.remove(remote_dest)  # Clean up temp file
+        ip = self.ip_input.text()
+        user = self.user_input.text()
+        try:
+            if is_local_ip(ip):
+                shutil.copyfile(remote_dest, path)
+                try: os.remove(remote_dest)
                 except: pass
-                sftp.close()
-                ssh.close()
-                self.console.append("Download complete.")
-                QMessageBox.information(self, "Success", f"NC files backed up to:\n{path}")
-            except Exception as e:
-                self.console.append(f"[SFTP FAILED]: {e}")
-                self.set_status("Download failed.")
-                QMessageBox.critical(self, "Download Failed", f"Failed to download NC files backup:\n{e}")
-        else:
-            QMessageBox.critical(self, "Download Failed", "Paramiko is required to download the backup. Please run 'pip install paramiko'.")
+            else:
+                res = subprocess.run(["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{ip}:{remote_dest}", path], capture_output=True, timeout=30)
+                if res.returncode != 0:
+                    raise RuntimeError(res.stderr.decode() if isinstance(res.stderr, bytes) else str(res.stderr))
+                subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", f"rm -f {remote_dest}"], capture_output=True)
+            self.console.append("Download complete.")
+            QMessageBox.information(self, "Success", f"NC files backed up to:\n{path}")
+        except Exception as e:
+            self.console.append(f"[DOWNLOAD FAILED]: {e}")
+            self.set_status("Download failed.")
+            QMessageBox.critical(self, "Download Failed", f"Failed to download NC files backup:\n{e}")
             
         self.set_status("Ready.")
 
@@ -876,24 +888,20 @@ class MesaUtilTab(QWidget):
         
         remote_dest = "/tmp/linuxcnc_restore.tar.gz"
         
-        if HAS_PARAMIKO:
-            try:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                pwd = self.pass_input.text()
-                ssh.connect(self.ip_input.text(), username=self.user_input.text(), password=pwd, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(pwd), allow_agent=not bool(pwd))
-                sftp = ssh.open_sftp()
-                sftp.put(path, remote_dest)
-                sftp.close()
-                ssh.close()
-                self.console.append("Upload complete.")
-            except Exception as e:
-                self.console.append(f"[SFTP FAILED]: {e}")
-                self.set_status("Upload failed.")
-                QMessageBox.critical(self, "Upload Failed", f"Failed to upload config backup:\n{e}")
-                return
-        else:
-            QMessageBox.critical(self, "Upload Failed", "Paramiko is required to upload the backup. Please run 'pip install paramiko'.")
+        ip = self.ip_input.text()
+        user = self.user_input.text()
+        try:
+            if is_local_ip(ip):
+                shutil.copyfile(path, remote_dest)
+            else:
+                res = subprocess.run(["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", path, f"{user}@{ip}:{remote_dest}"], capture_output=True, timeout=30)
+                if res.returncode != 0:
+                    raise RuntimeError(res.stderr.decode() if isinstance(res.stderr, bytes) else str(res.stderr))
+            self.console.append("Upload complete.")
+        except Exception as e:
+            self.console.append(f"[UPLOAD FAILED]: {e}")
+            self.set_status("Upload failed.")
+            QMessageBox.critical(self, "Upload Failed", f"Failed to upload config backup:\n{e}")
             return
             
         self.set_status("Extracting configuration on remote machine...")
@@ -960,23 +968,18 @@ class MesaUtilTab(QWidget):
         user = self.user_input.text()
         password = self.pass_input.text()
 
-        if HAS_PARAMIKO:
-            try:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                sftp = ssh.open_sftp()
-                sftp.put(path, remote_dest)
-                sftp.close()
-                ssh.close()
-                self.console.append("Upload complete.")
-            except Exception as e:
-                self.console.append(f"[SFTP FAILED]: {e}")
-                self.set_status("Upload failed.")
-                QMessageBox.critical(self, "Upload Failed", f"Failed to upload firmware:\n{e}")
-                return
-        else:
-            QMessageBox.critical(self, "Upload Failed", "Paramiko is required to upload the firmware file. Please run 'pip install paramiko'.")
+        try:
+            if is_local_ip(ip):
+                shutil.copyfile(path, remote_dest)
+            else:
+                res = subprocess.run(["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", path, f"{user}@{ip}:{remote_dest}"], capture_output=True, timeout=30)
+                if res.returncode != 0:
+                    raise RuntimeError(res.stderr.decode() if isinstance(res.stderr, bytes) else str(res.stderr))
+            self.console.append("Upload complete.")
+        except Exception as e:
+            self.console.append(f"[UPLOAD FAILED]: {e}")
+            self.set_status("Upload failed.")
+            QMessageBox.critical(self, "Upload Failed", f"Failed to upload firmware:\n{e}")
             return
 
         self.set_status("Flashing firmware (this will take a moment)...")
@@ -1022,32 +1025,24 @@ class MesaUtilTab(QWidget):
         user = self.user_input.text()
         password = self.pass_input.text()
 
-        if HAS_PARAMIKO:
-            try:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(ip, username=user, password=password, timeout=10, banner_timeout=15, auth_timeout=15, look_for_keys=not bool(password), allow_agent=not bool(password))
-                
-                # Make sure remote dir exists and wait for it
-                stdin, stdout, stderr = ssh.exec_command(f"mkdir -p {remote_path}")
-                stdout.channel.recv_exit_status() 
-                
-                # SFTP doesn't expand '~' automatically
-                sftp_dest = remote_dest.replace("~/", f"/home/{user}/", 1) if remote_dest.startswith("~/") else remote_dest
-                
-                sftp = ssh.open_sftp()
-                sftp.put(path, sftp_dest)
-                sftp.close()
-                ssh.close()
-                
-                self.console.append("Upload complete.")
-                QMessageBox.information(self, "Success", f"File uploaded successfully to:\n{remote_dest}")
-            except Exception as e:
-                self.console.append(f"[SFTP FAILED]: {e}")
-                self.set_status("Upload failed.")
-                QMessageBox.critical(self, "Upload Failed", f"Failed to upload G-Code file:\n{e}")
-        else:
-            QMessageBox.critical(self, "Upload Failed", "Paramiko is required to upload the file. Please run 'pip install paramiko'.")
+        expanded_dest = remote_dest.replace("~/", f"/home/{user}/", 1) if remote_dest.startswith("~/") else remote_dest
+        try:
+            if is_local_ip(ip):
+                local_target = os.path.expanduser(remote_dest)
+                os.makedirs(os.path.dirname(local_target), exist_ok=True)
+                shutil.copyfile(path, local_target)
+            else:
+                remote_dir = os.path.dirname(expanded_dest)
+                subprocess.run(["ssh", "-o", "BatchMode=yes", f"{user}@{ip}", f"mkdir -p {remote_dir}"], capture_output=True, timeout=10)
+                res = subprocess.run(["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", path, f"{user}@{ip}:{expanded_dest}"], capture_output=True, timeout=30)
+                if res.returncode != 0:
+                    raise RuntimeError(res.stderr.decode() if isinstance(res.stderr, bytes) else str(res.stderr))
+            self.console.append("Upload complete.")
+            QMessageBox.information(self, "Success", f"File uploaded successfully to:\n{remote_dest}")
+        except Exception as e:
+            self.console.append(f"[UPLOAD FAILED]: {e}")
+            self.set_status("Upload failed.")
+            QMessageBox.critical(self, "Upload Failed", f"Failed to upload G-Code file:\n{e}")
             
         self.set_status("Ready.")
         
